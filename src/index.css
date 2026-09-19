@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --color-blue-50: #f0f3ff;
+  --color-blue-100: #e1e7ff;
+  --color-blue-200: #c2ceff;
+  --color-blue-300: #93abff;
+  --color-blue-350: #6b8eff;
+  --color-blue-400: #2b56ff;
+  --color-blue-500: #0d39e6;
+  --color-blue-600: #001d85; /* Official HSAC Logo Royal/Navy Blue */
+  --color-blue-700: #001563;
+  --color-blue-800: #000c3b;
+  --color-blue-900: #00051d;
+}
+
+/* Custom visible scrollbars */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+

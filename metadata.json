@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix: Remix: Integrated Personnel and Financial Management System",
+  "description": "An integrated system for the HSAC RAB 1 managing employee records, financial tracking, assets, service requests, and analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

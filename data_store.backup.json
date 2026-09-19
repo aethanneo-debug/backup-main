@@ -1,0 +1,1178 @@
+{
+  "users": [
+    {
+      "id": "u-1",
+      "username": "admin",
+      "email": "admin@hsac.gov.ph",
+      "fullName": "Hon. Romeo M. Alcantara",
+      "role": "Administrator / Division Chief",
+      "employeeId": "EMP001",
+      "status": "Active",
+      "createdAt": "2026-01-15T08:00:00Z"
+    },
+    {
+      "id": "u-2",
+      "username": "hr",
+      "email": "clara.santos@hsac.gov.ph",
+      "fullName": "Maria Clara V. Santos",
+      "role": "HR Officer",
+      "employeeId": "EMP002",
+      "status": "Active",
+      "createdAt": "2026-01-15T08:30:00Z"
+    },
+    {
+      "id": "u-3",
+      "username": "finance",
+      "email": "juan.delacruz@hsac.gov.ph",
+      "fullName": "Juan dela Cruz",
+      "role": "Financial Officer",
+      "employeeId": "EMP003",
+      "status": "Active",
+      "createdAt": "2026-01-15T09:00:00Z"
+    },
+    {
+      "id": "u-6",
+      "username": "employee",
+      "email": "andres.bonifacio@hsac.gov.ph",
+      "fullName": "Andres B. Bonifacio",
+      "role": "Personnel",
+      "employeeId": "EMP006",
+      "status": "Active",
+      "createdAt": "2026-01-15T10:00:00Z"
+    },
+    {
+      "id": "u-7",
+      "username": "budget",
+      "email": "budget@hsac.gov.ph",
+      "fullName": "Francisco F. Balagtas",
+      "role": "Budget Officer",
+      "employeeId": "EMP007",
+      "status": "Active",
+      "createdAt": "2026-01-15T10:15:00Z"
+    },
+    {
+      "id": "u-1785076338311",
+      "username": "aethan",
+      "email": "aethan@hsac.gov.ph",
+      "fullName": "Aethan Neo Vergar",
+      "role": "Personnel",
+      "status": "Active",
+      "employeeId": "HSAC-RAB1-300",
+      "createdAt": "2026-07-26T14:32:18.311Z"
+    }
+  ],
+  "employees": [
+    {
+      "id": "emp-1",
+      "employeeId": "EMP001",
+      "fullName": "Hon. Romeo M. Alcantara",
+      "position": "Regional Executive Adjudicator",
+      "division": "Adjudication Division",
+      "employmentStatus": "Permanent",
+      "email": "admin@hsac.gov.ph",
+      "address": "La Union, Philippines",
+      "dateHired": "2020-03-01",
+      "contactNumber": "09171234567",
+      "emergencyContactName": "Leonor Rivera",
+      "emergencyContactPhone": "09177654321",
+      "pdsFieldName": "EMP001_PDS_Signed.pdf",
+      "pdsUploadedAt": "2026-02-01T09:00:00Z"
+    },
+    {
+      "id": "emp-2",
+      "employeeId": "EMP002",
+      "fullName": "Maria Clara V. Santos",
+      "position": "Administrative Officer IV (HR)",
+      "division": "Administrative and Finance Division",
+      "employmentStatus": "Permanent",
+      "email": "clara.santos@hsac.gov.ph",
+      "address": "San Fernando City, La Union",
+      "dateHired": "2021-06-15",
+      "contactNumber": "09182345678",
+      "emergencyContactName": "Crisostomo Ibarra",
+      "emergencyContactPhone": "091887654321",
+      "pdsFieldName": "EMP002_PDS.pdf",
+      "pdsUploadedAt": "2026-02-10T10:30:00Z"
+    },
+    {
+      "id": "emp-3",
+      "employeeId": "EMP003",
+      "fullName": "Juan dela Cruz",
+      "position": "Financial Analyst II",
+      "division": "Administrative and Finance Division",
+      "employmentStatus": "Permanent",
+      "email": "juan.delacruz@hsac.gov.ph",
+      "address": "Bauang, La Union",
+      "dateHired": "2022-01-10",
+      "contactNumber": "09193456789",
+      "emergencyContactName": "Juana dela Cruz",
+      "emergencyContactPhone": "09199876543",
+      "pdsFieldName": "EMP003_PDS.pdf",
+      "pdsUploadedAt": "2026-02-11T14:22:00Z"
+    },
+    {
+      "id": "emp-4",
+      "employeeId": "EMP004",
+      "fullName": "Eulogio IV Esturas",
+      "position": "Property Custodian / AO II",
+      "division": "Administrative and Finance Division",
+      "employmentStatus": "Permanent",
+      "email": "eulogio.esturas@hsac.gov.ph",
+      "address": "San Juan, La Union",
+      "dateHired": "2021-09-01",
+      "contactNumber": "09204567890",
+      "emergencyContactName": "Maria Makiling",
+      "emergencyContactPhone": "09201234567",
+      "pdsFieldName": "EMP004_PDS.pdf",
+      "pdsUploadedAt": "2026-02-12T11:15:00Z"
+    },
+    {
+      "id": "emp-5",
+      "employeeId": "EMP005",
+      "fullName": "Froilan J. Estepa",
+      "position": "Legal Officer IV",
+      "division": "Legal Division",
+      "employmentStatus": "Permanent",
+      "email": "froilan.estepa@hsac.gov.ph",
+      "address": "San Fernando City, La Union",
+      "dateHired": "2019-11-20",
+      "contactNumber": "09159998888",
+      "emergencyContactName": "Teresita Estepa",
+      "emergencyContactPhone": "09151112222",
+      "pdsFieldName": "EMP005_PDS_Official.pdf",
+      "pdsUploadedAt": "2026-02-05T08:45:00Z"
+    },
+    {
+      "id": "emp-6",
+      "employeeId": "EMP006",
+      "fullName": "Jolly Joy A. Almoite",
+      "position": "Adjudication Assistant",
+      "division": "Adjudication Division",
+      "employmentStatus": "Contractual",
+      "email": "jolly.almoite@hsac.gov.ph",
+      "address": "Agoo, La Union",
+      "dateHired": "2023-01-16",
+      "contactNumber": "09162223333",
+      "emergencyContactName": "Juan Almoite",
+      "emergencyContactPhone": "09164445555",
+      "pdsFieldName": "EMP006_PDS.pdf",
+      "pdsUploadedAt": "2026-03-01T15:00:00Z"
+    },
+    {
+      "id": "emp-7",
+      "employeeId": "EMP007",
+      "fullName": "Francisco F. Balagtas",
+      "position": "Administrative Officer IV (Budget)",
+      "division": "Administrative and Finance Division",
+      "employmentStatus": "Permanent",
+      "email": "budget@hsac.gov.ph",
+      "address": "San Fernando City, La Union",
+      "dateHired": "2022-04-18",
+      "contactNumber": "09175551234",
+      "emergencyContactName": "Juana Tiambeng",
+      "emergencyContactPhone": "09175554321",
+      "pdsFieldName": "EMP007_PDS.pdf",
+      "pdsUploadedAt": "2026-04-01T10:00:00Z"
+    },
+    {
+      "id": "emp-1784134260731",
+      "employeeId": "HSAC-RAB1-300",
+      "fullName": "Aethan Neo Fong Vergara",
+      "surname": "Vergara",
+      "firstName": "Aethan Neo",
+      "middleName": "Fong",
+      "nameExtension": "",
+      "position": "Admin Officer",
+      "salary": 50000,
+      "division": "Adjudication Division",
+      "employmentStatus": "Permanent",
+      "email": "neo@hsac.gov.ph",
+      "address": "",
+      "dateHired": "2026-07-16",
+      "contactNumber": "09182738720",
+      "emergencyContactName": "",
+      "emergencyContactPhone": "09981297399"
+    },
+    {
+      "id": "emp-1784134770417",
+      "employeeId": "EMP-TEST-002",
+      "fullName": "Test User",
+      "surname": "Test",
+      "firstName": "User",
+      "position": "Tester",
+      "salary": 60000,
+      "division": "Testing Division",
+      "dateHired": "2026-07-15"
+    },
+    {
+      "id": "emp-1784134822124",
+      "employeeId": "EMP-TEST-003",
+      "fullName": "Test User",
+      "surname": "Test",
+      "firstName": "User",
+      "position": "Tester",
+      "salary": 60000,
+      "division": "Testing Division",
+      "dateHired": "2026-07-15"
+    }
+  ],
+  "employmentHistory": [
+    {
+      "id": "h-1",
+      "employeeId": "EMP001",
+      "action": "Designation",
+      "previousDetails": "Attorney V",
+      "newDetails": "Regional Executive Adjudicator",
+      "effectiveDate": "2020-03-01",
+      "updatedBy": "System Setup"
+    },
+    {
+      "id": "h-2",
+      "employeeId": "EMP006",
+      "action": "Service Record Update",
+      "previousDetails": "Contract Started",
+      "newDetails": "Contract Renewed for FY 2026",
+      "effectiveDate": "2026-01-01",
+      "updatedBy": "Maria Clara V. Santos"
+    },
+    {
+      "id": "h-3",
+      "employeeId": "EMP002",
+      "action": "Promotion",
+      "previousDetails": "Administrative Officer III",
+      "newDetails": "Administrative Officer IV (HR)",
+      "effectiveDate": "2023-08-15",
+      "updatedBy": "System Administrator"
+    },
+    {
+      "id": "h-1784134260731",
+      "employeeId": "HSAC-RAB1-300",
+      "action": "Service Record Update",
+      "previousDetails": "N/A",
+      "newDetails": "Initial employment records set as Admin Officer (Permanent) in Adjudication Division.",
+      "effectiveDate": "2026-07-16",
+      "updatedBy": "Hon. Romeo M. Alcantara (Dev Admin)"
+    },
+    {
+      "id": "h-1784134770417",
+      "employeeId": "EMP-TEST-002",
+      "action": "Service Record Update",
+      "previousDetails": "N/A",
+      "newDetails": "Initial employment records set as Tester (undefined) in Testing Division.",
+      "effectiveDate": "2026-07-15",
+      "updatedBy": "Hon. Romeo M. Alcantara"
+    },
+    {
+      "id": "h-1784134822124",
+      "employeeId": "EMP-TEST-003",
+      "action": "Service Record Update",
+      "previousDetails": "N/A",
+      "newDetails": "Initial employment records set as Tester (undefined) in Testing Division.",
+      "effectiveDate": "2026-07-15",
+      "updatedBy": "Hon. Romeo M. Alcantara"
+    }
+  ],
+  "trainings": [
+    {
+      "id": "t-1",
+      "employeeId": "EMP001",
+      "title": "Advanced Legal Writing & Case Adjudication",
+      "organizer": "Supreme Court / PhilJA",
+      "dateConducted": "2025-05-12",
+      "certificateFilename": "EMP001_PhilJA_Cert.pdf",
+      "trainingHours": 40
+    },
+    {
+      "id": "t-2",
+      "employeeId": "EMP005",
+      "title": "Housing and Land Use Adjudication Rules",
+      "organizer": "HSAC Central Office",
+      "dateConducted": "2025-07-20",
+      "certificateFilename": "EMP005_AdjudicationRules.pdf",
+      "trainingHours": 24
+    },
+    {
+      "id": "t-3",
+      "employeeId": "EMP002",
+      "title": "Strategic HR Management in the Public Sector",
+      "organizer": "Civil Service Commission",
+      "dateConducted": "2025-09-18",
+      "certificateFilename": "EMP002_StrategicHR_Cert.pdf",
+      "trainingHours": 32
+    },
+    {
+      "id": "t-4",
+      "employeeId": "EMP003",
+      "title": "Government Procurement Reform Act (RA 9184)",
+      "organizer": "Department of Budget and Management",
+      "dateConducted": "2025-11-10",
+      "certificateFilename": "EMP003_RA9184_Cert.pdf",
+      "trainingHours": 16
+    }
+  ],
+  "financialTransactions": [
+    {
+      "id": "tx-4",
+      "transactionId": "TXN-2025-099",
+      "transactionDate": "2025-08-15",
+      "supplier": "Demo Supplier 2025",
+      "amount": 5000,
+      "description": "Demo transaction for previous FY 2025",
+      "receiptFilename": "demo_receipt_2025.png",
+      "status": "Liquidated",
+      "supportingDocuments": [],
+      "history": [],
+      "department": "Administrative and Finance Division",
+      "category": "Maintenance",
+      "employeeRef": "EMP004",
+      "createdBy": "Jolly Joy A. Almoite",
+      "dateCreated": "2025-08-15"
+    },
+    {
+      "id": "tx-5",
+      "transactionId": "TXN-2024-001",
+      "transactionDate": "2024-03-10",
+      "supplier": "Demo Supplier 2024",
+      "amount": 8000,
+      "description": "Demo transaction for previous FY 2024",
+      "receiptFilename": "demo_receipt_2024.png",
+      "status": "Liquidated",
+      "supportingDocuments": [],
+      "history": [],
+      "department": "Administrative and Finance Division",
+      "category": "Maintenance",
+      "employeeRef": "EMP004",
+      "createdBy": "Jolly Joy A. Almoite",
+      "dateCreated": "2024-03-10"
+    }
+  ],
+  "assets": [
+    {
+      "id": "ast-1",
+      "assetNumber": "HSAC-RAB1-AST-001",
+      "serialNumber": "5CD1923JXP",
+      "category": "IT Equipment",
+      "description": "HP ProBook Laptop Core i5, 16GB RAM, 512GB SSD",
+      "dateAcquired": "2024-03-10",
+      "cost": 48500,
+      "status": "Assigned",
+      "assignedToId": "EMP002",
+      "assignedToName": "Maria Clara V. Santos"
+    },
+    {
+      "id": "ast-2",
+      "assetNumber": "HSAC-RAB1-AST-002",
+      "serialNumber": "5CD1923K9D",
+      "category": "IT Equipment",
+      "description": "HP ProBook Laptop Core i5, 16GB RAM, 512GB SSD",
+      "dateAcquired": "2024-03-10",
+      "cost": 48500,
+      "status": "Available"
+    },
+    {
+      "id": "ast-3",
+      "assetNumber": "HSAC-RAB1-AST-003",
+      "serialNumber": "SN-VHL-ISZ8810",
+      "category": "Vehicles",
+      "description": "Executive Service Vehicle - Isuzu D-MAX 3.0 BluePower 4x4",
+      "dateAcquired": "2023-01-20",
+      "cost": 1450000,
+      "status": "Assigned",
+      "assignedToId": "EMP001",
+      "assignedToName": "Hon. Romeo M. Alcantara"
+    },
+    {
+      "id": "ast-4",
+      "assetNumber": "HSAC-RAB1-AST-004",
+      "serialNumber": "OFC-DSK-2024-09",
+      "category": "Office Furniture",
+      "description": "Executive Mahogany Wooden Desk with drawers",
+      "dateAcquired": "2024-06-15",
+      "cost": 18000,
+      "status": "Assigned",
+      "assignedToId": "EMP-FROILAN",
+      "assignedToName": "Froilan J. Estepa"
+    },
+    {
+      "id": "ast-5",
+      "assetNumber": "HSAC-RAB1-AST-005",
+      "serialNumber": "PRJ-EPS-7712",
+      "category": "IT Equipment",
+      "description": "Epson Multimedia Projector for Adjudication Hearing Room 1",
+      "dateAcquired": "2025-02-05",
+      "cost": 26000,
+      "status": "Available"
+    },
+    {
+      "id": "ast-6",
+      "assetNumber": "HSAC-RAB1-AST-006",
+      "serialNumber": "OFC-CHR-4422",
+      "category": "Office Furniture",
+      "description": "Ergonomic High-Back Executive Mesh Office Chair",
+      "dateAcquired": "2024-06-15",
+      "cost": 8500,
+      "status": "Damaged"
+    },
+    {
+      "id": "ast-7",
+      "assetNumber": "HSAC-RAB1-AST-007",
+      "serialNumber": "TAB-APL-IPD09",
+      "category": "IT Equipment",
+      "description": "Apple iPad Pro 11-inch (M2, 128GB, Wi-Fi)",
+      "dateAcquired": "2024-08-22",
+      "cost": 52000,
+      "status": "Lost"
+    }
+  ],
+  "assetIssuances": [
+    {
+      "id": "iss-1",
+      "assetId": "ast-1",
+      "assetNumber": "HSAC-RAB1-AST-001",
+      "assignedToId": "EMP002",
+      "assignedToName": "Maria Clara V. Santos",
+      "dateIssued": "2024-03-12",
+      "quantity": 1,
+      "conditionOnIssue": "Brand New in box"
+    },
+    {
+      "id": "iss-2",
+      "assetId": "ast-3",
+      "assetNumber": "HSAC-RAB1-AST-003",
+      "assignedToId": "EMP001",
+      "assignedToName": "Hon. Romeo M. Alcantara",
+      "dateIssued": "2023-01-22",
+      "quantity": 1,
+      "conditionOnIssue": "Brand New"
+    },
+    {
+      "id": "iss-3",
+      "assetId": "ast-4",
+      "assetNumber": "HSAC-RAB1-AST-004",
+      "assignedToId": "EMP-FROILAN",
+      "assignedToName": "Froilan J. Estepa",
+      "dateIssued": "2024-06-16",
+      "quantity": 1,
+      "conditionOnIssue": "Good - Minor scratches"
+    }
+  ],
+  "supplyItems": [
+    {
+      "id": "sup-1",
+      "name": "A4 Multi-purpose Bond Paper (80gsm)",
+      "totalQuantity": 150,
+      "availableQuantity": 112,
+      "unit": "reams"
+    },
+    {
+      "id": "sup-2",
+      "name": "Black Gel Ink Pen 0.5mm",
+      "totalQuantity": 300,
+      "availableQuantity": 245,
+      "unit": "pieces"
+    },
+    {
+      "id": "sup-3",
+      "name": "Sign Pen Blue 0.7mm",
+      "totalQuantity": 200,
+      "availableQuantity": 160,
+      "unit": "pieces"
+    },
+    {
+      "id": "sup-4",
+      "name": "Yellow Post-It notes 3x3",
+      "totalQuantity": 100,
+      "availableQuantity": 82,
+      "unit": "pads"
+    },
+    {
+      "id": "sup-5",
+      "name": "Heavy Duty Expanding Folders (Legal)",
+      "totalQuantity": 500,
+      "availableQuantity": 410,
+      "unit": "pieces"
+    }
+  ],
+  "supplyIssuances": [
+    {
+      "id": "si-1",
+      "supplyId": "sup-1",
+      "supplyName": "A4 Multi-purpose Bond Paper (80gsm)",
+      "issuedToId": "EMP-FROILAN",
+      "issuedToName": "Froilan J. Estepa",
+      "quantity": 10,
+      "dateIssued": "2026-05-18"
+    },
+    {
+      "id": "si-2",
+      "supplyId": "sup-2",
+      "supplyName": "Black Gel Ink Pen 0.5mm",
+      "issuedToId": "EMP-JOLLY",
+      "issuedToName": "Jolly Joy A. Almoite",
+      "quantity": 12,
+      "dateIssued": "2026-05-20"
+    },
+    {
+      "id": "si-3",
+      "supplyId": "sup-5",
+      "supplyName": "Heavy Duty Expanding Folders (Legal)",
+      "issuedToId": "EMP-JOLLY",
+      "issuedToName": "Jolly Joy A. Almoite",
+      "quantity": 50,
+      "dateIssued": "2026-05-22"
+    }
+  ],
+  "requests": [
+    {
+      "id": "req-1",
+      "requestType": "Leave Request",
+      "employeeId": "EMP-JOLLY",
+      "employeeName": "Jolly Joy A. Almoite",
+      "dateRequested": "2026-06-01",
+      "status": "Pending HR Review",
+      "leaveType": "Vacation Leave",
+      "startDate": "2026-06-12",
+      "endDate": "2026-06-15",
+      "reason": "Family event / out of town celebration in Baguio City."
+    },
+    {
+      "id": "req-2",
+      "requestType": "Service Record Request",
+      "employeeId": "EMP003",
+      "employeeName": "Juan dela Cruz",
+      "dateRequested": "2026-06-03",
+      "status": "Approved",
+      "purpose": "Loan application requirement with GSIS",
+      "copies": 2,
+      "approvedBy": "Maria Clara V. Santos (HR)",
+      "remarks": "Official physical copy prepared in sealed envelope."
+    },
+    {
+      "id": "req-3",
+      "requestType": "Vehicle Request",
+      "employeeId": "emp-samantha",
+      "employeeName": "Samantha C. Bernardo",
+      "dateRequested": "2026-06-04",
+      "status": "Pending HR Review",
+      "destination": "Bangui, Ilocos Norte - Dispute Mediation Site Visit",
+      "purpose": "Conduct compulsory ocular inspection of disputable housing settlements.",
+      "dateNeeded": "2026-06-18",
+      "passengers": "Eulogio IV Esturas, Jolly Joy A. Almoite, Froilan J. Estepa"
+    },
+    {
+      "id": "req-4",
+      "requestType": "Zoom Access Request",
+      "employeeId": "EMP001",
+      "employeeName": "Hon. Romeo M. Alcantara",
+      "dateRequested": "2026-06-05",
+      "status": "Approved",
+      "meetingTitle": "RAB 1 En Banc Case Reconciliation Adjudication",
+      "meetingDate": "2026-06-10",
+      "startTime": "09:00 AM",
+      "endTime": "12:00 PM",
+      "alternativeHost": "jose.rizal@hsac.gov.ph",
+      "approvedBy": "Super Administrator",
+      "remarks": "Assigned Executive Account Room B"
+    },
+    {
+      "id": "req-5",
+      "requestType": "Supply Request",
+      "employeeId": "EMP002",
+      "employeeName": "Maria Clara V. Santos",
+      "dateRequested": "2026-06-06",
+      "status": "Pending HR Review",
+      "supplyId": "sup-1",
+      "supplyName": "A4 Multi-purpose Bond Paper (80gsm)",
+      "quantity": 5,
+      "purpose": "Urgent recruitment materials printing and exam templates compilation."
+    }
+  ],
+  "auditLogs": [
+    {
+      "id": "log-1785076410638-432",
+      "timestamp": "2026-07-26T14:33:30.638Z",
+      "userId": "u-1785076338311",
+      "username": "aethan",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1785076384297-172",
+      "timestamp": "2026-07-26T14:33:04.297Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1785076356672-567",
+      "timestamp": "2026-07-26T14:32:36.672Z",
+      "userId": "u-1785076338311",
+      "username": "aethan",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1785076338311-350",
+      "timestamp": "2026-07-26T14:32:18.311Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create User Account",
+      "details": "Created digital user: aethan with role Personnel"
+    },
+    {
+      "id": "log-1785076266741-461",
+      "timestamp": "2026-07-26T14:31:06.741Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1785076247607-843",
+      "timestamp": "2026-07-26T14:30:47.607Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1785076201366-346",
+      "timestamp": "2026-07-26T14:30:01.366Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784995107417-47",
+      "timestamp": "2026-07-25T15:58:27.417Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784995077294-570",
+      "timestamp": "2026-07-25T15:57:57.294Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784994817975-300",
+      "timestamp": "2026-07-25T15:53:37.975Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784994771016-43",
+      "timestamp": "2026-07-25T15:52:51.016Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784994718228-475",
+      "timestamp": "2026-07-25T15:51:58.228Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784994232807-16",
+      "timestamp": "2026-07-25T15:43:52.807Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784901469190-328",
+      "timestamp": "2026-07-24T13:57:49.190Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784235716661-492",
+      "timestamp": "2026-07-16T21:01:56.661Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784134822124-494",
+      "timestamp": "2026-07-15T17:00:22.124Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create Employee",
+      "details": "Registered new personnel Test User (EMP-TEST-003)"
+    },
+    {
+      "id": "log-1784134822115-948",
+      "timestamp": "2026-07-15T17:00:22.115Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784134807348-513",
+      "timestamp": "2026-07-15T17:00:07.348Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784134770417-859",
+      "timestamp": "2026-07-15T16:59:30.417Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create Employee",
+      "details": "Registered new personnel Test User (EMP-TEST-002)"
+    },
+    {
+      "id": "log-1784134770408-361",
+      "timestamp": "2026-07-15T16:59:30.408Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784134758827-419",
+      "timestamp": "2026-07-15T16:59:18.827Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1784134260731-20",
+      "timestamp": "2026-07-15T16:51:00.731Z",
+      "userId": "u-admin",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create Employee",
+      "details": "Registered new personnel Aethan Neo Fong Vergara (HSAC-RAB1-300)"
+    },
+    {
+      "id": "log-1",
+      "timestamp": "2026-06-01T08:30:00Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful login via secure web portal"
+    },
+    {
+      "id": "log-2",
+      "timestamp": "2026-06-01T09:12:00Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Create Request Approval",
+      "details": "Approved Service Record Request for Juan dela Cruz - Copies: 2"
+    },
+    {
+      "id": "log-3",
+      "timestamp": "2026-06-03T10:15:00Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Finance Officer",
+      "action": "Login",
+      "details": "Financial Officer logged into ledger analytics portal."
+    },
+    {
+      "id": "log-4",
+      "timestamp": "2026-06-03T11:45:00Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Finance Officer",
+      "action": "Review Journal Receipts",
+      "details": "Reviewed fuel transaction documentation with ID TXN-2026-003."
+    }
+  ],
+  "liquidations": [
+    {
+      "id": "liqp-1",
+      "liquidationNo": "LIQ-2026-001",
+      "requestRef": "REQ-VHL-091",
+      "employee": "Andres B. Bonifacio",
+      "department": "Adjudication Division",
+      "amountReleased": 5000,
+      "amountLiquidated": 4800,
+      "remainingBalance": 200,
+      "liquidationDate": "2026-06-03",
+      "status": "Completed",
+      "notes": "Completed Petron fuel trip liquidation. Refund has been submitted.",
+      "approvedBy": "Juan dela Cruz",
+      "createdAt": "2026-06-03T17:00:00Z"
+    },
+    {
+      "id": "liqp-2",
+      "liquidationNo": "LIQ-2026-002",
+      "requestRef": "REQ-SPL-044",
+      "employee": "Jolly Joy A. Almoite",
+      "department": "Administrative and Finance Division",
+      "amountReleased": 15000,
+      "amountLiquidated": 14500,
+      "remainingBalance": 500,
+      "liquidationDate": "2026-05-15",
+      "status": "Completed",
+      "notes": "La Union Office Supplies purchase liquidation.",
+      "approvedBy": "Juan dela Cruz",
+      "createdAt": "2026-05-15T16:45:00Z"
+    },
+    {
+      "id": "liqp-3",
+      "liquidationNo": "LIQ-2026-003",
+      "requestRef": "REQ-TRV-112",
+      "employee": "Juan dela Cruz",
+      "department": "Administrative and Finance Division",
+      "amountReleased": 12000,
+      "amountLiquidated": 0,
+      "remainingBalance": 12000,
+      "liquidationDate": "2026-06-08",
+      "status": "Under Review",
+      "notes": "Awaiting review of food receipts and accommodation invoice details for mediation trip.",
+      "createdAt": "2026-06-08T09:00:00Z"
+    },
+    {
+      "id": "liqp-4",
+      "liquidationNo": "LIQ-2026-004",
+      "requestRef": "REQ-PRV-312",
+      "employee": "Maria Clara V. Santos",
+      "department": "Administrative and Finance Division",
+      "amountReleased": 8500,
+      "amountLiquidated": 0,
+      "remainingBalance": 8500,
+      "liquidationDate": "2026-06-09",
+      "status": "Pending Submission",
+      "notes": "Equipment repairs cash advance for regional branch laptops.",
+      "createdAt": "2026-06-09T08:30:00Z"
+    }
+  ],
+  "budgetAllocations": [
+    {
+      "id": "b-1",
+      "fiscalYearId": "fy-1",
+      "department": "Adjudication Division",
+      "budgetAllocation": 1150000,
+      "carryOver": 300000,
+      "budgetUtilized": 0,
+      "remainingBudget": 1450000,
+      "budgetPercentageUsed": 0,
+      "allocatedPS": 1000000,
+      "allocatedMOOE": 100000,
+      "allocatedCO": 50000,
+      "remainingPS": 1000000,
+      "remainingMOOE": 100000,
+      "remainingCO": 50000
+    },
+    {
+      "id": "b-1-old",
+      "fiscalYearId": "fy-2",
+      "department": "Adjudication Division",
+      "budgetAllocation": 2400000,
+      "carryOver": 100000,
+      "budgetUtilized": 1500000,
+      "remainingBudget": 1000000,
+      "budgetPercentageUsed": 0,
+      "allocatedPS": 0,
+      "allocatedMOOE": 0,
+      "allocatedCO": 0,
+      "remainingPS": 0,
+      "remainingMOOE": 0,
+      "remainingCO": 0
+    },
+    {
+      "id": "b-2",
+      "fiscalYearId": "fy-1",
+      "department": "Administrative and Finance Division",
+      "budgetAllocation": 0,
+      "carryOver": 100000,
+      "budgetUtilized": 0,
+      "remainingBudget": 100000,
+      "budgetPercentageUsed": 0,
+      "allocatedPS": 0,
+      "allocatedMOOE": 0,
+      "allocatedCO": 0,
+      "remainingPS": 0,
+      "remainingMOOE": 0,
+      "remainingCO": 0
+    },
+    {
+      "id": "b-2-old",
+      "fiscalYearId": "fy-2",
+      "department": "Administrative and Finance Division",
+      "budgetAllocation": 800000,
+      "carryOver": 200000,
+      "budgetUtilized": 700000,
+      "remainingBudget": 300000,
+      "budgetPercentageUsed": 0,
+      "allocatedPS": 0,
+      "allocatedMOOE": 0,
+      "allocatedCO": 0,
+      "remainingPS": 0,
+      "remainingMOOE": 0,
+      "remainingCO": 0
+    },
+    {
+      "id": "b-3",
+      "fiscalYearId": "fy-1",
+      "department": "Legal Division",
+      "budgetAllocation": 0,
+      "carryOver": 200000,
+      "budgetUtilized": 0,
+      "remainingBudget": 1000000,
+      "budgetPercentageUsed": 0,
+      "allocatedPS": 0,
+      "allocatedMOOE": 0,
+      "allocatedCO": 0,
+      "remainingPS": 400000,
+      "remainingMOOE": 240000,
+      "remainingCO": 160000
+    },
+    {
+      "id": "b-3-old",
+      "fiscalYearId": "fy-2",
+      "department": "Legal Division",
+      "budgetAllocation": 1800000,
+      "carryOver": 0,
+      "budgetUtilized": 1600000,
+      "remainingBudget": 200000,
+      "budgetPercentageUsed": 0,
+      "allocatedPS": 0,
+      "allocatedMOOE": 0,
+      "allocatedCO": 0,
+      "remainingPS": 0,
+      "remainingMOOE": 0,
+      "remainingCO": 0
+    }
+  ],
+  "financeAuditLogs": [
+    {
+      "id": "fl-1",
+      "user": "Juan dela Cruz",
+      "action": "Validate Transaction",
+      "module": "Financial Transactions",
+      "timestamp": "2026-05-13T09:30:00Z",
+      "previousValue": "Under Review",
+      "newValue": "Validated"
+    },
+    {
+      "id": "fl-2",
+      "user": "Juan dela Cruz",
+      "action": "Complete Liquidation",
+      "module": "Liquidation Monitoring",
+      "timestamp": "2026-06-03T17:00:00Z",
+      "previousValue": "Under Review",
+      "newValue": "Completed"
+    }
+  ],
+  "budgetRequests": [
+    {
+      "id": "br-1",
+      "department": "Adjudication Division",
+      "amountRequested": 150000,
+      "requestType": "Augmentation",
+      "purpose": "Additional travel allocations for provincial hearings",
+      "status": "Pending",
+      "createdAt": "2026-06-15T09:00:00Z"
+    },
+    {
+      "id": "br-2",
+      "department": "Legal Division",
+      "amountRequested": 50000,
+      "requestType": "Emergency",
+      "purpose": "Urgent purchase of legal research library subscriptions",
+      "status": "Approved",
+      "remarks": "Approved for FY2026 Q3",
+      "createdAt": "2026-06-12T14:30:00Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-1",
+      "title": "Leave Request Submitted",
+      "message": "Atty. Korrine Madeleine Flores - Fontanilla has submitted an urgent Vacation Leave Request for your review.",
+      "type": "urgent",
+      "isRead": false,
+      "timestamp": "2026-06-16T02:00:00Z",
+      "targetRole": "HR Officer"
+    },
+    {
+      "id": "notif-2",
+      "title": "Low Supply Inventory Range Alert",
+      "message": "Supply stock for 'A4 Multi-purpose Bond Paper (80gsm)' is currently low (5 units left). Please arrange purchase acquisition.",
+      "type": "warning",
+      "isRead": false,
+      "timestamp": "2026-06-16T01:30:00Z",
+      "targetRole": "Administrator / Division Chief"
+    },
+    {
+      "id": "notif-3",
+      "title": "Financial Liquidation Verification",
+      "message": "Juan dela Cruz submitted a travel liquidation of ₱12,000 for travel request REQ-TRV-112. Support vouchers need verification.",
+      "type": "info",
+      "isRead": false,
+      "timestamp": "2026-06-15T18:00:00Z",
+      "targetRole": "Financial Officer"
+    },
+    {
+      "id": "notif-4",
+      "title": "Comprehensive Security Compliance Log Audit",
+      "message": "All HR and Finance tables comply with RA 10173 Data Privacy protection directives. Periodic validation complete.",
+      "type": "success",
+      "isRead": false,
+      "timestamp": "2026-06-15T10:00:00Z",
+      "targetRole": "Administrator / Division Chief"
+    },
+    {
+      "id": "notif-5",
+      "title": "En Banc Board Case Reconciliation Scheduled",
+      "message": "A general assembly has been scheduled for case adjustments on Room B at 09:00 AM.",
+      "type": "info",
+      "isRead": false,
+      "timestamp": "2026-06-15T09:00:00Z",
+      "targetRole": "Personnel"
+    },
+    {
+      "id": "notif-6",
+      "title": "Meeting Room Assignment Active",
+      "message": "Zoom meeting 'RAB 1 En Banc Case Reconciliation Adjudication' setup is ready for launch.",
+      "type": "success",
+      "isRead": false,
+      "timestamp": "2026-06-15T08:00:00Z",
+      "targetRole": "Personnel"
+    }
+  ],
+  "activities": [],
+  "liquidationSubmissions": [],
+  "activityBudgetLinks": [
+    {
+      "id": "bl-1",
+      "liquidationNo": "LIQ-2026-001",
+      "employee": "Andres B. Bonifacio",
+      "department": "Adjudication Division",
+      "amount": 12000,
+      "budgetId": "b-1",
+      "timestamp": "2026-06-14T10:00:00Z"
+    },
+    {
+      "id": "bl-2",
+      "liquidationNo": "LIQ-2026-002",
+      "employee": "Apolinario M. Mabini",
+      "department": "Legal Division",
+      "amount": 25000,
+      "budgetId": "b-3",
+      "timestamp": "2026-06-15T11:30:00Z"
+    }
+  ],
+  "pds": [],
+  "fiscalYears": [
+    {
+      "id": "fy-1",
+      "label": "2026",
+      "start_date": "2026-01-01",
+      "end_date": "2026-12-31",
+      "status": "Active",
+      "rollover_policy": "Standard"
+    },
+    {
+      "id": "fy-2",
+      "label": "2025",
+      "start_date": "2025-01-01",
+      "end_date": "2025-12-31",
+      "status": "Closed",
+      "rollover_policy": "Standard"
+    }
+  ],
+  "hsacBudgets": [
+    {
+      "id": "hb-1",
+      "fiscalYearId": "fy-1",
+      "approvedBudget": 9000000,
+      "carryOverBudget": 600000,
+      "totalUtilized": 0
+    },
+    {
+      "id": "hb-2",
+      "fiscalYearId": "fy-2",
+      "approvedBudget": 5000000,
+      "carryOverBudget": 300000,
+      "totalUtilized": 3800000
+    }
+  ],
+  "trainingBudgets": [
+    {
+      "id": "tb-1",
+      "fiscalYearId": "fy-1",
+      "totalBudget": 40000
+    }
+  ],
+  "trainingPrograms": [
+    {
+      "id": "tp-1784995006106",
+      "title": "Seminar",
+      "description": "KNSO'ANKNFAK",
+      "category": "Leadership",
+      "allocatedBudget": 10000,
+      "usedBudget": 0,
+      "fiscalYear": "2026",
+      "startDate": "2026-07-26",
+      "endDate": "2026-07-28",
+      "startTime": "08:00",
+      "endTime": "17:00",
+      "durationDays": 3,
+      "totalHours": 24,
+      "venue": "SFC",
+      "facilitator": "",
+      "maxParticipants": 1,
+      "targetSpecialization": "",
+      "targetDivision": "Adjudication Division",
+      "createdAt": "2026-07-25T15:56:46.106Z"
+    }
+  ],
+  "trainingParticipants": [
+    {
+      "id": "part-1784995006106-299",
+      "trainingProgramId": "tp-1784995006106",
+      "employeeId": "emp-1784134260731",
+      "status": "Assigned",
+      "allowanceAllocated": 10000
+    }
+  ],
+  "trainingLiquidations": []
+}
