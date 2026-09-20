@@ -1,23 +1,35 @@
-import React, { useState, useEffect } from "react";
-import { User, AnyRequest, RequestType, RequestStatus } from "../types";
-import { apiCall, getLocalTodayString } from "../utils";
+import React, { useState, useEffect, useMemo } from "react";
+import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission } from "../types";
+import { apiCall, getLocalTodayString, formatCurrency } from "../utils";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
-import { 
-  User as UserIcon, 
-  Send, 
-  Backpack, 
-  FileText, 
-  Upload, 
-  HelpCircle, 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  Clock, 
-  DollarSign, 
+import ParticularsEditor, {
+  newParticular,
+  sumParticulars,
+  filledParticulars
+} from "./liquidation/ParticularsEditor";
+import LiquidationCoaFields, {
+  CoaHeaderFields,
+  emptyCoaHeaderFields,
+  SettlementSummary
+} from "./liquidation/LiquidationCoaFields";
+import LiquidationReportModal from "./liquidation/LiquidationReportModal";
+import {
+  User as UserIcon,
+  Send,
+  Backpack,
+  FileText,
+  Upload,
+  HelpCircle,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Clock,
+  DollarSign,
   Paperclip,
   Trash2,
   Bell,
-  Package
+  Package,
+  Printer
 } from "lucide-react";
 
 interface EmployeePortalViewProps {
@@ -36,6 +48,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   const [profile, setProfile] = useState<any>(null);
   const [requests, setRequests] = useState<AnyRequest[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
+  // Everything this employee may file a liquidation against: general activities plus
+  // TDP seminar enrolments, normalised to { id, label, allocated }.
+  const [liquidatable, setLiquidatable] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
 
@@ -54,6 +69,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   // Liquidation Upload Form
   const [selectedActivityId, setSelectedActivityId] = useState("");
   const [totalReleased, setTotalReleased] = useState<number>(0);
+  // Typing "0.50" into a controlled number input is impossible if the parsed value is
+  // echoed straight back, so hold the raw keystrokes until blur.
+  const [releasedDraft, setReleasedDraft] = useState<string | null>(null);
   const [totalSpent, setTotalSpent] = useState<number>(0);
   const [liqRemarks, setLiqRemarks] = useState("");
   // Uploaded receipts carry size + base64 content; older records only a filename.
@@ -63,6 +81,79 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   const [resubmittingItem, setResubmittingItem] = useState<any | null>(null);
   const [resubmitRequest, setResubmitRequest] = useState<any | null>(null);
   const [resubmitDates, setResubmitDates] = useState({ dateRequested: "", startDate: "", endDate: "", dateNeeded: "", meetingDate: "" });
+
+  // --- COA Liquidation Report (PARTICULARS block + header fields) ---
+  const [particulars, setParticulars] = useState<LiquidationParticular[]>([newParticular()]);
+  const [particularErrors, setParticularErrors] = useState<Record<string, string>>({});
+  const [coaFields, setCoaFields] = useState<CoaHeaderFields>(emptyCoaHeaderFields);
+  const [submittingLiq, setSubmittingLiq] = useState(false);
+  const [reportSubmission, setReportSubmission] = useState<LiquidationSubmission | null>(null);
+
+  // TOTAL AMOUNT SPENT is derived from the lines, never typed. The server re-derives it
+  // from the same rows, so the printed total can never disagree with its particulars.
+  const computedSpent = useMemo(() => sumParticulars(particulars), [particulars]);
+  const hasParticularLines = filledParticulars(particulars).length > 0;
+  // Legacy reports carry only a typed total; keep honouring it until it is itemised.
+  const effectiveSpent = hasParticularLines ? computedSpent : totalSpent;
+  const refundDue = Math.round((totalReleased - effectiveSpent) * 100) / 100 > 0;
+
+  // Human label for a liquidation's activity, used on the printed report header.
+  function activityLabelFor(activityId: string): string | undefined {
+    const item = (liquidatable ?? []).find((a: any) => a.id === activityId);
+    return item?.label || undefined;
+  }
+
+  // Clears the whole liquidation form (used after submit and by "Cancel Edit").
+  function resetLiquidationForm() {
+    setResubmittingItem(null);
+    setSelectedActivityId("");
+    setTotalReleased(0);
+    setReleasedDraft(null);
+    setTotalSpent(0);
+    setLiqRemarks("");
+    setAttachedFiles([]);
+    setParticulars([newParticular()]);
+    setParticularErrors({});
+    setCoaFields(emptyCoaHeaderFields);
+  }
+
+  // Loads a returned report back into the form, including its PARTICULARS. A report
+  // filed before the block existed is seeded as a single line so the claimant can split
+  // it up rather than retyping a bare figure the server would no longer derive.
+  function loadForResubmission(sub: any) {
+    setResubmittingItem(sub);
+    setSelectedActivityId(sub.activityId);
+    setTotalReleased(sub.totalReleased);
+    setTotalSpent(sub.totalSpent);
+    setLiqRemarks(sub.remarks || "");
+    setAttachedFiles(sub.supportingDocs || []);
+    setParticularErrors({});
+
+    const existing = (sub.particulars ?? []) as LiquidationParticular[];
+    if (existing.length > 0) {
+      setParticulars(existing.map(p => ({ ...p })));
+    } else if (Number(sub.totalSpent) > 0) {
+      setParticulars([
+        {
+          ...newParticular(),
+          description: activityLabelFor(sub.activityId) || "Liquidated expenses",
+          amount: Number(sub.totalSpent)
+        }
+      ]);
+    } else {
+      setParticulars([newParticular()]);
+    }
+
+    setCoaFields({
+      periodCoveredFrom: sub.periodCoveredFrom || "",
+      periodCoveredTo: sub.periodCoveredTo || "",
+      responsibilityCenterCode: sub.responsibilityCenterCode || "",
+      cashAdvanceDvNo: sub.cashAdvanceDvNo || "",
+      cashAdvanceDvDate: sub.cashAdvanceDvDate || "",
+      refundOrNo: sub.refundOrNo || "",
+      refundOrDate: sub.refundOrDate || ""
+    });
+  }
 
   useEffect(() => {
     fetchPortalData();
@@ -102,14 +193,48 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
         setRequests(reqRes.data);
       }
 
-      // 3. Load activities assigned
-      const actRes = await apiCall("/api/activities");
-      if (actRes.status === "success") {
-        setActivities(actRes.data);
-        if (actRes.data.length > 0 && !selectedActivityId) {
-          setSelectedActivityId(actRes.data[0].id);
-          setTotalReleased(actRes.data[0].allottedBudget);
-        }
+      // 3. Load everything this employee can liquidate against. Two sources: general
+      // activities, and TDP seminar enrolments — a seminar is not an `activity`, so
+      // without the second call an assigned participant has nothing to select and
+      // cannot file a report at all.
+      const [actRes, seminarRes] = await Promise.all([
+        apiCall("/api/activities"),
+        apiCall(`/api/employees/${encodeURIComponent(user.employeeId || "")}/assigned_activities`)
+          .catch(() => ({ status: "error", data: [] }))
+      ]);
+
+      const generalActivities = actRes.status === "success"
+        ? (actRes.data ?? []).map((a: any) => ({
+            id: a.id,
+            label: `${a.activityNo} - ${a.title}`,
+            // What HR set aside. Whether it actually reached the employee is a separate
+            // question, which is why the cash-advance field stays editable.
+            allocated: Number(a.allottedBudget || 0),
+            source: "activity" as const
+          }))
+        : [];
+
+      const seminarActivities = seminarRes.status === "success"
+        ? (seminarRes.data ?? [])
+            .filter((s: any) => s.status !== "Liquidated" && s.status !== "Archived" && s.status !== "Cancelled")
+            .map((s: any) => ({
+              id: s.id,
+              label: `Seminar - ${s.title}`,
+              allocated: Number(s.allocatedBudget || 0),
+              liquidationDueDate: s.liquidationDueDate,
+              source: "seminar" as const
+            }))
+        : [];
+
+      // `activities` keeps its raw server shape for the Activities submenu; the
+      // liquidation dropdown reads the normalised merge instead.
+      if (actRes.status === "success") setActivities(actRes.data ?? []);
+
+      const merged = [...generalActivities, ...seminarActivities];
+      setLiquidatable(merged);
+      if (merged.length > 0 && !selectedActivityId) {
+        setSelectedActivityId(merged[0].id);
+        setTotalReleased(merged[0].allocated);
       }
 
       // 4. Load submissions
@@ -224,8 +349,31 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       return;
     }
 
+    // Mirror the server's rules on the particulars so the claimant sees the problem on
+    // the offending row instead of a single banner at the top of the form.
+    const lines = filledParticulars(particulars);
+    const rowErrors: Record<string, string> = {};
+    lines.forEach(p => {
+      if (!(p.description || "").trim()) {
+        rowErrors[p.id] = "Describe this expense before submitting.";
+      } else if (!isFinite(Number(p.amount)) || Number(p.amount) < 0) {
+        rowErrors[p.id] = "Amount must be zero or more.";
+      }
+    });
+    if (Object.keys(rowErrors).length > 0) {
+      setParticularErrors(rowErrors);
+      setError("Please correct the highlighted particulars before submitting.");
+      return;
+    }
+    if (lines.length === 0 && !(totalSpent > 0)) {
+      setError("Add at least one particular describing what the cash advance was spent on.");
+      return;
+    }
+    setParticularErrors({});
+
+    setSubmittingLiq(true);
     try {
-      const url = resubmittingItem 
+      const url = resubmittingItem
         ? `/api/liquidation-submissions/${resubmittingItem.id}/resubmit`
         : "/api/liquidation-submissions";
       const method = resubmittingItem ? "PUT" : "POST";
@@ -235,27 +383,35 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
         body: JSON.stringify({
           activityId: selectedActivityId,
           totalReleased,
-          totalSpent,
+          // Only a fallback: the server derives totalSpent from the particulars whenever
+          // there is at least one usable line.
+          totalSpent: lines.length > 0 ? computedSpent : totalSpent,
           remarks: liqRemarks,
-          supportingDocs: attachedFiles
+          supportingDocs: attachedFiles,
+          particulars: lines,
+          periodCoveredFrom: coaFields.periodCoveredFrom,
+          periodCoveredTo: coaFields.periodCoveredTo,
+          responsibilityCenterCode: coaFields.responsibilityCenterCode,
+          cashAdvanceDvNo: coaFields.cashAdvanceDvNo,
+          cashAdvanceDvDate: coaFields.cashAdvanceDvDate,
+          // An OR only exists when money was actually returned.
+          refundOrNo: refundDue ? coaFields.refundOrNo : "",
+          refundOrDate: refundDue ? coaFields.refundOrDate : ""
         })
       });
 
       if (res.status === "success") {
-        setSuccess(resubmittingItem 
+        setSuccess(resubmittingItem
           ? `Settlement revision report ${resubmittingItem.submissionNo} corrected and resubmitted successfully to HR desk.`
           : "Liquidation report filed. Forwarded to HR relationship and activity verification desk.");
-        setLiqRemarks("");
-        setAttachedFiles([]);
-        setTotalSpent(0);
-        setSelectedActivityId("");
-        setTotalReleased(0);
-        setResubmittingItem(null);
+        resetLiquidationForm();
         fetchPortalData();
         onRefresh();
       }
     } catch (err: any) {
       setError(err.message || "Failed to submit liquidation.");
+    } finally {
+      setSubmittingLiq(false);
     }
   }
 
@@ -326,6 +482,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
 
   return (
     <>
+      {/* Printable COA Liquidation Report. Mounted here so it overlays the whole portal
+          and so `.lr-printing` on <body> can hide every other pixel when printing. */}
+      <LiquidationReportModal
+        submission={reportSubmission}
+        activityLabel={reportSubmission ? activityLabelFor(reportSubmission.activityId) : undefined}
+        onClose={() => setReportSubmission(null)}
+      />
+
       {resubmitRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200">
@@ -854,27 +1018,27 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
         {/* SUBMENU 4: LIQUIDATIONS */}
         {activeSubMenu === "liquidations" && (
           <div className="space-y-6">
-            <div className="border-b border-slate-100 pb-4">
-              <h1 className="text-base font-bold text-slate-800">Liquidation Reports Submission Portal</h1>
-              <p className="text-xs text-slate-400">Upload liquidation vouchers, invoice files, and Receipts to clear cash advances with HR and Finance.</p>
+            <div className="flex items-start gap-3 border-b-2 border-blue-600 pb-4">
+              <span className="mt-0.5 rounded-lg bg-blue-600 p-2 text-white" aria-hidden="true">
+                <FileText size={16} />
+              </span>
+              <div>
+                <h1 className="text-base font-bold text-slate-800">Liquidation Report (COA Form)</h1>
+                <p className="text-xs text-slate-400">
+                  Itemise every expense charged to your cash advance, attach the receipts, and file it for HR verification and Finance validation.
+                </p>
+              </div>
             </div>
 
             {/* CREATE SUBMISSION FORM */}
             <form onSubmit={handleLiquidationSubmit} className="space-y-4 p-5 border border-slate-200 rounded-xl bg-slate-50/30">
-              <h2 className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider flex items-center justify-between">
+              <h2 className="text-xs font-bold text-blue-700 uppercase font-mono tracking-wider flex items-center justify-between">
                 <span>{resubmittingItem ? `Correct & Resubmit Report: ${resubmittingItem.submissionNo}` : "File Liquidation Voucher Report"}</span>
                 {resubmittingItem && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setResubmittingItem(null);
-                      setSelectedActivityId("");
-                      setTotalReleased(0);
-                      setTotalSpent(0);
-                      setLiqRemarks("");
-                      setAttachedFiles([]);
-                    }}
-                    className="text-[10px] text-slate-400 hover:text-slate-600 bg-white border px-2 py-0.5 rounded font-mono uppercase cursor-pointer"
+                    onClick={resetLiquidationForm}
+                    className="text-[10px] text-slate-400 hover:text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded font-mono uppercase cursor-pointer"
                   >
                     Cancel Edit
                   </button>
@@ -882,7 +1046,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
               </h2>
 
               {resubmittingItem && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-850 space-y-2">
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-2">
                   <p className="font-bold uppercase tracking-wider text-[10px] text-amber-900 font-mono">⚠️ CORRECTIONS REQUIRED & FEEDBACK FROM AUDITING</p>
                   
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[10px]">
@@ -901,62 +1065,94 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                   </div>
                   
                   <p className="text-[10px] font-sans font-medium text-slate-600 leading-normal">
-                    Please audit your bills and receipts, edit the <strong>Actual Spent Amount</strong>, attach any missing Receipts/Invoices, and click <strong>"Resubmit Corrected Report"</strong> below to refresh active evaluation queues.
+                    Please audit your bills and receipts, correct the <strong>Particulars</strong> below (the Total Amount Spent recomputes itself), attach any missing Receipts/Invoices, and click <strong>"Resubmit Corrected Report"</strong> to refresh the active evaluation queues.
                   </p>
                 </div>
               )}
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Assigned Activity</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">
+                    Assigned Activity <span className="text-rose-600" aria-hidden="true">*</span>
+                  </label>
                   <select
                     value={selectedActivityId}
                     onChange={e => {
                       setSelectedActivityId(e.target.value);
-                      const found = activities.find(a => a.id === e.target.value);
-                      if (found) setTotalReleased(found.allottedBudget);
+                      const found = liquidatable.find(a => a.id === e.target.value);
+                      // Seed with what HR allocated; the claimant can correct it to what
+                      // they actually received, including zero.
+                      if (found) setTotalReleased(found.allocated);
                     }}
                     className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold"
                   >
-                    <option value="">-- Choose Assigned Activity --</option>
-                    {activities
+                    <option value="">-- Choose Assigned Activity or Seminar --</option>
+                    {(liquidatable ?? [])
                       .filter(a => {
-                        const isLinked = submissions.some(sub => sub.activityId === a.id);
+                        const isLinked = (submissions ?? []).some(sub => sub.activityId === a.id);
                         if (resubmittingItem && resubmittingItem.activityId === a.id) return true;
                         return !isLinked;
                       })
                       .map(a => (
-                      <option key={a.id} value={a.id}>{a.activityNo} - {a.title}</option>
+                      <option key={a.id} value={a.id}>{a.label}</option>
                     ))}
                   </select>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Cash Advanced (₱)</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Cash Advance Received (₱)</label>
                   <input
                     type="number"
-                    disabled
-                    value={totalReleased}
-                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-100 font-mono"
+                    min="0"
+                    step="0.01"
+                    disabled={submittingLiq}
+                    aria-label="Cash advance actually received. Enter 0 if you received none."
+                    value={releasedDraft ?? String(totalReleased)}
+                    onChange={e => {
+                      setReleasedDraft(e.target.value);
+                      const n = Number(e.target.value);
+                      if (isFinite(n) && n >= 0) setTotalReleased(n);
+                    }}
+                    onBlur={() => {
+                      setReleasedDraft(null);
+                      setTotalReleased(v => Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
+                    }}
+                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
                   />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Actual Spent Amount (₱)</label>
-                  <input
-                    type="number"
-                    required
-                    value={totalSpent || ""}
-                    onChange={e => setTotalSpent(Number(e.target.value))}
-                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono text-slate-800"
-                  />
+                  <p className="text-[9px] text-slate-400 font-mono leading-snug">
+                    Seeded from what HR allocated — correct it to what you actually received.{" "}
+                    <strong className="text-slate-500">Enter 0 if you paid out of pocket;</strong> the balance becomes a reimbursement claim.
+                  </p>
                 </div>
               </div>
 
+              {/* PARTICULARS — the itemised body of the COA Liquidation Report */}
+              <ParticularsEditor
+                particulars={particulars}
+                onChange={setParticulars}
+                total={computedSpent}
+                errors={particularErrors}
+                disabled={submittingLiq}
+              />
+
+              {/* COA header fields: period covered, DV reference, refund OR */}
+              <LiquidationCoaFields
+                value={coaFields}
+                onChange={setCoaFields}
+                refundEnabled={refundDue}
+                disabled={submittingLiq}
+              />
+
+              {/* Live derived figures — exactly what the printed form will show */}
+              <SettlementSummary totalReleased={totalReleased} totalSpent={effectiveSpent} />
+
               {/* REAL DRAG & DROP ATTACHMENT UPLOADER */}
-              <div className="p-4 bg-white border border-slate-150 rounded-xl space-y-3 max-w-xl">
-                <p className="text-[10px] font-bold uppercase text-slate-500 font-mono tracking-wider">Upload Receipts & Invoices Vouchers</p>
-                
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center gap-2 bg-blue-600 px-3 py-2">
+                  <Package size={12} className="text-white" />
+                  <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-white">Supporting Documents &amp; Receipts</h3>
+                </div>
+                <div className="space-y-3 p-3">
                 <div
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
@@ -986,7 +1182,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                   <div className="space-y-1.5 border-t border-slate-100 pt-3">
                     <p className="text-[9px] font-bold uppercase text-slate-400 font-mono tracking-wider">Loaded Documents Queue</p>
                     {attachedFiles.map((file) => (
-                      <div key={file.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-150 text-[11px] text-slate-600">
+                      <div key={file.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600">
                         <div className="flex items-center space-x-2">
                           <span className="font-mono">📎 {file.name}</span>
                           {file.size && <span className="text-[9px] bg-slate-200 text-slate-600 font-bold font-mono px-1.5 rounded">{file.size}</span>}
@@ -1009,86 +1205,149 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                     ))}
                   </div>
                 )}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Evaluation Remarks / Travel notes</label>
-                <textarea
-                  placeholder="Review or ledger statements for HR & Finance check..."
-                  value={liqRemarks}
-                  onChange={e => setLiqRemarks(e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs h-16 max-w-xl"
-                />
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center gap-2 bg-blue-600 px-3 py-2">
+                  <FileText size={12} className="text-white" />
+                  <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-white">Evaluation Remarks / Travel Notes</h3>
+                </div>
+                <div className="p-3">
+                  <textarea
+                    placeholder="Review or ledger statements for HR & Finance check..."
+                    value={liqRemarks}
+                    onChange={e => setLiqRemarks(e.target.value)}
+                    className="h-16 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                  />
+                </div>
               </div>
 
+              <div className="border-t border-slate-200 pt-4">
               <button
                 type="submit"
-                className={`px-6 py-2 rounded-lg shadow-sm font-semibold text-xs cursor-pointer transition-all ${
-                  resubmittingItem 
-                    ? "bg-amber-600 hover:bg-amber-700 text-white" 
+                disabled={submittingLiq}
+                className={`px-6 py-2 rounded-lg shadow-sm font-semibold text-xs cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  resubmittingItem
+                    ? "bg-amber-600 hover:bg-amber-700 text-white"
                     : "bg-blue-600 hover:bg-blue-700 text-white"
                 }`}
               >
-                {resubmittingItem ? "Resubmit Corrected Report" : "Submit Liquidation to HR"}
+                {submittingLiq
+                  ? "Submitting…"
+                  : resubmittingItem
+                    ? "Resubmit Corrected Report"
+                    : "Submit Liquidation to HR"}
               </button>
+              </div>
             </form>
 
             {/* PAST REPORT ENTRIES LIQUIADTION LEDGER */}
             <div className="space-y-2">
               <h2 className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider">My Settlement Log Entries</h2>
-              {submissions.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">No settlement reports logged yet.</p>
+              {loading ? (
+                <div className="space-y-3" aria-hidden="true">
+                  {[0, 1].map(i => (
+                    <div key={i} className="p-4 border border-slate-100 rounded-xl bg-white space-y-2.5 animate-pulse">
+                      <div className="h-3 w-40 bg-slate-100 rounded" />
+                      <div className="h-2.5 w-64 bg-slate-100 rounded" />
+                      <div className="h-12 bg-slate-50 rounded" />
+                    </div>
+                  ))}
+                </div>
+              ) : (submissions ?? []).length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 py-10 text-center">
+                  <FileText size={22} className="text-slate-300" aria-hidden="true" />
+                  <p className="text-xs font-semibold text-slate-600">No settlement reports logged yet</p>
+                  <p className="max-w-sm text-[10px] text-slate-400 font-sans">
+                    File your first Liquidation Report using the form above. It will appear here once HR receives it.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {submissions.map((sub: any) => (
+                  {(submissions ?? []).map((sub: any) => (
                     <div key={sub.id} className="p-4 border border-slate-100 rounded-xl bg-slate-50/10 space-y-2.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-mono font-bold text-slate-800">{sub.submissionNo}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">Released: ₱{sub.totalReleased} | Spent: ₱{sub.totalSpent}</span>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-mono font-bold text-slate-800">{sub.serialNo || sub.submissionNo}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Cash Advance: {formatCurrency(Number(sub.totalReleased) || 0)} · Spent: {formatCurrency(Number(sub.totalSpent) || 0)}
+                          </span>
+                          {Number(sub.remainingBalance) !== 0 && (
+                            <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border ${
+                              Number(sub.remainingBalance) > 0
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-amber-50 text-amber-700 border-amber-200"
+                            }`}>
+                              {Number(sub.remainingBalance) > 0 ? "Refunded" : "To Reimburse"}: {formatCurrency(Math.abs(Number(sub.remainingBalance) || 0))}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setReportSubmission(sub as LiquidationSubmission)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold rounded text-[9px] uppercase tracking-wider cursor-pointer font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                          >
+                            <Printer size={10} aria-hidden="true" />
+                            Print / View Report
+                          </button>
                           {sub.status === "Returned" && (
                             <button
                               type="button"
-                              onClick={() => {
-                                setResubmittingItem(sub);
-                                setSelectedActivityId(sub.activityId);
-                                setTotalReleased(sub.totalReleased);
-                                setTotalSpent(sub.totalSpent);
-                                setLiqRemarks(sub.remarks || "");
-                                setAttachedFiles(sub.supportingDocs || []);
-                              }}
-                              className="px-2 py-0.5 bg-amber-650 hover:bg-amber-700 text-amber-900 border border-amber-300 font-bold rounded text-[9px] uppercase tracking-wider cursor-pointer font-mono"
+                              onClick={() => loadForResubmission(sub)}
+                              className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold rounded text-[9px] uppercase tracking-wider cursor-pointer font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                             >
                               Fix & Resubmit
                             </button>
                           )}
-                          <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded ${
-                            sub.status === "Approved" 
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
+                          <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded border ${
+                            sub.status === "Approved" || sub.status === "Completed"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : sub.status === "Rejected"
+                              ? "bg-rose-50 text-rose-700 border-rose-200"
                               : sub.status === "Returned"
-                              ? "bg-amber-50 text-amber-700 border border-amber-105"
-                              : "bg-blue-50 text-blue-700 border border-blue-101"
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-blue-50 text-blue-700 border-blue-200"
                           }`}>
                             {sub.status}
                           </span>
                         </div>
                       </div>
 
+                      {/* PARTICULARS FILED ON THIS REPORT */}
+                      {(sub.particulars ?? []).length > 0 && (
+                        <div className="rounded-lg border border-slate-100 bg-white p-2">
+                          <p className="font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">Particulars Filed</p>
+                          <ul className="mt-1 space-y-0.5">
+                            {(sub.particulars ?? []).map((p: any, idx: number) => (
+                              <li key={p.id || idx} className="flex items-baseline justify-between gap-3 text-[10px]">
+                                <span className="truncate text-slate-600">
+                                  <span className="mr-1 font-mono text-slate-400">{idx + 1}.</span>
+                                  {p.description}
+                                </span>
+                                <span className="shrink-0 font-mono tabular-nums text-slate-700">
+                                  {formatCurrency(Number(p.amount) || 0)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
                       {/* REMARKS AND TRIAL CORRECTION VIEWS */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[10px] font-sans">
                         <div className="p-2 bg-white rounded border border-slate-100">
                           <span className="text-blue-700 font-bold uppercase font-mono">HR Verification:</span>
-                          <p className="text-slate-500 class-italic mt-0.5">"{sub.hrRemarks || 'Pending review'}"</p>
+                          <p className="text-slate-500 italic mt-0.5">"{sub.hrRemarks || 'Pending review'}"</p>
                         </div>
                         <div className="p-2 bg-white rounded border border-slate-100">
                           <span className="text-emerald-700 font-bold uppercase font-mono">Finance Check:</span>
-                          <p className="text-slate-500 class-italic mt-0.5">"{sub.financeRemarks || 'Awaiting HR forward'}"</p>
+                          <p className="text-slate-500 italic mt-0.5">"{sub.financeRemarks || 'Awaiting HR forward'}"</p>
                         </div>
                         <div className="p-2 bg-white rounded border border-slate-100 font-sans">
                           <span className="text-purple-700 font-bold uppercase font-mono">Chief Approval:</span>
-                          <p className="text-slate-500 class-italic mt-0.5">"{sub.divisionChiefRemarks || 'Pending endorsements'}"</p>
+                          <p className="text-slate-500 italic mt-0.5">"{sub.divisionChiefRemarks || 'Pending endorsements'}"</p>
                         </div>
                       </div>
 

@@ -360,6 +360,37 @@ export interface Activity {
   status: "Active" | "Completed" | "Pending";
 }
 
+// The spending buckets HR's training ledger groups by. Shared with the PARTICULARS
+// editor so a claimant's line item lands in a real bucket instead of "Miscellaneous".
+export type TrainingExpenseCategory =
+  | "Meals"
+  | "Transportation"
+  | "Accommodation"
+  | "Materials"
+  | "Venue Rental"
+  | "Speaker Fees"
+  | "Miscellaneous";
+
+export const TRAINING_EXPENSE_CATEGORIES: TrainingExpenseCategory[] = [
+  "Meals",
+  "Transportation",
+  "Accommodation",
+  "Materials",
+  "Venue Rental",
+  "Speaker Fees",
+  "Miscellaneous"
+];
+
+// One line of the PARTICULARS block on the COA Liquidation Report.
+export interface LiquidationParticular {
+  id: string;
+  description: string;
+  amount: number; // PHP, rounded to 2 decimals at the boundary
+  // Which bucket this line is charged to. Optional so reports filed before the picker
+  // existed stay valid; the server falls back to "Miscellaneous".
+  category?: TrainingExpenseCategory;
+}
+
 export interface LiquidationSubmission {
   id: string;
   submissionNo: string;
@@ -375,24 +406,68 @@ export interface LiquidationSubmission {
   // when not set explicitly by the submitter.
   spendingCategory?: SpendingCategory;
 
+  // --- COA Liquidation Report fields ---
+  // All optional: records created before this existed stay valid, and the server still
+  // accepts a bare totalSpent when no particulars are sent.
+  // The itemised PARTICULARS block. When present, totalSpent is derived from its sum.
+  particulars?: LiquidationParticular[];
+  serialNo?: string;                 // e.g. "LR-101-2026-09-024"
+  periodCoveredFrom?: string;        // YYYY-MM-DD
+  periodCoveredTo?: string;          // YYYY-MM-DD
+  entityName?: string;               // defaults to HSAC-RAB I
+  fundCluster?: string;              // e.g. "01 - Regular Fund"
+  responsibilityCenterCode?: string;
+  cashAdvanceDvNo?: string;          // e.g. "2026-08-336"
+  cashAdvanceDvDate?: string;        // YYYY-MM-DD
+  refundOrNo?: string;               // e.g. "0247983" — only when there is a refund
+  refundOrDate?: string;             // YYYY-MM-DD
+  jevNo?: string;                    // filled by the Accountant
+
+  // --- Reimbursement ---
+  // When an employee is assigned a seminar but never receives the cash advance, they pay
+  // out of pocket and the Liquidation Report doubles as the claim to get it back. That is
+  // simply totalSpent > totalReleased, so the amount is derived, never typed.
+  reimbursementStatus?: "Not Required" | "Awaiting Reimbursement" | "Reimbursed";
+  reimbursementAmount?: number;      // = max(0, totalSpent - totalReleased)
+  reimbursementDvNo?: string;        // the DV the reimbursement was paid on
+  reimbursementDate?: string;        // YYYY-MM-DD
+  reimbursedBy?: string;             // the Financial Officer who released it
+
+  // Stamped by the server at filing time from HR's own assignment record — never taken
+  // from the request body. `totalReleased` is what the claimant says they received, and
+  // Finance cannot read the HR training tables (isTrainingRecordsRole excludes them), so
+  // without this there is no way to notice a claim for money already advanced.
+  // Left undefined when the activity cannot be resolved, so the UI can say "not on
+  // record" rather than assert a false zero.
+  allocatedAtFiling?: number;
+  activityTitle?: string;            // human label for the activity, for Finance's queue
+
   // Three-tier statuses
   hrStatus: "Pending Review" | "Verified & Forwarded" | "Returned by HR";
   hrRemarks?: string;
   hrVerifiedBy?: string;
   hrVerifiedAt?: string;
 
-  financeStatus: "Pending Validation" | "Validated & Endorsed" | "Returned by Finance";
+  financeStatus: "Pending Validation" | "Validated & Endorsed" | "Validated & Approved" | "Returned by Finance";
   financeRemarks?: string;
   financeValidatedBy?: string;
   financeValidatedAt?: string;
 
-  divisionChiefStatus: "Pending Chief Approval" | "Approved" | "Returned by Chief" | "Rejected";
+  // "Certified by Authorized Representative" is the normal terminal state at RAB 1: the
+  // Financial Officer signs box B of the COA Liquidation Report ("Head of Agency /
+  // Authorized Representative") under delegated authority. This is a documented business
+  // rule, not a skipped approval. "Bypassed (Auto-Approved by Finance)" is the legacy
+  // wording for the same thing — migrated on load, but kept here because a restored
+  // backup can still carry it.
+  divisionChiefStatus: "Pending Chief Approval" | "Approved" | "Certified by Authorized Representative"
+    | "Bypassed (Auto-Approved by Finance)" | "Returned by Chief" | "Rejected";
   divisionChiefRemarks?: string;
   divisionChiefApprovedBy?: string;
   divisionChiefApprovedAt?: string;
 
-  status: "Pending HR Review" | "Verified & Forwarded" | "Validated & Endorsed" | "Approved" | "Returned" | "Rejected";
+  status: "Pending HR Review" | "Verified & Forwarded" | "Validated & Endorsed" | "Approved" | "Completed" | "Returned" | "Rejected";
   createdAt: string;
+  dateSubmitted?: string;
 }
 
 export interface Child {
@@ -507,6 +582,10 @@ export interface TrainingProgram {
   // seminar before" survives rollover. Older programs lack it; matching falls
   // back to the normalised title.
   seriesId?: string;
+  // Needed-training titles from Plan A that this seminar covers, ticked by HR from
+  // the plan's own list. Resolved by normalised title, so an employee who adds the
+  // same need later is still recognised.
+  fulfillsNeedTitles?: string[];
   createdAt: string;
 }
 
@@ -523,6 +602,10 @@ export interface TrainingCandidate {
   monthsSinceHire: number | null;
   hasTdpHistory: boolean;
   matchesTarget: boolean;
+  // This seminar covers something their Plan A actually lists — the strongest
+  // reason to give them a seat, so it outranks the new-hire preference.
+  needsThis: boolean;
+  needMatches: string[];
   eligible: boolean;
   ineligibleReason?: string;
 }
@@ -542,6 +625,66 @@ export interface TrainingParticipant {
   allowanceAllocated: number;
 }
 
+// --- OFFICIAL TRAINING & DEVELOPMENT PLAN (Plan A / Plan D) ---
+// The RAB-1 form lists, per employee, the trainings they still need in three
+// columns. Plan D is the same list checked off mid-year.
+export type TrainingNeedCategory = "Function" | "Additional Function" | "Career Advancement";
+
+export const TRAINING_NEED_CATEGORIES: TrainingNeedCategory[] = ["Function", "Additional Function", "Career Advancement"];
+
+// Column headings exactly as the official workbook prints them.
+export const TRAINING_NEED_COLUMN_LABELS: Record<TrainingNeedCategory, string> = {
+  "Function": "Needed Training for the Function",
+  "Additional Function": "Needed Training for Additional Function/Designation",
+  "Career Advancement": "Needed Training for Career Advancement"
+};
+
+export interface TrainingNeed {
+  id: string;
+  employeeId: string; // Employee.id, the same form TrainingParticipant uses
+  fiscalYear: string; // label, e.g. "2026"
+  category: TrainingNeedCategory;
+  title: string;
+  // Plan D: HR's decision overrides whatever the evidence says.
+  accomplishedOverride?: boolean;
+  remarks?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+// How a need was judged accomplished for Plan D.
+export interface TrainingNeedStatus {
+  accomplished: boolean;
+  source: "seminar" | "recorded-training" | "pds" | "override" | null;
+  evidence?: string; // e.g. the seminar title that satisfied it
+  date?: string;
+}
+
+export interface TrainingNeedRow extends TrainingNeed {
+  status: TrainingNeedStatus;
+}
+
+// One employee's block in the plan, with their needs split by column.
+export interface TrainingPlanEmployee {
+  employeeId: string;
+  fullName: string;
+  position: string;
+  division: string;
+  needs: Record<TrainingNeedCategory, TrainingNeedRow[]>;
+}
+
+// One row of the "which plan needs does this seminar cover?" picker.
+export interface TrainingNeedCatalogItem {
+  title: string;
+  employeeCount: number;
+  categories: TrainingNeedCategory[];
+}
+
+export interface TrainingPlanOffice {
+  office: string; // uppercase heading, as the form prints it
+  employees: TrainingPlanEmployee[];
+}
+
 export interface TrainingLiquidationExpense {
   id: string;
   trainingProgramId: string;
@@ -549,7 +692,7 @@ export interface TrainingLiquidationExpense {
   // costs (venue rental, speaker fees) legitimately have no single owner.
   trainingParticipantId?: string;
   employeeId?: string; // denormalised from the participant, for display/filtering
-  expenseCategory: "Meals" | "Transportation" | "Accommodation" | "Materials" | "Venue Rental" | "Speaker Fees" | "Miscellaneous";
+  expenseCategory: TrainingExpenseCategory;
   description: string;
   amount: number;
   receiptFileName?: string;

@@ -41,6 +41,7 @@ import {
   Activity,
   ArrowRight
 } from "lucide-react";
+import ReimbursementQueue from "./finance/ReimbursementQueue";
 import { apiCall, formatCurrency, formatDate, downloadCSV } from "../utils";
 
 interface FinanceViewProps {
@@ -1388,7 +1389,7 @@ export default function FinanceView({
                           <div>
                             <h3 className="text-xs font-bold text-slate-800">{sub.employeeName}</h3>
                             <p className="text-[11px] text-slate-500 mt-1">
-                              <strong>Activity ID:</strong> {sub.activityId} • <span className="text-blue-600 font-medium">Verified by HR</span>
+                              <strong>For:</strong> {sub.activityTitle || sub.activityId} • <span className="text-blue-600 font-medium">Verified by HR</span>
                             </p>
                           </div>
 
@@ -1476,6 +1477,12 @@ export default function FinanceView({
                   )}
                 </div>
               </div>
+            )}
+
+            {/* OUT-OF-POCKET CLAIMS. Validation does not release money, so these stay
+                open until Finance records the disbursement voucher. */}
+            {(user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN) && (
+              <ReimbursementQueue submissions={submissions} onRecorded={() => { fetchFinanceAddons(); onRefresh(); }} />
             )}
 
             {/* LIQUIDATIONS INDEX TABLE */}

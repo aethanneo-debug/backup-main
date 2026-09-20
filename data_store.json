@@ -71,6 +71,18 @@
       "createdAt": "2026-09-16T03:40:28.449Z",
       "passwordHash": "fe4420d7b7d6e8872994ddc8a7fc69a5:89b63cd543953e18f8221dbd09168f17da97dcec6372529fd924847ffff0237f9d2b31321fbe1ff21c259046f0034229eb6cfd4bacc9b4c654e90aba06b67b33",
       "requirePasswordChange": false
+    },
+    {
+      "id": "u-1789836952451",
+      "username": "ZhonellBading",
+      "email": "custodiojayzerkien@gmail.com",
+      "fullName": "ZhonellBading",
+      "role": "Personnel",
+      "status": "Active",
+      "employeeId": "EMP-2739",
+      "createdAt": "2026-09-19T16:55:52.451Z",
+      "passwordHash": "0f5ea79acd281d24b9e16b7f04a1b6de:18ad501735a7353e1be38ef1ed0978f374b4e3b7c40cf2740fe8a9e5c0b9179013ac146cf76e1884f100b00ae303e58d139837fd54ab7f80d326daeb81c1eaa8",
+      "requirePasswordChange": false
     }
   ],
   "employees": [
@@ -206,28 +218,6 @@
       "emergencyContactPhone": "09981297399"
     },
     {
-      "id": "emp-1784134770417",
-      "employeeId": "EMP-TEST-002",
-      "fullName": "Test User",
-      "surname": "Test",
-      "firstName": "User",
-      "position": "Tester",
-      "salary": 60000,
-      "division": "Testing Division",
-      "dateHired": "2026-07-15"
-    },
-    {
-      "id": "emp-1784134822124",
-      "employeeId": "EMP-TEST-003",
-      "fullName": "Test User",
-      "surname": "Test",
-      "firstName": "User",
-      "position": "Tester",
-      "salary": 60000,
-      "division": "Testing Division",
-      "dateHired": "2026-07-15"
-    },
-    {
       "id": "emp-1789530028402",
       "employeeId": "HSAC-9123697",
       "fullName": "Sabe",
@@ -239,6 +229,17 @@
       "isActive": true,
       "pdsFieldName": "PDS-Saavedra-2026 (1).pdf",
       "pdsUploadedAt": "2026-09-16T03:44:58.116Z"
+    },
+    {
+      "id": "emp-1789836952407",
+      "employeeId": "EMP-2739",
+      "fullName": "ZhonellBading",
+      "position": "Employee",
+      "division": "Adjudication Division",
+      "employmentStatus": "Regular",
+      "email": "custodiojayzerkien@gmail.com",
+      "dateHired": "2026-09-19",
+      "isActive": true
     }
   ],
   "employmentHistory": [
@@ -393,6 +394,30 @@
       "category": "Travel",
       "createdBy": "Sabe",
       "dateCreated": "2026-09-16T03:50:14.436Z"
+    },
+    {
+      "id": "tx-1789899599620",
+      "transactionId": "TX-LIQ-9620",
+      "transactionDate": "2026-09-20",
+      "supplier": "Regional Expenses",
+      "amount": 4800,
+      "description": "Official travel liquidation for activity: LIQSUB-2026-02",
+      "status": "Liquidated",
+      "supportingDocuments": [],
+      "history": [
+        {
+          "id": "his-1789899599620",
+          "status": "Liquidated",
+          "changedBy": "Juan dela Cruz",
+          "changedAt": "2026-09-20T10:19:59.620Z",
+          "remarks": "Approved and finalized by Finance"
+        }
+      ],
+      "employeeRef": "EMP007",
+      "department": "Administrative and Finance Division",
+      "category": "Travel",
+      "createdBy": "Francisco F. Balagtas",
+      "dateCreated": "2026-09-20T10:19:59.620Z"
     }
   ],
   "assets": [
@@ -637,6 +662,600 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1789899614173-7",
+      "timestamp": "2026-09-20T10:20:14.173Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Record Reimbursement",
+      "details": "Reimbursed PHP 4800.00 to Francisco F. Balagtas for LIQSUB-2026-02 via DV 2026-09-412"
+    },
+    {
+      "id": "log-1789899613813-68",
+      "timestamp": "2026-09-20T10:20:13.813Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899599620-562",
+      "timestamp": "2026-09-20T10:19:59.620Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Finance Validate Liquidation",
+      "details": "Finance evaluated liquidation LIQSUB-2026-02 with action Validate"
+    },
+    {
+      "id": "log-1789899599618-233",
+      "timestamp": "2026-09-20T10:19:59.619Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Auto-Deduct Budget",
+      "details": "Liquidation LIQSUB-2026-02 (Training) auto-deducted ₱4,800 from Administrative and Finance Division bucket b-2 for FY 2026."
+    },
+    {
+      "id": "log-1789899599302-216",
+      "timestamp": "2026-09-20T10:19:59.302Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "HR Verify Liquidation",
+      "details": "HR evaluated liquidation LIQSUB-2026-02 with action Verify"
+    },
+    {
+      "id": "log-1789899598754-560",
+      "timestamp": "2026-09-20T10:19:58.754Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899598429-826",
+      "timestamp": "2026-09-20T10:19:58.429Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899577344-365",
+      "timestamp": "2026-09-20T10:19:37.344Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Submit Liquidation",
+      "details": "Submitted liquidation report: LIQSUB-2026-02"
+    },
+    {
+      "id": "log-1789899575797-555",
+      "timestamp": "2026-09-20T10:19:35.797Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899055117-552",
+      "timestamp": "2026-09-20T10:10:55.117Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899054794-668",
+      "timestamp": "2026-09-20T10:10:54.794Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899054468-2",
+      "timestamp": "2026-09-20T10:10:54.468Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789899035780-983",
+      "timestamp": "2026-09-20T10:10:35.780Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789898539059-523",
+      "timestamp": "2026-09-20T10:02:19.059Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789898538749-388",
+      "timestamp": "2026-09-20T10:02:18.749Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789898538425-120",
+      "timestamp": "2026-09-20T10:02:18.425Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789898521843-231",
+      "timestamp": "2026-09-20T10:02:01.843Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789898521536-23",
+      "timestamp": "2026-09-20T10:02:01.536Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789898521211-390",
+      "timestamp": "2026-09-20T10:02:01.211Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789897330672-383",
+      "timestamp": "2026-09-20T09:42:10.672Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789891995322-362",
+      "timestamp": "2026-09-20T08:13:15.322Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789887083259-706",
+      "timestamp": "2026-09-20T06:51:23.259Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789887049748-305",
+      "timestamp": "2026-09-20T06:50:49.748Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789886983955-642",
+      "timestamp": "2026-09-20T06:49:43.955Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789886709574-314",
+      "timestamp": "2026-09-20T06:45:09.574Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789886708993-675",
+      "timestamp": "2026-09-20T06:45:08.993Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789886054670-614",
+      "timestamp": "2026-09-20T06:34:14.670Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789886007054-421",
+      "timestamp": "2026-09-20T06:33:27.054Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Submit Liquidation",
+      "details": "Submitted liquidation report: LIQSUB-2026-03"
+    },
+    {
+      "id": "log-1789886006742-990",
+      "timestamp": "2026-09-20T06:33:26.742Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789885978857-777",
+      "timestamp": "2026-09-20T06:32:58.857Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Submit Liquidation",
+      "details": "Submitted liquidation report: LIQSUB-2026-02"
+    },
+    {
+      "id": "log-1789885978559-424",
+      "timestamp": "2026-09-20T06:32:58.559Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789885931286-44",
+      "timestamp": "2026-09-20T06:32:11.286Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789885869082-687",
+      "timestamp": "2026-09-20T06:31:09.082Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789885856846-335",
+      "timestamp": "2026-09-20T06:30:56.846Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789883414483-997",
+      "timestamp": "2026-09-20T05:50:14.483Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789882923038-534",
+      "timestamp": "2026-09-20T05:42:03.038Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789881837089-11",
+      "timestamp": "2026-09-20T05:23:57.089Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789881293548-378",
+      "timestamp": "2026-09-20T05:14:53.548Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789837103241-656",
+      "timestamp": "2026-09-19T16:58:23.241Z",
+      "userId": "u-1789836952451",
+      "username": "ZhonellBading",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789837091415-761",
+      "timestamp": "2026-09-19T16:58:11.415Z",
+      "userId": "u-1789836952451",
+      "username": "ZhonellBading",
+      "role": "Personnel",
+      "action": "Change Password",
+      "details": "User successfully modified/updated login credentials."
+    },
+    {
+      "id": "log-1789837018885-564",
+      "timestamp": "2026-09-19T16:56:58.885Z",
+      "userId": "u-1789836952451",
+      "username": "ZhonellBading",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789836952451-494",
+      "timestamp": "2026-09-19T16:55:52.451Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create User Account",
+      "details": "Created digital user: ZhonellBading and employee EMP-2739"
+    },
+    {
+      "id": "log-1789836712458-955",
+      "timestamp": "2026-09-19T16:51:52.458Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789829625740-757",
+      "timestamp": "2026-09-19T14:53:45.740Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"RA 12009 (New Government Procurement Act)\" (Additional Function) for Jolly Joy A. Almoite in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789829606239-123",
+      "timestamp": "2026-09-19T14:53:26.239Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"Legal Ethics\" (Function) for Jolly Joy A. Almoite in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789829088949-181",
+      "timestamp": "2026-09-19T14:44:48.949Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789829046099-490",
+      "timestamp": "2026-09-19T14:44:06.099Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789796478782-48",
+      "timestamp": "2026-09-19T05:41:18.782Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789796440579-538",
+      "timestamp": "2026-09-19T05:40:40.579Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Delete Employee",
+      "details": "Declassified/Removed Employee record profile Test User (EMP-TEST-003)"
+    },
+    {
+      "id": "log-1789796440246-958",
+      "timestamp": "2026-09-19T05:40:40.246Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Delete Employee",
+      "details": "Declassified/Removed Employee record profile Test User (EMP-TEST-002)"
+    },
+    {
+      "id": "log-1789796439930-92",
+      "timestamp": "2026-09-19T05:40:39.930Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Remove Training Need",
+      "details": "Removed \"bvnxv\" (Career Advancement) for Test User from the 2026 plan."
+    },
+    {
+      "id": "log-1789796439659-970",
+      "timestamp": "2026-09-19T05:40:39.659Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Remove Training Need",
+      "details": "Removed \"gsdfgdf\" (Additional Function) for Test User from the 2026 plan."
+    },
+    {
+      "id": "log-1789796439390-891",
+      "timestamp": "2026-09-19T05:40:39.390Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Remove Training Need",
+      "details": "Removed \"gsdgdfg\" (Function) for Test User from the 2026 plan."
+    },
+    {
+      "id": "log-1789796439091-795",
+      "timestamp": "2026-09-19T05:40:39.091Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789796438762-654",
+      "timestamp": "2026-09-19T05:40:38.762Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789796158998-433",
+      "timestamp": "2026-09-19T05:35:58.998Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"SEP TEST2\" (Function) for Sabe in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789794326895-22",
+      "timestamp": "2026-09-19T05:05:26.895Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789794313359-442",
+      "timestamp": "2026-09-19T05:05:13.359Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789794271732-770",
+      "timestamp": "2026-09-19T05:04:31.732Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789794271427-901",
+      "timestamp": "2026-09-19T05:04:31.427Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789792876570-488",
+      "timestamp": "2026-09-19T04:41:16.570Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"Sep test\" (Function) for Sabe in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789792285826-664",
+      "timestamp": "2026-09-19T04:31:25.826Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"bvnxv\" (Career Advancement) for Test User in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789792282183-825",
+      "timestamp": "2026-09-19T04:31:22.183Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"gsdfgdf\" (Additional Function) for Test User in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789792273716-455",
+      "timestamp": "2026-09-19T04:31:13.716Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"gsdgdfg\" (Function) for Test User in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1789792046376-929",
+      "timestamp": "2026-09-19T04:27:26.376Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789792046056-58",
+      "timestamp": "2026-09-19T04:27:26.056Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
     {
       "id": "log-1789788602028-621",
       "timestamp": "2026-09-19T03:30:02.028Z",
@@ -1637,9 +2256,9 @@
       "department": "Administrative and Finance Division",
       "budgetAllocation": 0,
       "carryOver": 100000,
-      "budgetUtilized": 0,
-      "remainingBudget": 100000,
-      "budgetPercentageUsed": 0,
+      "budgetUtilized": 4800,
+      "remainingBudget": 95200,
+      "budgetPercentageUsed": 5,
       "allocatedPS": 0,
       "allocatedMOOE": 0,
       "allocatedCO": 0,
@@ -1852,7 +2471,7 @@
       "id": "notif-1789530474234",
       "title": "Liquidation Report Submitted",
       "message": "Sabe submitted a liquidation report for activity relationship evaluation.",
-      "isRead": false,
+      "isRead": true,
       "type": "info",
       "timestamp": "2026-09-16T03:47:54.234Z",
       "targetRole": "HR Officer"
@@ -1886,6 +2505,33 @@
       "targetRole": "Personnel",
       "targetEmployeeId": "HSAC-RAB1-300",
       "dedupeKey": "liq-due:part-1788709833290-260:overdue"
+    },
+    {
+      "id": "notif-1789885978857",
+      "title": "Liquidation Report Submitted",
+      "message": "Andres B. Bonifacio submitted a liquidation report for activity relationship evaluation.",
+      "isRead": false,
+      "type": "info",
+      "timestamp": "2026-09-20T06:32:58.857Z",
+      "targetRole": "HR Officer"
+    },
+    {
+      "id": "notif-1789886007054",
+      "title": "Liquidation Report Submitted",
+      "message": "Andres B. Bonifacio submitted a liquidation report for activity relationship evaluation.",
+      "isRead": false,
+      "type": "info",
+      "timestamp": "2026-09-20T06:33:27.054Z",
+      "targetRole": "HR Officer"
+    },
+    {
+      "id": "notif-1789899577344",
+      "title": "Liquidation Report Submitted",
+      "message": "Francisco F. Balagtas submitted a liquidation report for activity relationship evaluation.",
+      "isRead": false,
+      "type": "info",
+      "timestamp": "2026-09-20T10:19:37.344Z",
+      "targetRole": "HR Officer"
     }
   ],
   "activities": [],
@@ -1904,7 +2550,7 @@
       "status": "Completed",
       "dateSubmitted": "2026-09-16T03:47:54.234Z",
       "financeStatus": "Validated & Approved",
-      "divisionChiefStatus": "Bypassed (Auto-Approved by Finance)",
+      "divisionChiefStatus": "Certified by Authorized Representative",
       "hrStatus": "Verified & Forwarded",
       "hrRemarks": "Bulk HR Verify",
       "hrVerifiedBy": "Maria Clara V. Santos",
@@ -1912,9 +2558,11 @@
       "financeRemarks": "Financial documentations validated & finalized.",
       "financeValidatedBy": "Juan dela Cruz",
       "financeValidatedAt": "2026-09-16T03:50:14.263Z",
-      "divisionChiefRemarks": "Validation finalized at Finance level.",
-      "divisionChiefApprovedBy": "System",
-      "divisionChiefApprovedAt": "2026-09-16T03:50:14.263Z"
+      "divisionChiefRemarks": "Certified by the Financial Officer under delegated authority.",
+      "divisionChiefApprovedBy": "Juan dela Cruz",
+      "divisionChiefApprovedAt": "2026-09-16T03:50:14.263Z",
+      "allocatedAtFiling": 15000,
+      "activityTitle": "Seminar - Sabee"
     }
   ],
   "activityBudgetLinks": [
@@ -2544,7 +3192,11 @@
         "Accommodation": 20,
         "Materials": 10
       },
-      "createdAt": "2026-09-16T03:46:42.603Z"
+      "createdAt": "2026-09-16T03:46:42.603Z",
+      "seriesId": "tp-1789530402603",
+      "fulfillsNeedTitles": [
+        "Sep test"
+      ]
     },
     {
       "id": "tp-1789755275182",
@@ -2599,6 +3251,44 @@
       "dateIncurred": "2026-09-16",
       "submittedBy": "HSAC-9123697",
       "status": "Approved"
+    }
+  ],
+  "trainingNeeds": [
+    {
+      "id": "need-1789792876570-85453",
+      "employeeId": "emp-1789530028402",
+      "fiscalYear": "2026",
+      "category": "Function",
+      "title": "Sep test",
+      "createdAt": "2026-09-19T04:41:16.570Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1789796158998-58786",
+      "employeeId": "emp-1789530028402",
+      "fiscalYear": "2026",
+      "category": "Function",
+      "title": "SEP TEST2",
+      "createdAt": "2026-09-19T05:35:58.998Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1789829606239-84082",
+      "employeeId": "emp-6",
+      "fiscalYear": "2026",
+      "category": "Function",
+      "title": "Legal Ethics",
+      "createdAt": "2026-09-19T14:53:26.239Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1789829625740-91145",
+      "employeeId": "emp-6",
+      "fiscalYear": "2026",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-09-19T14:53:45.740Z",
+      "createdBy": "hr"
     }
   ]
 }

@@ -31,4 +31,39 @@
   background: #94a3b8;
 }
 
+/* --- COA Liquidation Report printing ---
+   LiquidationReportModal renders through a React portal into <body> as #lr-print-portal
+   and adds `.lr-printing` to <body> while it is open. Printing then hides every other
+   direct child of <body> (the app root included), so both Ctrl+P and the modal's Print
+   button produce the bare form with no sidebar, page header or modal chrome. Scoped to
+   the `.lr-printing` class so the existing PDS print view is untouched. */
+@media print {
+  body.lr-printing {
+    background: #fff;
+  }
+
+  body.lr-printing > *:not(#lr-print-portal) {
+    display: none !important;
+  }
+
+  body.lr-printing #lr-print-portal {
+    display: block !important;
+    position: static !important;
+  }
+
+  /* Keep the form's rules and shaded header cells on paper. */
+  body.lr-printing #lr-print-root {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.lr-printing #lr-print-root table {
+    page-break-inside: auto;
+  }
+
+  body.lr-printing #lr-print-root tr {
+    page-break-inside: avoid;
+  }
+}
+
 

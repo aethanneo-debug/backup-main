@@ -48,8 +48,18 @@ import {
   TrainingLiquidationExpense,
   TrainingBudgetSplit,
   TrainingCandidate,
+  TrainingNeed,
+  TrainingNeedCategory,
+  TrainingNeedStatus,
+  TrainingNeedRow,
+  TrainingNeedCatalogItem,
+  TrainingPlanEmployee,
+  TrainingPlanOffice,
+  TRAINING_NEED_CATEGORIES,
   SpendingCategory,
-  SPENDING_CATEGORIES
+  SPENDING_CATEGORIES,
+  TrainingExpenseCategory,
+  TRAINING_EXPENSE_CATEGORIES
 } from "./src/types";
 
 const app = express();
@@ -87,6 +97,7 @@ interface DBStructure {
   trainingPrograms: TrainingProgram[];
   trainingParticipants: TrainingParticipant[];
   trainingLiquidations: TrainingLiquidationExpense[];
+  trainingNeeds: TrainingNeed[];
 }
 
 // Check and seed DB on server launch
@@ -414,6 +425,51 @@ function getInitialData(): DBStructure {
       }
       if (!loaded.trainingLiquidations) {
         loaded.trainingLiquidations = [];
+        changed = true;
+      }
+      if (!loaded.trainingNeeds) {
+        loaded.trainingNeeds = [];
+        changed = true;
+      }
+
+      // Records finalised before the wording change recorded the Financial Officer's
+      // delegated certification of box B as "Bypassed (Auto-Approved by Finance)" signed
+      // by "System" — which reads as a skipped approval rather than the documented RAB 1
+      // business rule it is. Re-attribute them to the officer who actually validated.
+      for (const sub of (loaded.liquidationSubmissions || [])) {
+        if (sub.divisionChiefStatus === "Bypassed (Auto-Approved by Finance)") {
+          sub.divisionChiefStatus = "Certified by Authorized Representative";
+          if (!sub.divisionChiefApprovedBy || sub.divisionChiefApprovedBy === "System") {
+            sub.divisionChiefApprovedBy = sub.financeValidatedBy || "Financial Officer";
+          }
+          if (sub.divisionChiefRemarks === "Validation finalized at Finance level.") {
+            sub.divisionChiefRemarks = "Certified by the Financial Officer under delegated authority.";
+          }
+          changed = true;
+        }
+      }
+
+      // Backfill HR's allocated figure and a readable activity label onto reports filed
+      // before they were stamped, so Finance's queue can flag a stated advance that
+      // disagrees with HR's record on existing data too, not only on new submissions.
+      for (const sub of (loaded.liquidationSubmissions || [])) {
+        if (sub.allocatedAtFiling !== undefined && sub.activityTitle) continue;
+        const participant = (loaded.trainingParticipants || []).find((p: any) => p.id === sub.activityId);
+        const activity = (loaded.activities || []).find((a: any) => a.id === sub.activityId);
+        let allocated: number | undefined;
+        let title = "";
+        if (participant) {
+          const prog = (loaded.trainingPrograms || []).find((tp: any) => tp.id === participant.trainingProgramId);
+          const name = String(prog?.title || "").trim();
+          allocated = Math.round((Number(participant.allowanceAllocated || 0)) * 100) / 100;
+          title = name ? `Seminar - ${name}` : "Seminar";
+        } else if (activity) {
+          allocated = Math.round((Number(activity.allottedBudget || 0)) * 100) / 100;
+          title = [activity.activityNo, activity.title].filter(Boolean).join(" - ") || "Activity";
+        }
+        if (allocated === undefined) continue; // unresolvable id — leave it unset
+        if (sub.allocatedAtFiling === undefined) sub.allocatedAtFiling = allocated;
+        if (!sub.activityTitle) sub.activityTitle = title;
         changed = true;
       }
 
@@ -892,7 +948,8 @@ function getInitialData(): DBStructure {
     ],
     trainingPrograms: [],
     trainingParticipants: [],
-    trainingLiquidations: []
+    trainingLiquidations: [],
+    trainingNeeds: []
   };
 
   // Write initial setup
@@ -3275,29 +3332,197 @@ app.get("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   res.json({ status: "success", data: db.liquidationSubmissions });
 });
 
+// A liquidation's `activityId` may reference either a TDP enrolment or a general
+// activity. Whichever it resolves to must belong to the caller: without this an employee
+// could file against someone else's assignment, and Finance validation (see
+// /finance-action) would then flip that person's record to "Liquidated" and charge their
+// programme's budget. Returns null when the id matches neither collection, so an
+// unrecognised reference keeps its previous behaviour rather than breaking a flow.
+function liquidationActivityOwnedByUser(activityId: string, user: any): boolean | null {
+  const participant = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
+  if (participant) {
+    return employeeIdForms(participant.employeeId).includes(user.employeeId);
+  }
+
+  const activity = (db.activities || []).find((a: any) => a.id === activityId);
+  if (activity) {
+    // Activity.assignedEmployeeId holds an employee id OR a full name (src/types.ts),
+    // so accept either form rather than rejecting a legitimately assigned employee.
+    const assigned = String(activity.assignedEmployeeId || "").trim();
+    if (!assigned) return null;
+    return employeeIdForms(assigned).includes(user.employeeId)
+      || assigned.toLowerCase() === String(user.fullName || "").trim().toLowerCase();
+  }
+
+  return null;
+}
+
+// --- COA Liquidation Report support ---
+
+// Constant header values for RAB 1. Kept here rather than typed per submission.
+const LR_ENTITY_NAME = "HSAC-RAB I";
+const LR_FUND_CLUSTER = "01 - Regular Fund";
+// TODO(HSAC): confirm what "101" denotes on the printed serial — office code or
+// responsibility centre. Isolated here so it is one edit when we find out.
+const LR_SERIAL_PREFIX = "LR-101";
+
+// PHP: round at the boundary so ledger totals never drift.
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+// Normalises the PARTICULARS block. Returns null when the payload carries no usable
+// lines, so an older client sending only `totalSpent` keeps working unchanged.
+function normalizeParticulars(raw: any): { particulars: any[]; total: number; error?: string } | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const particulars: any[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const p = raw[i] || {};
+    const description = String(p.description || "").trim();
+    const amount = round2(Number(p.amount));
+    if (!description && !amount) continue; // blank row the user never filled in
+    if (!description) {
+      return { particulars: [], total: 0, error: `Particular ${i + 1} needs a description.` };
+    }
+    if (!isFinite(amount) || amount < 0) {
+      return { particulars: [], total: 0, error: `"${description}" needs an amount of zero or more.` };
+    }
+    // An unrecognised or missing bucket falls back rather than failing the whole
+    // report — the claimant's money is not held up by a bad dropdown value.
+    const category: TrainingExpenseCategory =
+      TRAINING_EXPENSE_CATEGORIES.includes(p.category) ? p.category : "Miscellaneous";
+    particulars.push({ id: String(p.id || `lp-${Date.now()}-${i}`), description, amount, category });
+  }
+  if (particulars.length === 0) return null;
+  return { particulars, total: round2(particulars.reduce((s, p) => s + p.amount, 0)) };
+}
+
+// What HR actually set aside for this assignment, plus a human label. Read from the
+// office's own records at filing time, never from the request body, so Finance can
+// compare it against what the claimant says they received — without being handed access
+// to the HR training tables. Returns null when the id resolves to nothing, so the caller
+// can leave the figure unset rather than assert a false zero.
+function liquidationActivityFacts(activityId: string): { allocated: number; title: string } | null {
+  const participant = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
+  if (participant) {
+    const prog = (db.trainingPrograms || []).find((tp: any) => tp.id === participant.trainingProgramId);
+    const name = String(prog?.title || "").trim();
+    return {
+      allocated: round2(Number(participant.allowanceAllocated || 0)),
+      title: name ? `Seminar - ${name}` : "Seminar"
+    };
+  }
+
+  const activity = (db.activities || []).find((a: any) => a.id === activityId);
+  if (activity) {
+    return {
+      allocated: round2(Number(activity.allottedBudget || 0)),
+      title: [activity.activityNo, activity.title].filter(Boolean).join(" - ") || "Activity"
+    };
+  }
+
+  return null;
+}
+
+// Serial number for the printed report, e.g. "LR-101-2026-09-024". Numbering restarts
+// each month, following the sample form.
+function nextLiquidationSerialNo(when: Date): string {
+  const scope = `${LR_SERIAL_PREFIX}-${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-`;
+  const used = (db.liquidationSubmissions || [])
+    .map((s: any) => String(s.serialNo || ""))
+    .filter((s: string) => s.startsWith(scope))
+    .map((s: string) => Number(s.slice(scope.length)) || 0);
+  return `${scope}${String((used.length ? Math.max(...used) : 0) + 1).padStart(3, "0")}`;
+}
+
 app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   const { employeeId, fullName } = req.user;
-  const { activityId, totalReleased, totalSpent, remarks, supportingDocs } = req.body;
-  if (!activityId || !totalReleased) {
-    return res.status(400).json({ status: "error", message: "Please compile activity reference and budget disbursement values" });
+  const {
+    activityId, totalReleased, totalSpent, remarks, supportingDocs, particulars,
+    periodCoveredFrom, periodCoveredTo, responsibilityCenterCode,
+    cashAdvanceDvNo, cashAdvanceDvDate, refundOrNo, refundOrDate
+  } = req.body;
+  if (!activityId) {
+    return res.status(400).json({ status: "error", message: "Please choose the activity this report settles." });
+  }
+  // A cash advance of zero is legitimate: an employee assigned to a seminar who never
+  // received the advance pays out of pocket, and this report is how they claim it back.
+  // Only a missing or negative figure is rejected.
+  const releasedRaw = Number(totalReleased);
+  if (totalReleased === undefined || totalReleased === null || totalReleased === "" || !isFinite(releasedRaw) || releasedRaw < 0) {
+    return res.status(400).json({ status: "error", message: "Enter the cash advance you actually received — enter 0 if you received none." });
+  }
+
+  const lines = normalizeParticulars(particulars);
+  if (lines && lines.error) {
+    return res.status(400).json({ status: "error", message: lines.error });
+  }
+  if (!lines && !(Number(totalSpent) > 0)) {
+    return res.status(400).json({ status: "error", message: "Add at least one particular describing what was spent." });
+  }
+
+  // Mirrors the ownership checks already in liquidate_activity and /resubmit.
+  if ((req as any).user.role !== UserRole.SUPER_ADMIN
+      && liquidationActivityOwnedByUser(activityId, req.user) === false) {
+    return res.status(403).json({ status: "error", message: "You can only liquidate your own assigned activity." });
   }
 
   const subNo = `LIQSUB-2026-0${db.liquidationSubmissions.length + 1}`;
+  const now = new Date();
+  const facts = liquidationActivityFacts(activityId);
+  const released = round2(Number(totalReleased));
+  // When the report is itemised, the total is the sum of the lines — never a separately
+  // typed figure that could disagree with them.
+  const spent = lines ? lines.total : round2(Number(totalSpent || 0));
   const newSub = {
     id: `liqsub-${Date.now()}`,
     submissionNo: subNo,
     activityId,
     employeeId,
     employeeName: fullName,
-    totalReleased: Number(totalReleased),
-    totalSpent: Number(totalSpent || 0),
-    remainingBalance: Number(totalReleased) - Number(totalSpent || 0),
+    totalReleased: released,
+    totalSpent: spent,
+    remainingBalance: round2(released - spent),
     remarks: remarks || "",
     supportingDocs: supportingDocs || [],
+
+    // COA Liquidation Report fields. A positive remainingBalance is the form's
+    // "Amount Refunded"; a negative one is "Amount to be Reimbursed" — the split is
+    // presentational, so only the one stored figure is kept.
+    particulars: lines ? lines.particulars : [],
+    serialNo: nextLiquidationSerialNo(now),
+    entityName: LR_ENTITY_NAME,
+    fundCluster: LR_FUND_CLUSTER,
+    periodCoveredFrom: periodCoveredFrom || "",
+    periodCoveredTo: periodCoveredTo || "",
+    responsibilityCenterCode: responsibilityCenterCode || "",
+    cashAdvanceDvNo: cashAdvanceDvNo || "",
+    cashAdvanceDvDate: cashAdvanceDvDate || "",
+    refundOrNo: refundOrNo || "",
+    refundOrDate: refundOrDate || "",
+    jevNo: "",
+
+    // Spending more than was received makes this a claim for the difference. Derived, so
+    // it can never disagree with the figures above.
+    reimbursementAmount: round2(Math.max(0, spent - released)),
+    reimbursementStatus: spent > released ? "Awaiting Reimbursement" : "Not Required",
+    reimbursementDvNo: "",
+    reimbursementDate: "",
+    reimbursedBy: "",
+
+    // HR's own figure, so Finance can see a stated advance that disagrees with it.
+    ...(facts ? { allocatedAtFiling: facts.allocated, activityTitle: facts.title } : {}),
+
     status: "Pending HR Review",
+    createdAt: new Date().toISOString(),
     dateSubmitted: new Date().toISOString(),
-    financeStatus: "Pending Audit",
-    divisionChiefStatus: "Pending Concurrence"
+    // Use the vocabulary the rest of the workflow already speaks (see /resubmit below).
+    // These previously started as "Pending Audit" / "Pending Concurrence" — values no
+    // other route and no type in src/types.ts ever recognised — and hrStatus was never
+    // set at all, leaving a required field undefined on every new submission.
+    hrStatus: "Pending Review",
+    financeStatus: "Pending Validation",
+    divisionChiefStatus: "Pending Chief Approval"
   };
 
   db.liquidationSubmissions.push(newSub);
@@ -3362,7 +3587,11 @@ app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
 
 app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const { totalSpent, remarks, supportingDocs } = req.body;
+  const {
+    totalSpent, remarks, supportingDocs, particulars,
+    periodCoveredFrom, periodCoveredTo, responsibilityCenterCode,
+    cashAdvanceDvNo, cashAdvanceDvDate, refundOrNo, refundOrDate
+  } = req.body;
 
   const sub = db.liquidationSubmissions.find(l => l.id === id);
   if (!sub) {
@@ -3373,10 +3602,36 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
     return res.status(403).json({ status: "error", message: "Forbidden: You cannot resubmit this report details." });
   }
 
-  // Update details
-  sub.totalSpent = Number(totalSpent || 0);
-  sub.remainingBalance = sub.totalReleased - sub.totalSpent;
+  const lines = normalizeParticulars(particulars);
+  if (lines && lines.error) {
+    return res.status(400).json({ status: "error", message: lines.error });
+  }
+
+  // Update details. An itemised correction recomputes the total from its lines; a
+  // submission that was never itemised keeps accepting a plain typed figure.
+  if (lines) sub.particulars = lines.particulars;
+  sub.totalSpent = lines ? lines.total : round2(Number(totalSpent || 0));
+  sub.remainingBalance = round2(sub.totalReleased - sub.totalSpent);
   sub.remarks = remarks || sub.remarks;
+
+  // A correction can turn a settled report into a claim, or the reverse. Never downgrade
+  // one already paid — that would silently reopen money the office has handed over.
+  if (sub.reimbursementStatus !== "Reimbursed") {
+    sub.reimbursementAmount = round2(Math.max(0, sub.totalSpent - sub.totalReleased));
+    sub.reimbursementStatus = sub.totalSpent > sub.totalReleased ? "Awaiting Reimbursement" : "Not Required";
+  }
+
+  // Header fields are only overwritten when the correction actually supplies them.
+  if (periodCoveredFrom !== undefined) sub.periodCoveredFrom = periodCoveredFrom;
+  if (periodCoveredTo !== undefined) sub.periodCoveredTo = periodCoveredTo;
+  if (responsibilityCenterCode !== undefined) sub.responsibilityCenterCode = responsibilityCenterCode;
+  if (cashAdvanceDvNo !== undefined) sub.cashAdvanceDvNo = cashAdvanceDvNo;
+  if (cashAdvanceDvDate !== undefined) sub.cashAdvanceDvDate = cashAdvanceDvDate;
+  if (refundOrNo !== undefined) sub.refundOrNo = refundOrNo;
+  if (refundOrDate !== undefined) sub.refundOrDate = refundOrDate;
+  if (!sub.serialNo) sub.serialNo = nextLiquidationSerialNo(new Date());
+  if (!sub.entityName) sub.entityName = LR_ENTITY_NAME;
+  if (!sub.fundCluster) sub.fundCluster = LR_FUND_CLUSTER;
   
   if (supportingDocs && supportingDocs.length > 0) {
     // Append unique documents to keep version history
@@ -3478,10 +3733,14 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
     sub.financeValidatedBy = (req as any).user.fullName;
     sub.financeValidatedAt = new Date().toISOString();
     
-    // Bypass Chief - Finalize Record
-    sub.divisionChiefStatus = "Bypassed (Auto-Approved by Finance)";
-    sub.divisionChiefRemarks = "Validation finalized at Finance level.";
-    sub.divisionChiefApprovedBy = "System";
+    // HSAC RAB 1 delegates box B of the COA Liquidation Report ("Head of Agency /
+    // Authorized Representative") to the Financial Officer. This is a documented business
+    // rule from the stakeholder interview — the Chief's approval is not skipped, it is
+    // signed by the authorised representative the form itself provides for. Record who
+    // certified it: box B is a signature line, and "System" cannot sign one.
+    sub.divisionChiefStatus = "Certified by Authorized Representative";
+    sub.divisionChiefRemarks = "Certified by the Financial Officer under delegated authority.";
+    sub.divisionChiefApprovedBy = (req as any).user.fullName;
     sub.divisionChiefApprovedAt = new Date().toISOString();
     sub.status = "Completed";
 
@@ -3489,16 +3748,31 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
     const tPart = db.trainingParticipants.find(p => p.id === sub.activityId);
     if (tPart) {
       tPart.status = "Liquidated";
-      // Ensure the training liquidation is also logged in training liquidations
-      db.trainingLiquidations.push({
-        id: `tliq-${Date.now()}`,
-        trainingProgramId: tPart.trainingProgramId,
-        expenseCategory: "Miscellaneous",
-        description: sub.remarks || "Employee submitted liquidation",
-        amount: sub.totalSpent,
-        dateIncurred: new Date().toISOString().split("T")[0],
-        submittedBy: sub.employeeId,
-        status: "Approved"
+      // Mirror the approved report into the training ledger. An itemised report copies
+      // one row per PARTICULARS line so HR's breakdown shows what was actually bought;
+      // a report with no line items still collapses to a single row, as before.
+      const dateIncurred = new Date().toISOString().split("T")[0];
+      const ledgerLines = (sub.particulars && sub.particulars.length > 0)
+        ? sub.particulars.map((p: any) => ({
+            description: p.description,
+            amount: p.amount,
+            category: TRAINING_EXPENSE_CATEGORIES.includes(p.category) ? p.category : "Miscellaneous"
+          }))
+        : [{ description: sub.remarks || "Employee submitted liquidation", amount: sub.totalSpent, category: "Miscellaneous" }];
+
+      ledgerLines.forEach((line: any, i: number) => {
+        db.trainingLiquidations.push({
+          id: `tliq-${Date.now()}-${i}`,
+          trainingProgramId: tPart.trainingProgramId,
+          trainingParticipantId: tPart.id,
+          employeeId: sub.employeeId,
+          expenseCategory: line.category,
+          description: line.description,
+          amount: line.amount,
+          dateIncurred,
+          submittedBy: sub.employeeId,
+          status: "Approved"
+        });
       });
       
       // Update the usedBudget in trainingPrograms
@@ -3550,16 +3824,35 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
     });
 
     if (!db.notifications) db.notifications = [];
+    const owed = Number(sub.reimbursementAmount || 0);
+    const claimPending = owed > 0 && sub.reimbursementStatus !== "Reimbursed";
+
     db.notifications.push({
       id: `notif-${Date.now()}`,
       title: "Liquidation APPROVED & FINALIZED",
-      message: `Your liquidation report ${sub.submissionNo} has been validated and finalized by Finance.`,
+      message: claimPending
+        ? `Your liquidation report ${sub.submissionNo} has been validated. You spent ₱${owed.toFixed(2)} of your own money — Finance will reimburse you.`
+        : `Your liquidation report ${sub.submissionNo} has been validated and finalized by Finance.`,
       isRead: false,
       type: "success",
       timestamp: new Date().toISOString(),
       targetRole: UserRole.EMPLOYEE,
       targetEmployeeId: sub.employeeId
     });
+
+    // The claimant is out of pocket until someone actually releases the money, so put it
+    // in front of Finance rather than quietly closing the record.
+    if (claimPending) {
+      db.notifications.push({
+        id: `notif-${Date.now()}-reimb`,
+        title: "Reimbursement due",
+        message: `${sub.employeeName} is owed ₱${owed.toFixed(2)} for ${sub.submissionNo}. Record the payment once the DV is released.`,
+        isRead: false,
+        type: "warning",
+        timestamp: new Date().toISOString(),
+        targetRole: UserRole.FINANCE_OFFICER
+      });
+    }
   } else {
     sub.financeStatus = "Returned by Finance";
     sub.financeRemarks = remarks || "Receipt vouchers incomplete; returned for clarification.";
@@ -3579,6 +3872,51 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
   }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}`);
+  saveDB();
+  res.json({ status: "success", data: sub });
+});
+
+// Closes the loop on an out-of-pocket claim: the employee fronted the money, and this
+// records the disbursement voucher that paid them back. Until this runs, the claimant is
+// still owed — which is why finance-action leaves the report "Awaiting Reimbursement"
+// instead of treating validation as the end of the story.
+app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateToken, (req: any, res) => {
+  if ((req as any).user.role !== UserRole.FINANCE_OFFICER && (req as any).user.role !== UserRole.SUPER_ADMIN) {
+    return res.status(403).json({ status: "error", message: "Only the Financial Officer can record a reimbursement." });
+  }
+
+  const { dvNo, date } = req.body;
+  const sub = db.liquidationSubmissions.find(l => l.id === req.params.id);
+  if (!sub) return res.status(404).json({ status: "error", message: "Submission records not found" });
+
+  const owed = round2(Number(sub.reimbursementAmount || 0));
+  if (owed <= 0) {
+    return res.status(400).json({ status: "error", message: "This report has nothing to reimburse." });
+  }
+  if (sub.reimbursementStatus === "Reimbursed") {
+    return res.status(400).json({ status: "error", message: `Already reimbursed on ${sub.reimbursementDate} via DV ${sub.reimbursementDvNo}.` });
+  }
+  if (sub.status !== "Completed") {
+    return res.status(400).json({ status: "error", message: "Validate the liquidation report before releasing a reimbursement." });
+  }
+  if (!String(dvNo || "").trim() || !isIsoDate(date)) {
+    return res.status(400).json({ status: "error", message: "A disbursement voucher number and a payment date are required." });
+  }
+
+  sub.reimbursementStatus = "Reimbursed";
+  sub.reimbursementDvNo = String(dvNo).trim();
+  sub.reimbursementDate = date;
+  sub.reimbursedBy = (req as any).user.fullName;
+
+  notifyEmployee(sub.employeeId, {
+    title: "Reimbursement released",
+    message: `₱${owed.toFixed(2)} for ${sub.submissionNo} was released on DV ${sub.reimbursementDvNo} dated ${formatLongDate(sub.reimbursementDate)}.`,
+    type: "success",
+    dedupeKey: `reimbursed:${sub.id}`
+  });
+
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Record Reimbursement",
+    `Reimbursed PHP ${owed.toFixed(2)} to ${sub.employeeName} for ${sub.submissionNo} via DV ${sub.reimbursementDvNo}`);
   saveDB();
   res.json({ status: "success", data: sub });
 });
@@ -3732,7 +4070,36 @@ type SeminarRef = {
   targetDivision?: string;
   targetSpecialization?: string;
   maxParticipants?: number;
+  // Plan A entries this seminar covers, as ticked by HR.
+  fulfillsNeedTitles?: string[];
 };
+
+// Cleans whatever the client sent into a stored list of covered plan needs:
+// trimmed, blank-free, deduped by normalised title, and capped.
+function normalizeFulfillsNeedTitles(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    const title = String(entry ?? "").trim().slice(0, 300);
+    const key = normalizeTitle(title);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(title);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+// Which of this employee's own Plan A entries the seminar covers.
+function employeeNeedMatches(employeeId: string, program: SeminarRef): string[] {
+  const covered = (program.fulfillsNeedTitles || []).map(normalizeTitle).filter(Boolean);
+  if (covered.length === 0) return [];
+  const forms = employeeIdForms(employeeId);
+  return (db.trainingNeeds || [])
+    .filter(n => forms.includes(n.employeeId) && n.fiscalYear === program.fiscalYear && covered.includes(normalizeTitle(n.title)))
+    .map(n => n.title);
+}
 
 // "Today" as a calendar date in the Philippines (UTC+8, no DST), so deadlines flip
 // at local midnight instead of 8 AM.
@@ -3859,7 +4226,10 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
       const newHire = months !== null && months >= 0 && months < NEW_HIRE_MONTHS;
       const history = hasTdpHistory(emp.id, program.id);
       const priority: 1 | 2 | 3 = newHire ? 1 : !history ? 2 : 3;
+      const needMatches = employeeNeedMatches(emp.id, program);
       return {
+        needsThis: needMatches.length > 0,
+        needMatches,
         employeeId: emp.id,
         fullName: emp.fullName,
         position: emp.position || "",
@@ -3875,8 +4245,11 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
       };
     });
 
+  // The plan listing this training is the strongest reason for a seat, so it
+  // outranks the new-hire preference — which still decides among those who need it.
   candidates.sort((a, b) =>
     Number(b.eligible) - Number(a.eligible) ||
+    Number(b.needsThis) - Number(a.needsThis) ||
     a.priority - b.priority ||
     Number(b.matchesTarget) - Number(a.matchesTarget) ||
     b.dateHired.localeCompare(a.dateHired) ||
@@ -3885,6 +4258,134 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
   const seats = Math.max(0, Number(program.maxParticipants) || 0);
   const recommendedIds = candidates.filter(c => c.eligible).slice(0, seats).map(c => c.employeeId);
   return { candidates, recommendedIds };
+}
+
+// --- OFFICIAL TDP: PLAN A (NEEDED TRAINING) & PLAN D (MONITORING) ---
+
+// Accepts "YYYY-MM-DD" and the "MM/DD/YYYY" the PDS parser produces.
+function toIsoDateLoose(value: any): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const v = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : null;
+}
+
+// The plan's wording is usually longer than a seminar title ("Legal Research" vs
+// "Legal Research Seminar"), so containment counts — but only for strings long
+// enough that it cannot fire on an abbreviation.
+function titlesMatch(a: string, b: string): boolean {
+  const x = normalizeTitle(a);
+  const y = normalizeTitle(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  return x.length >= 6 && y.length >= 6 && (x.includes(y) || y.includes(x));
+}
+
+// Undated evidence still counts; only clearly later evidence is excluded.
+function onOrBeforeAsOf(dateStr: string | null, asOf: string): boolean {
+  return !dateStr || daysBetween(dateStr, asOf) >= 0;
+}
+
+// Plan D: did this employee already take the training they were listed as needing?
+function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatus {
+  if (typeof need.accomplishedOverride === "boolean") {
+    return { accomplished: need.accomplishedOverride, source: "override" };
+  }
+  const forms = employeeIdForms(need.employeeId);
+  const needKey = normalizeTitle(need.title);
+
+  // 1. A seminar HR explicitly linked to this need — exact, no title guessing.
+  for (const p of db.trainingParticipants || []) {
+    if (!forms.includes(p.employeeId)) continue;
+    if (p.status !== "Liquidated" && p.status !== "Liquidation Pending" && p.status !== "Completed") continue;
+    const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
+    if (!prog || !(prog.fulfillsNeedTitles || []).some(t => normalizeTitle(t) === needKey)) continue;
+    const when = toIsoDateLoose(prog.endDate);
+    if (!onOrBeforeAsOf(when, asOf)) continue;
+    return {
+      accomplished: true,
+      source: "seminar",
+      evidence: `${prog.title} (FY ${prog.fiscalYear}) — linked to this need`,
+      date: when || undefined
+    };
+  }
+
+  // 2. A seminar whose title matches, for seminars created before the link existed.
+  for (const p of db.trainingParticipants || []) {
+    if (!forms.includes(p.employeeId)) continue;
+    if (p.status !== "Liquidated" && p.status !== "Liquidation Pending" && p.status !== "Completed") continue;
+    const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
+    if (!prog || !titlesMatch(need.title, prog.title)) continue;
+    const when = toIsoDateLoose(prog.endDate);
+    if (!onOrBeforeAsOf(when, asOf)) continue;
+    return { accomplished: true, source: "seminar", evidence: `${prog.title} (FY ${prog.fiscalYear})`, date: when || undefined };
+  }
+
+  // 3. HR's certificate-backed training ledger.
+  for (const t of db.trainings || []) {
+    if (!forms.includes(t.employeeId) || t.status === "Rejected") continue;
+    if (!titlesMatch(need.title, t.title)) continue;
+    const when = toIsoDateLoose(t.dateConducted);
+    if (!onOrBeforeAsOf(when, asOf)) continue;
+    return { accomplished: true, source: "recorded-training", evidence: t.title, date: when || undefined };
+  }
+
+  // 4. The L&D history parsed from the uploaded PDS (those rows key on the business id).
+  const pdsRecord: any = (db.pds || []).find((r: any) => forms.includes(r.employeeId));
+  for (const t of (pdsRecord?.trainings || [])) {
+    if (!titlesMatch(need.title, t?.title || "")) continue;
+    const when = toIsoDateLoose(t?.dateTo || t?.dateFrom);
+    if (!onOrBeforeAsOf(when, asOf)) continue;
+    return { accomplished: true, source: "pds", evidence: t.title, date: when || undefined };
+  }
+
+  return { accomplished: false, source: null };
+}
+
+// Office headings as the workbook prints them; any other division follows these.
+const TDP_OFFICE_ORDER = ["OFFICE OF THE CHIEF REGIONAL ADJUDICATOR", "LEGAL DIVISION", "ADMINISTRATIVE & FINANCE DIVISION"];
+
+function officeHeading(division?: string): string {
+  const d = (division || "").trim();
+  return d ? d.toUpperCase().replace(/\bAND\b/g, "&") : "UNASSIGNED";
+}
+
+// The whole plan, grouped like the form: every active employee appears, even with
+// no needs listed yet.
+function buildTrainingPlan(fiscalYear: string, asOf: string): TrainingPlanOffice[] {
+  const byOffice = new Map<string, TrainingPlanEmployee[]>();
+
+  for (const emp of (db.employees || []).filter(e => e.isActive !== false)) {
+    const forms = [emp.id, emp.employeeId].filter(Boolean);
+    const needs = { "Function": [], "Additional Function": [], "Career Advancement": [] } as Record<TrainingNeedCategory, TrainingNeedRow[]>;
+    for (const n of db.trainingNeeds || []) {
+      if (n.fiscalYear !== fiscalYear || !forms.includes(n.employeeId)) continue;
+      if (!needs[n.category]) continue;
+      needs[n.category].push({ ...n, status: needAccomplishment(n, asOf) });
+    }
+    for (const c of TRAINING_NEED_CATEGORIES) {
+      needs[c].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    }
+    const heading = officeHeading(emp.division);
+    if (!byOffice.has(heading)) byOffice.set(heading, []);
+    byOffice.get(heading)!.push({
+      employeeId: emp.id,
+      fullName: emp.fullName,
+      position: emp.position || "",
+      division: emp.division || "",
+      needs
+    });
+  }
+
+  return [...byOffice.entries()]
+    .map(([office, employees]) => ({ office, employees: employees.sort((a, b) => a.fullName.localeCompare(b.fullName)) }))
+    .sort((a, b) => {
+      const ai = TDP_OFFICE_ORDER.indexOf(a.office);
+      const bi = TDP_OFFICE_ORDER.indexOf(b.office);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      return a.office.localeCompare(b.office);
+    });
 }
 
 let smtpSkipWarned = false;
@@ -4303,9 +4804,144 @@ app.get("/api/training/recommendations", authenticateToken, (req: any, res: any)
     fiscalYear: (typeof q.fiscalYear === "string" && q.fiscalYear) || stored?.fiscalYear || activeFy?.label || "",
     targetDivision: typeof q.targetDivision === "string" ? q.targetDivision : stored?.targetDivision,
     targetSpecialization: typeof q.targetSpecialization === "string" ? q.targetSpecialization : stored?.targetSpecialization,
-    maxParticipants: q.maxParticipants !== undefined ? (parseInt(q.maxParticipants) || 0) : stored?.maxParticipants
+    maxParticipants: q.maxParticipants !== undefined ? (parseInt(q.maxParticipants) || 0) : stored?.maxParticipants,
+    // Repeatable ?needTitle= lets an unsaved draft row rank correctly before it is saved.
+    fulfillsNeedTitles: q.needTitle !== undefined
+      ? normalizeFulfillsNeedTitles(Array.isArray(q.needTitle) ? q.needTitle : [q.needTitle])
+      : stored?.fulfillsNeedTitles
   };
   res.json({ status: "success", data: rankTrainingCandidates(program) });
+});
+
+// --- OFFICIAL TDP PLAN A / PLAN D ---
+// HR owns these records, so the whole group is HR + Admin only.
+function requireTrainingPlanRole(req: any, res: any): boolean {
+  if (!isTrainingRecordsRole(req.user.role)) {
+    res.status(403).json({ status: "error", message: "The Training and Development Plan is restricted to HR." });
+    return false;
+  }
+  return true;
+}
+
+function activeFiscalYearLabel(): string {
+  const fy = (db.fiscalYears || []).find((f: any) => f.status === "Active");
+  return fy?.label || String(new Date().getFullYear());
+}
+
+// The distinct needed trainings in a year's plan — what HR ticks when saying which
+// of them a seminar covers.
+app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();
+
+  const byTitle = new Map<string, { title: string; employees: Set<string>; categories: Set<TrainingNeedCategory> }>();
+  for (const need of db.trainingNeeds || []) {
+    if (need.fiscalYear !== fiscalYear) continue;
+    const key = normalizeTitle(need.title);
+    if (!key) continue;
+    if (!byTitle.has(key)) byTitle.set(key, { title: need.title, employees: new Set(), categories: new Set() });
+    const entry = byTitle.get(key)!;
+    entry.employees.add(employeeIdForms(need.employeeId)[0]);
+    entry.categories.add(need.category);
+  }
+
+  const data: TrainingNeedCatalogItem[] = [...byTitle.values()]
+    .map(e => ({ title: e.title, employeeCount: e.employees.size, categories: [...e.categories] }))
+    .sort((a, b) => b.employeeCount - a.employeeCount || a.title.localeCompare(b.title));
+
+  res.json({ status: "success", data: { fiscalYear, needs: data } });
+});
+
+// Plan A (needs) and Plan D (the same needs, checked off as of a date).
+app.get("/api/training/needs", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();
+  const asOf = toIsoDateLoose(req.query.asOf) || manilaToday();
+  res.json({ status: "success", data: { fiscalYear, asOf, offices: buildTrainingPlan(fiscalYear, asOf) } });
+});
+
+app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const { employeeId, category, title } = req.body || {};
+  const fiscalYear = req.body?.fiscalYear || activeFiscalYearLabel();
+
+  const emp = (db.employees || []).find(e => e.id === employeeId || e.employeeId === employeeId);
+  if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
+  if (!TRAINING_NEED_CATEGORIES.includes(category)) {
+    return res.status(400).json({ status: "error", message: "Category must be Function, Additional Function or Career Advancement." });
+  }
+  const cleanTitle = String(title || "").trim();
+  if (!cleanTitle) return res.status(400).json({ status: "error", message: "Enter the needed training." });
+  if (cleanTitle.length > 300) return res.status(400).json({ status: "error", message: "Keep the needed training under 300 characters." });
+
+  const duplicate = (db.trainingNeeds || []).some(n =>
+    n.fiscalYear === fiscalYear && n.category === category &&
+    employeeIdForms(n.employeeId).includes(emp.id) &&
+    normalizeTitle(n.title) === normalizeTitle(cleanTitle));
+  if (duplicate) {
+    return res.status(400).json({ status: "error", message: `"${cleanTitle}" is already listed for ${emp.fullName} under this column.` });
+  }
+
+  const need: TrainingNeed = {
+    id: `need-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+    employeeId: emp.id,
+    fiscalYear,
+    category,
+    title: cleanTitle,
+    createdAt: new Date().toISOString(),
+    createdBy: req.user.username
+  };
+  if (!db.trainingNeeds) db.trainingNeeds = [];
+  db.trainingNeeds.push(need);
+  logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need",
+    `Added "${cleanTitle}" (${category}) for ${emp.fullName} in the ${fiscalYear} Training and Development Plan.`);
+  saveDB();
+  res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
+});
+
+app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const need = (db.trainingNeeds || []).find(n => n.id === req.params.id);
+  if (!need) return res.status(404).json({ status: "error", message: "Training need not found." });
+
+  const { title, category, remarks, accomplishedOverride } = req.body || {};
+  if (title !== undefined) {
+    const cleanTitle = String(title).trim();
+    if (!cleanTitle) return res.status(400).json({ status: "error", message: "Enter the needed training." });
+    need.title = cleanTitle;
+  }
+  if (category !== undefined) {
+    if (!TRAINING_NEED_CATEGORIES.includes(category)) {
+      return res.status(400).json({ status: "error", message: "Unknown column for this needed training." });
+    }
+    need.category = category;
+  }
+  if (remarks !== undefined) need.remarks = String(remarks).trim() || undefined;
+  // null clears the override and hands the decision back to the evidence.
+  if (accomplishedOverride !== undefined) {
+    if (accomplishedOverride === null) delete need.accomplishedOverride;
+    else if (typeof accomplishedOverride === "boolean") need.accomplishedOverride = accomplishedOverride;
+    else return res.status(400).json({ status: "error", message: "accomplishedOverride must be true, false or null." });
+  }
+
+  const emp = (db.employees || []).find(e => e.id === need.employeeId || e.employeeId === need.employeeId);
+  logEvent(req.user.id, req.user.username, req.user.role, "Update Training Need",
+    `Updated "${need.title}" (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
+  saveDB();
+  res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
+});
+
+app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const index = (db.trainingNeeds || []).findIndex(n => n.id === req.params.id);
+  if (index === -1) return res.status(404).json({ status: "error", message: "Training need not found." });
+
+  const [removed] = db.trainingNeeds.splice(index, 1);
+  const emp = (db.employees || []).find(e => e.id === removed.employeeId || e.employeeId === removed.employeeId);
+  logEvent(req.user.id, req.user.username, req.user.role, "Remove Training Need",
+    `Removed "${removed.title}" (${removed.category}) for ${emp ? emp.fullName : removed.employeeId} from the ${removed.fiscalYear} plan.`);
+  saveDB();
+  res.json({ status: "success", message: "Training need removed." });
 });
 
 app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
@@ -4356,6 +4992,8 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
     targetSpecialization: body.targetSpecialization,
     targetDivision: body.targetDivision,
     budgetSplit: normalizeBudgetSplit(body.budgetSplit),
+    // Which Plan A entries this seminar answers, ticked by HR from the plan.
+    fulfillsNeedTitles: normalizeFulfillsNeedTitles(body.fulfillsNeedTitles),
     createdAt: new Date().toISOString(),
   };
 
@@ -4429,7 +5067,10 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
     maxParticipants: body.maxParticipants !== undefined ? (parseInt(body.maxParticipants) || 1) : existingProgram.maxParticipants,
     targetDivision: body.targetDivision !== undefined ? body.targetDivision : existingProgram.targetDivision,
     targetSpecialization: body.targetSpecialization !== undefined ? body.targetSpecialization : existingProgram.targetSpecialization,
-    budgetSplit: body.budgetSplit !== undefined ? normalizeBudgetSplit(body.budgetSplit) : normalizeBudgetSplit(existingProgram.budgetSplit)
+    budgetSplit: body.budgetSplit !== undefined ? normalizeBudgetSplit(body.budgetSplit) : normalizeBudgetSplit(existingProgram.budgetSplit),
+    fulfillsNeedTitles: body.fulfillsNeedTitles !== undefined
+      ? normalizeFulfillsNeedTitles(body.fulfillsNeedTitles)
+      : existingProgram.fulfillsNeedTitles
   };
 
   let skippedMessages: string[] = [];

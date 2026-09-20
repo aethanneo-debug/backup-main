@@ -12,6 +12,8 @@ export interface PickerProgram {
   targetDivision?: string;
   targetSpecialization?: string;
   maxParticipants: number | string;
+  // Plan A entries this seminar covers; drives the "Needs this" ranking.
+  fulfillsNeedTitles?: string[];
 }
 
 interface Props {
@@ -27,6 +29,11 @@ function CandidateBadges({ c }: { c: TrainingCandidate }) {
   return (
     <span className="flex flex-wrap gap-1">
       {!c.eligible && <span className={`${BADGE} bg-rose-50 text-rose-700 border-rose-200`}>{c.ineligibleReason}</span>}
+      {c.needsThis && (
+        <span className={`${BADGE} bg-emerald-50 text-emerald-800 border-emerald-300`} title={`Listed in their plan: ${c.needMatches.join("; ")}`}>
+          Needs this
+        </span>
+      )}
       {c.priority === 1 && (
         <span className={`${BADGE} bg-emerald-50 text-emerald-700 border-emerald-200`}>
           New hire{c.monthsSinceHire !== null ? ` · ${c.monthsSinceHire < 1 ? "<1" : c.monthsSinceHire} mo` : ""}
@@ -40,6 +47,7 @@ function CandidateBadges({ c }: { c: TrainingCandidate }) {
 
 function optionLabel(c: TrainingCandidate) {
   const extras = [c.division || "No division"];
+  if (c.needsThis) extras.push("listed in their plan");
   if (c.priority === 1 && c.monthsSinceHire !== null) extras.push(`hired ${c.monthsSinceHire < 1 ? "this month" : `${c.monthsSinceHire} mo ago`}`);
   if (c.matchesTarget) extras.push("target match");
   return `${c.fullName} — ${extras.join(" · ")}`;
@@ -66,6 +74,8 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
       maxParticipants: String(max)
     });
     if (!program.isNew) params.set("programId", program.id);
+    // Repeatable needTitle, so an unsaved draft row ranks by the plan too.
+    for (const title of program.fulfillsNeedTitles ?? []) params.append("needTitle", title);
 
     setLoading(true);
     setError("");
@@ -78,15 +88,17 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
       .catch(err => { if (!cancelled) setError(err.message || "Unable to load recommendations."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [program.id, program.isNew, program.title, program.fiscalYear, program.targetDivision, program.targetSpecialization, max, reloadKey]);
+  }, [program.id, program.isNew, program.title, program.fiscalYear, program.targetDivision, program.targetSpecialization,
+      (program.fulfillsNeedTitles ?? []).join("|"), max, reloadKey]);
 
   const byId = useMemo(() => new Map((candidates ?? []).map(c => [c.employeeId, c])), [candidates]);
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId));
   const recommended = available.slice(0, freeSlots);
   const groups: { label: string; items: TrainingCandidate[] }[] = [
-    { label: "Priority 1 — New hires", items: available.filter(c => c.priority === 1) },
-    { label: "Priority 2 — Never attended a TDP seminar", items: available.filter(c => c.priority === 2) },
-    { label: "Other eligible employees", items: available.filter(c => c.priority === 3) },
+    { label: "Listed in their plan (Plan A)", items: available.filter(c => c.needsThis) },
+    { label: "Priority 1 — New hires", items: available.filter(c => !c.needsThis && c.priority === 1) },
+    { label: "Priority 2 — Never attended a TDP seminar", items: available.filter(c => !c.needsThis && c.priority === 2) },
+    { label: "Other eligible employees", items: available.filter(c => !c.needsThis && c.priority === 3) },
     { label: "Not eligible", items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId)) }
   ];
 
@@ -117,7 +129,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
           <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-3 rounded-lg flex gap-2">
             <Sparkles size={16} className="shrink-0 mt-0.5" />
             <p>
-              Recommendations list <strong>new hires</strong> first, then employees who have <strong>never attended a TDP seminar</strong>.
+              Employees whose <strong>Plan A</strong> lists this training come first, then <strong>new hires</strong>, then those who have <strong>never attended a TDP seminar</strong>.
               Employees who already attended this seminar, or already have a seminar this fiscal year, can't be selected.
             </p>
           </div>
