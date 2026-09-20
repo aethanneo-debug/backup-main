@@ -89,6 +89,7 @@ interface DBStructure {
   budgetRequests: BudgetRequestItem[];
   activities: any[];
   liquidationSubmissions: any[];
+  cashAdvances: any[];
   activityBudgetLinks: any[];
   pds: PDS[];
   fiscalYears: any[];
@@ -429,6 +430,10 @@ function getInitialData(): DBStructure {
       }
       if (!loaded.trainingNeeds) {
         loaded.trainingNeeds = [];
+        changed = true;
+      }
+      if (!loaded.cashAdvances) {
+        loaded.cashAdvances = [];
         changed = true;
       }
 
@@ -930,6 +935,7 @@ function getInitialData(): DBStructure {
     ],
     activities: [],
     liquidationSubmissions: [],
+    cashAdvances: [],
     activityBudgetLinks: [
       { id: "bl-1", liquidationNo: "LIQ-2026-001", employee: "Andres B. Bonifacio", department: "Adjudication Division", amount: 12000.00, budgetId: "b-1", timestamp: "2026-06-14T10:00:00Z" },
       { id: "bl-2", liquidationNo: "LIQ-2026-002", employee: "Apolinario M. Mabini", department: "Legal Division", amount: 25000.00, budgetId: "b-3", timestamp: "2026-06-15T11:30:00Z" }
@@ -3470,7 +3476,16 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   const subNo = `LIQSUB-2026-0${db.liquidationSubmissions.length + 1}`;
   const now = new Date();
   const facts = liquidationActivityFacts(activityId);
-  const released = round2(Number(totalReleased));
+
+  // The cash advance record is the authority on what was released — not the claimant's
+  // input. With one on file the employee can no longer understate it to manufacture a
+  // reimbursement, and the DV reference comes from Finance rather than being typed.
+  // With none on file we fall back to the submitted figure, because assignments funded
+  // before cash advances were recorded have no record to read. That gap closes as
+  // Finance issues advances through this flow; until then allocatedAtFiling is what
+  // flags a suspicious claim.
+  const advance = openAdvanceFor(activityId, employeeIdForms(employeeId || ""));
+  const released = advance ? round2(Number(advance.amount)) : round2(Number(totalReleased));
   // When the report is itemised, the total is the sum of the lines — never a separately
   // typed figure that could disagree with them.
   const spent = lines ? lines.total : round2(Number(totalSpent || 0));
@@ -3496,8 +3511,10 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     periodCoveredFrom: periodCoveredFrom || "",
     periodCoveredTo: periodCoveredTo || "",
     responsibilityCenterCode: responsibilityCenterCode || "",
-    cashAdvanceDvNo: cashAdvanceDvNo || "",
-    cashAdvanceDvDate: cashAdvanceDvDate || "",
+    // Finance's own DV reference wins over anything typed into the form.
+    cashAdvanceId: advance ? advance.id : undefined,
+    cashAdvanceDvNo: advance ? advance.dvNo : (cashAdvanceDvNo || ""),
+    cashAdvanceDvDate: advance ? advance.dvDate : (cashAdvanceDvDate || ""),
     refundOrNo: refundOrNo || "",
     refundOrDate: refundOrDate || "",
     jevNo: "",
@@ -3840,6 +3857,18 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
       targetEmployeeId: sub.employeeId
     });
 
+    // Settle the advance this report accounts for, so an outstanding cash advance stops
+    // showing as outstanding the moment it is properly liquidated.
+    const settledAdvance = (db.cashAdvances || []).find((a: any) =>
+      (sub.cashAdvanceId && a.id === sub.cashAdvanceId) ||
+      (a.activityId === sub.activityId && a.status === "Released"
+        && employeeIdForms(sub.employeeId).includes(a.employeeId)));
+    if (settledAdvance && settledAdvance.status === "Released") {
+      settledAdvance.status = "Liquidated";
+      settledAdvance.liquidationId = sub.id;
+      settledAdvance.liquidatedAt = new Date().toISOString();
+    }
+
     // The claimant is out of pocket until someone actually releases the money, so put it
     // in front of Finance rather than quietly closing the record.
     if (claimPending) {
@@ -3920,6 +3949,188 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
   saveDB();
   res.json({ status: "success", data: sub });
 });
+// --- CASH ADVANCES: the money-out record ---
+
+function isCashAdvanceRole(role: UserRole) {
+  return role === UserRole.FINANCE_OFFICER || role === UserRole.SUPER_ADMIN;
+}
+
+// "CA-2026-09-001". Numbering restarts each month, like the liquidation serial.
+function nextCashAdvanceNo(when: Date): string {
+  const scope = `CA-${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-`;
+  const used = (db.cashAdvances || [])
+    .map((a: any) => String(a.advanceNo || ""))
+    .filter((n: string) => n.startsWith(scope))
+    .map((n: string) => Number(n.slice(scope.length)) || 0);
+  return `${scope}${String((used.length ? Math.max(...used) : 0) + 1).padStart(3, "0")}`;
+}
+
+// The advance still open against an assignment, if any. Cancelled and already-liquidated
+// ones do not block a fresh release.
+function openAdvanceFor(activityId: string, employeeForms: string[]) {
+  return (db.cashAdvances || []).find((a: any) =>
+    a.activityId === activityId && employeeForms.includes(a.employeeId) && a.status === "Released");
+}
+
+app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
+  const { role, employeeId } = req.user;
+  const all = db.cashAdvances || [];
+  if (isCashAdvanceRole(role)) {
+    return res.json({ status: "success", data: all });
+  }
+  // Everyone else sees only their own, so the employee's liquidation form can fill and
+  // lock its DV fields from the real record.
+  const forms = employeeIdForms(employeeId || "");
+  res.json({ status: "success", data: all.filter((a: any) => forms.includes(a.employeeId)) });
+});
+
+// Who Finance may release money to, and who has already been funded.
+//
+// Finance cannot read the HR training tables (isTrainingRecordsRole excludes them), but
+// they cannot release a cash advance without knowing who is assigned to what. This returns
+// the minimum needed to do that - name, what it is for, HR's allocated ceiling, and the
+// funding state - all derived server-side. It is not a window onto the HR module: no
+// training needs, recommendations, plan entries or PDS history are exposed.
+app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
+  if (!isCashAdvanceRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Cash advances are restricted to the Financial Officer." });
+  }
+
+  const rows: any[] = [];
+  const advanceFor = (activityId: string, forms: string[]) => {
+    const open = openAdvanceFor(activityId, forms);
+    if (open) return open;
+    return (db.cashAdvances || []).find((a: any) =>
+      a.activityId === activityId && forms.includes(a.employeeId) && a.status === "Liquidated") || null;
+  };
+
+  for (const p of (db.trainingParticipants || [])) {
+    if (p.status === "Cancelled" || p.status === "Archived") continue;
+    const emp = (db.employees || []).find((e: any) => e.id === p.employeeId || e.employeeId === p.employeeId);
+    if (!emp) continue;
+    const facts = liquidationActivityFacts(p.id);
+    const forms = employeeIdForms(p.employeeId);
+    const advance = advanceFor(p.id, forms);
+    rows.push({
+      activityId: p.id,
+      activityTitle: facts ? facts.title : "Seminar",
+      employeeId: emp.employeeId,
+      employeeName: emp.fullName,
+      allocated: facts ? facts.allocated : 0,
+      assignmentStatus: p.status,
+      funded: !!(advance && advance.status === "Released"),
+      advanceNo: advance ? advance.advanceNo : null,
+      advanceAmount: advance ? advance.amount : null,
+      advanceStatus: advance ? advance.status : null,
+      liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === p.id)
+    });
+  }
+
+  for (const a of (db.activities || [])) {
+    if (a.status === "Completed") continue;
+    const assigned = String(a.assignedEmployeeId || "").trim();
+    // Activity.assignedEmployeeId holds an id OR a full name (src/types.ts), so match both.
+    const emp = (db.employees || []).find((e: any) =>
+      e.id === assigned || e.employeeId === assigned ||
+      String(e.fullName || "").trim().toLowerCase() === assigned.toLowerCase());
+    const facts = liquidationActivityFacts(a.id);
+    const forms = emp ? [emp.id, emp.employeeId].filter(Boolean) : [assigned];
+    const advance = advanceFor(a.id, forms);
+    rows.push({
+      activityId: a.id,
+      activityTitle: facts ? facts.title : (a.title || "Activity"),
+      employeeId: emp ? emp.employeeId : assigned,
+      employeeName: emp ? emp.fullName : assigned,
+      allocated: facts ? facts.allocated : 0,
+      assignmentStatus: a.status,
+      funded: !!(advance && advance.status === "Released"),
+      advanceNo: advance ? advance.advanceNo : null,
+      advanceAmount: advance ? advance.amount : null,
+      advanceStatus: advance ? advance.status : null,
+      liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === a.id)
+    });
+  }
+
+  // Unfunded first - that is the work queue.
+  rows.sort((x, y) => Number(x.funded) - Number(y.funded) || String(x.employeeName).localeCompare(String(y.employeeName)));
+  res.json({ status: "success", data: rows });
+});
+
+app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
+  if (!isCashAdvanceRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Only the Financial Officer can release a cash advance." });
+  }
+
+  const { activityId, employeeId, amount, dvNo, dvDate, purpose } = req.body;
+  if (!activityId || !employeeId) {
+    return res.status(400).json({ status: "error", message: "Choose the employee and the assignment this advance funds." });
+  }
+
+  const emp = (db.employees || []).find((e: any) => e.id === employeeId || e.employeeId === employeeId);
+  if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
+
+  const released = round2(Number(amount));
+  if (!isFinite(released) || released <= 0) {
+    return res.status(400).json({ status: "error", message: "Enter the amount released, greater than zero." });
+  }
+  if (!String(dvNo || "").trim() || !isIsoDate(dvDate)) {
+    return res.status(400).json({ status: "error", message: "A disbursement voucher number and date are required." });
+  }
+
+  const facts = liquidationActivityFacts(activityId);
+  if (!facts) {
+    return res.status(404).json({ status: "error", message: "That assignment no longer exists." });
+  }
+  // HR's allocation is a ceiling. Releasing more than was set aside has to go back to HR
+  // rather than be quietly absorbed here.
+  if (facts.allocated > 0 && released > facts.allocated) {
+    return res.status(400).json({
+      status: "error",
+      message: `That exceeds the PHP ${facts.allocated.toFixed(2)} HR allocated. Ask HR to raise the allocation first.`
+    });
+  }
+
+  const forms = employeeIdForms(emp.employeeId);
+  const existing = openAdvanceFor(activityId, forms);
+  if (existing) {
+    return res.status(400).json({
+      status: "error",
+      message: `${emp.fullName} already has an open advance for this assignment (${existing.advanceNo}, DV ${existing.dvNo}).`
+    });
+  }
+
+  const now = new Date();
+  const advance = {
+    id: `ca-${Date.now()}`,
+    advanceNo: nextCashAdvanceNo(now),
+    employeeId: emp.employeeId,
+    employeeName: emp.fullName,
+    activityId,
+    activityTitle: facts.title,
+    amount: released,
+    dvNo: String(dvNo).trim(),
+    dvDate,
+    purpose: purpose || facts.title,
+    issuedBy: (req as any).user.fullName,
+    issuedAt: now.toISOString(),
+    status: "Released"
+  };
+
+  db.cashAdvances.push(advance);
+
+  notifyEmployee(emp.employeeId, {
+    title: "Cash advance released",
+    message: `PHP ${released.toFixed(2)} was released to you on DV ${advance.dvNo} dated ${formatLongDate(dvDate)} for ${facts.title}. Liquidate it within ${LIQUIDATION_DUE_DAYS} days of the activity.`,
+    type: "info",
+    dedupeKey: `ca-released:${advance.id}`
+  });
+
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Release Cash Advance",
+    `Released PHP ${released.toFixed(2)} to ${emp.fullName} for ${facts.title} via DV ${advance.dvNo} (${advance.advanceNo})`);
+  saveDB();
+  res.json({ status: "success", data: advance });
+});
+
 app.put("/api/liquidation-submissions/:id/chief-action", authenticateToken, (req: any, res) => {
   if ((req as any).user.role !== UserRole.SUPER_ADMIN) {
     return res.status(403).json({ status: "error", message: "Only Division Chief can give the final seal" });

@@ -60,6 +60,11 @@ interface LiquidationCoaFieldsProps {
   /** OR fields open only when the cash advance exceeds what was actually spent. */
   refundEnabled: boolean;
   disabled?: boolean;
+  /**
+   * Set when Finance has a cash advance on record for this assignment. The DV reference
+   * then belongs to that record, not to the claimant, so the fields are shown read-only.
+   */
+  advanceOnRecord?: boolean;
 }
 
 export default function LiquidationCoaFields({
@@ -67,6 +72,7 @@ export default function LiquidationCoaFields({
   onChange,
   refundEnabled,
   disabled = false,
+  advanceOnRecord = false,
 }: LiquidationCoaFieldsProps) {
   const set = (patch: Partial<CoaHeaderFields>) => onChange({ ...value, ...patch });
 
@@ -116,14 +122,18 @@ export default function LiquidationCoaFields({
           title="Cash Advance & Refund References"
         />
         <div className="grid grid-cols-1 gap-4 p-3 md:grid-cols-4">
-          <Field label="Cash Advance DV No.">
+          <Field
+            label="Cash Advance DV No."
+            hint={advanceOnRecord ? "From the voucher Finance released" : undefined}
+          >
             <input
               type="text"
               value={value.cashAdvanceDvNo}
               disabled={disabled}
+              readOnly={advanceOnRecord}
               onChange={(e) => set({ cashAdvanceDvNo: e.target.value })}
               placeholder="2026-08-336"
-              className={inputClass}
+              className={advanceOnRecord ? `${inputClass} bg-slate-100 text-slate-600` : inputClass}
             />
           </Field>
           <Field label="DV Date">
@@ -131,8 +141,9 @@ export default function LiquidationCoaFields({
               type="date"
               value={value.cashAdvanceDvDate}
               disabled={disabled}
+              readOnly={advanceOnRecord}
               onChange={(e) => set({ cashAdvanceDvDate: e.target.value })}
-              className={inputClass}
+              className={advanceOnRecord ? `${inputClass} bg-slate-100 text-slate-600` : inputClass}
             />
           </Field>
           <Field

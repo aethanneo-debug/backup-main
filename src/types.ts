@@ -381,6 +381,30 @@ export const TRAINING_EXPENSE_CATEGORIES: TrainingExpenseCategory[] = [
   "Miscellaneous"
 ];
 
+// Money going OUT: the disbursement voucher Finance releases to an employee before an
+// activity. The COA Liquidation Report's "AMOUNT OF CASH ADVANCE PER DV NO. __ DTD __"
+// refers to one of these. Without the record, that DV number is only the claimant's word,
+// and there is no way to tell a genuinely unfunded assignment from an unreported advance.
+export interface CashAdvance {
+  id: string;
+  advanceNo: string;              // e.g. "CA-2026-09-001"
+  employeeId: string;             // business form, e.g. "EMP007"
+  employeeName: string;
+  // The assignment this funds: a TDP enrolment id or an Activity id — the same
+  // polymorphic reference LiquidationSubmission.activityId uses.
+  activityId: string;
+  activityTitle?: string;
+  amount: number;                 // PHP actually released, which may be less than HR allocated
+  dvNo: string;
+  dvDate: string;                 // YYYY-MM-DD
+  purpose?: string;
+  issuedBy: string;               // the Financial Officer who released it
+  issuedAt: string;               // ISO timestamp
+  status: "Released" | "Liquidated" | "Cancelled";
+  liquidationId?: string;         // the report that settled it
+  liquidatedAt?: string;
+}
+
 // One line of the PARTICULARS block on the COA Liquidation Report.
 export interface LiquidationParticular {
   id: string;
@@ -417,6 +441,9 @@ export interface LiquidationSubmission {
   entityName?: string;               // defaults to HSAC-RAB I
   fundCluster?: string;              // e.g. "01 - Regular Fund"
   responsibilityCenterCode?: string;
+  // The CashAdvance this report accounts for, when one was recorded. Its amount and DV
+  // reference override anything the claimant typed.
+  cashAdvanceId?: string;
   cashAdvanceDvNo?: string;          // e.g. "2026-08-336"
   cashAdvanceDvDate?: string;        // YYYY-MM-DD
   refundOrNo?: string;               // e.g. "0247983" — only when there is a refund

@@ -418,6 +418,30 @@
       "category": "Travel",
       "createdBy": "Francisco F. Balagtas",
       "dateCreated": "2026-09-20T10:19:59.620Z"
+    },
+    {
+      "id": "tx-1789901181794",
+      "transactionId": "TX-LIQ-1794",
+      "transactionDate": "2026-09-20",
+      "supplier": "Regional Expenses",
+      "amount": 4800,
+      "description": "Official travel liquidation for activity: LIQSUB-2026-02",
+      "status": "Liquidated",
+      "supportingDocuments": [],
+      "history": [
+        {
+          "id": "his-1789901181794",
+          "status": "Liquidated",
+          "changedBy": "Juan dela Cruz",
+          "changedAt": "2026-09-20T10:46:21.794Z",
+          "remarks": "Approved and finalized by Finance"
+        }
+      ],
+      "employeeRef": "EMP007",
+      "department": "Administrative and Finance Division",
+      "category": "Travel",
+      "createdBy": "Francisco F. Balagtas",
+      "dateCreated": "2026-09-20T10:46:21.794Z"
     }
   ],
   "assets": [
@@ -662,6 +686,114 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1789901181795-585",
+      "timestamp": "2026-09-20T10:46:21.795Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Finance Validate Liquidation",
+      "details": "Finance evaluated liquidation LIQSUB-2026-02 with action Validate"
+    },
+    {
+      "id": "log-1789901181793-574",
+      "timestamp": "2026-09-20T10:46:21.793Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Auto-Deduct Budget",
+      "details": "Liquidation LIQSUB-2026-02 (Training) auto-deducted ₱4,800 from Administrative and Finance Division bucket b-2 for FY 2026."
+    },
+    {
+      "id": "log-1789901181531-851",
+      "timestamp": "2026-09-20T10:46:21.531Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "HR Verify Liquidation",
+      "details": "HR evaluated liquidation LIQSUB-2026-02 with action Verify"
+    },
+    {
+      "id": "log-1789901181251-505",
+      "timestamp": "2026-09-20T10:46:21.251Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789901180956-119",
+      "timestamp": "2026-09-20T10:46:20.956Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789901164468-737",
+      "timestamp": "2026-09-20T10:46:04.468Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Submit Liquidation",
+      "details": "Submitted liquidation report: LIQSUB-2026-02"
+    },
+    {
+      "id": "log-1789901164190-652",
+      "timestamp": "2026-09-20T10:46:04.190Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789901148013-484",
+      "timestamp": "2026-09-20T10:45:48.013Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Release Cash Advance",
+      "details": "Released PHP 5000.00 to Francisco F. Balagtas for Seminar - Sep via DV 2026-09-500 (CA-2026-09-001)"
+    },
+    {
+      "id": "log-1789901147194-910",
+      "timestamp": "2026-09-20T10:45:47.194Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789901129411-870",
+      "timestamp": "2026-09-20T10:45:29.411Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789901129089-356",
+      "timestamp": "2026-09-20T10:45:29.089Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1789901128760-136",
+      "timestamp": "2026-09-20T10:45:28.760Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
     {
       "id": "log-1789899614173-7",
       "timestamp": "2026-09-20T10:20:14.173Z",
@@ -2256,9 +2388,9 @@
       "department": "Administrative and Finance Division",
       "budgetAllocation": 0,
       "carryOver": 100000,
-      "budgetUtilized": 4800,
-      "remainingBudget": 95200,
-      "budgetPercentageUsed": 5,
+      "budgetUtilized": 9600,
+      "remainingBudget": 90400,
+      "budgetPercentageUsed": 10,
       "allocatedPS": 0,
       "allocatedMOOE": 0,
       "allocatedCO": 0,
@@ -2531,6 +2663,15 @@
       "isRead": false,
       "type": "info",
       "timestamp": "2026-09-20T10:19:37.344Z",
+      "targetRole": "HR Officer"
+    },
+    {
+      "id": "notif-1789901164468",
+      "title": "Liquidation Report Submitted",
+      "message": "Francisco F. Balagtas submitted a liquidation report for activity relationship evaluation.",
+      "isRead": false,
+      "type": "info",
+      "timestamp": "2026-09-20T10:46:04.468Z",
       "targetRole": "HR Officer"
     }
   ],
@@ -3290,5 +3431,6 @@
       "createdAt": "2026-09-19T14:53:45.740Z",
       "createdBy": "hr"
     }
-  ]
+  ],
+  "cashAdvances": []
 }

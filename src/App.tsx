@@ -409,7 +409,7 @@ export default function App() {
 
   // Gated System Workspace layout frame
   return (
-    <div id="applet-viewport-frame" className="h-screen w-screen flex overflow-hidden bg-slate-50 text-slate-800 font-sans font-sans">
+    <div id="applet-viewport-frame" className="h-screen w-full flex overflow-hidden bg-slate-50 text-slate-800 font-sans">
       
       {!user.requirePasswordChange && !user.requirePdsUpload ? (
         <>
@@ -425,7 +425,7 @@ export default function App() {
           />
 
           {/* CORE WORKSPACE FRAME */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             
             {/* HEADER BRAND AND CLOCK */}
             <Header 
@@ -434,7 +434,7 @@ export default function App() {
             />
 
             {/* ACTIVE MODULE CONTAINER SCREEN */}
-            <main className="flex-1 flex overflow-y-auto">
+            <main className="flex-1 flex min-h-0 overflow-y-auto">
               {renderActiveView()}
             </main>
           </div>

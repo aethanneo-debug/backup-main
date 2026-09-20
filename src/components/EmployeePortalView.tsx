@@ -51,6 +51,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   // Everything this employee may file a liquidation against: general activities plus
   // TDP seminar enrolments, normalised to { id, label, allocated }.
   const [liquidatable, setLiquidatable] = useState<any[]>([]);
+  // Cash advances Finance actually released to this employee. When one exists for the
+  // chosen assignment it is the authority on what was received, so the form shows it
+  // read-only rather than asking - the server overrides the field either way.
+  const [myAdvances, setMyAdvances] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
 
@@ -96,6 +100,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   // Legacy reports carry only a typed total; keep honouring it until it is itemised.
   const effectiveSpent = hasParticularLines ? computedSpent : totalSpent;
   const refundDue = Math.round((totalReleased - effectiveSpent) * 100) / 100 > 0;
+
+  // The advance Finance released against the assignment currently selected, if any.
+  const activeAdvance = useMemo(
+    () => (myAdvances ?? []).find(
+      (a: any) => a.activityId === selectedActivityId && a.status === "Released"
+    ) || null,
+    [myAdvances, selectedActivityId]
+  );
 
   // Human label for a liquidation's activity, used on the printed report header.
   function activityLabelFor(activityId: string): string | undefined {
@@ -197,11 +209,13 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       // activities, and TDP seminar enrolments — a seminar is not an `activity`, so
       // without the second call an assigned participant has nothing to select and
       // cannot file a report at all.
-      const [actRes, seminarRes] = await Promise.all([
+      const [actRes, seminarRes, advRes] = await Promise.all([
         apiCall("/api/activities"),
         apiCall(`/api/employees/${encodeURIComponent(user.employeeId || "")}/assigned_activities`)
-          .catch(() => ({ status: "error", data: [] }))
+          .catch(() => ({ status: "error", data: [] })),
+        apiCall("/api/cash-advances").catch(() => ({ status: "error", data: [] }))
       ]);
+      setMyAdvances(advRes.status === "success" ? (advRes.data ?? []) : []);
 
       const generalActivities = actRes.status === "success"
         ? (actRes.data ?? []).map((a: any) => ({
@@ -1079,10 +1093,21 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                     value={selectedActivityId}
                     onChange={e => {
                       setSelectedActivityId(e.target.value);
-                      const found = liquidatable.find(a => a.id === e.target.value);
-                      // Seed with what HR allocated; the claimant can correct it to what
-                      // they actually received, including zero.
-                      if (found) setTotalReleased(found.allocated);
+                      // What Finance released, if it is on record. Otherwise zero rather
+                      // than HR's allocation - an allocation is not money in hand, and
+                      // seeding with it was what made an unfunded assignment look funded.
+                      const advance = (myAdvances ?? []).find(
+                        (a: any) => a.activityId === e.target.value && a.status === "Released"
+                      );
+                      setReleasedDraft(null);
+                      setTotalReleased(advance ? Number(advance.amount) : 0);
+                      if (advance) {
+                        setCoaFields(prev => ({
+                          ...prev,
+                          cashAdvanceDvNo: advance.dvNo || "",
+                          cashAdvanceDvDate: advance.dvDate || ""
+                        }));
+                      }
                     }}
                     className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold"
                   >
@@ -1102,27 +1127,45 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Cash Advance Received (₱)</label>
                   <input
-                    type="number"
+                    type={activeAdvance ? "text" : "number"}
                     min="0"
                     step="0.01"
                     disabled={submittingLiq}
-                    aria-label="Cash advance actually received. Enter 0 if you received none."
-                    value={releasedDraft ?? String(totalReleased)}
+                    readOnly={!!activeAdvance}
+                    aria-label={activeAdvance
+                      ? "Cash advance received, taken from the voucher Finance released"
+                      : "Cash advance actually received. Enter 0 if you received none."}
+                    value={activeAdvance ? formatCurrency(Number(activeAdvance.amount)) : (releasedDraft ?? String(totalReleased))}
                     onChange={e => {
+                      if (activeAdvance) return;
                       setReleasedDraft(e.target.value);
                       const n = Number(e.target.value);
                       if (isFinite(n) && n >= 0) setTotalReleased(n);
                     }}
                     onBlur={() => {
+                      if (activeAdvance) return;
                       setReleasedDraft(null);
                       setTotalReleased(v => Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
                     }}
-                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
+                    className={`w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100 ${
+                      activeAdvance ? "bg-slate-100 text-slate-600" : "text-slate-800"
+                    }`}
                   />
-                  <p className="text-[9px] text-slate-400 font-mono leading-snug">
-                    Seeded from what HR allocated — correct it to what you actually received.{" "}
-                    <strong className="text-slate-500">Enter 0 if you paid out of pocket;</strong> the balance becomes a reimbursement claim.
-                  </p>
+                  {activeAdvance ? (
+                    <p className="text-[9px] text-blue-700 font-mono leading-snug">
+                      From <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {activeAdvance.dvDate}.
+                      Taken from Finance&rsquo;s record, so it cannot be edited here.
+                    </p>
+                  ) : selectedActivityId ? (
+                    <p className="text-[9px] text-amber-700 font-mono leading-snug">
+                      <strong>No cash advance on record</strong> for this assignment. If you paid out of
+                      pocket, leave this at 0 &mdash; what you spent becomes a reimbursement claim.
+                    </p>
+                  ) : (
+                    <p className="text-[9px] text-slate-400 font-mono leading-snug">
+                      Choose an assignment first.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1141,6 +1184,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                 onChange={setCoaFields}
                 refundEnabled={refundDue}
                 disabled={submittingLiq}
+                advanceOnRecord={!!activeAdvance}
               />
 
               {/* Live derived figures — exactly what the printed form will show */}

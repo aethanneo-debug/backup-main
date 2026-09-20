@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Wallet } from "lucide-react";
 import { apiCall, formatCurrency, formatDate } from "../../utils";
+import SectionCard, { SectionCount } from "./SectionCard";
 
 interface Props {
   /** Every liquidation submission Finance can see. Filtered here, not by the caller. */
@@ -100,19 +101,18 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+    <SectionCard
+      icon={<HandCoins size={12} className="text-blue-600" aria-hidden="true" />}
+      title="Reimbursement Queue"
+      action={<SectionCount>{pending.length}</SectionCount>}
+      caption="Money Back"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xs font-bold font-sans text-slate-800 uppercase tracking-tight flex items-center">
-            <HandCoins size={15} className="mr-2 text-amber-600" />
-            Reimbursement Queue ({pending.length})
-          </h2>
-          <p className="text-[11px] text-slate-500 mt-1 max-w-2xl">
-            Employees who paid out of their own pocket because the cash advance never reached
-            them. Validating the liquidation does not release any money &mdash; record the
-            disbursement voucher here to close the claim.
-          </p>
-        </div>
+        <p className="text-[11px] text-slate-500 max-w-2xl">
+          Employees who paid out of their own pocket because the cash advance never reached
+          them. Validating the liquidation does not release any money &mdash; record the
+          disbursement voucher here to close the claim.
+        </p>
         {pending.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right shrink-0">
             <span className="block text-[9px] font-mono font-bold uppercase tracking-wider text-amber-700">Total Owed</span>
@@ -287,6 +287,6 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
           </ul>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }

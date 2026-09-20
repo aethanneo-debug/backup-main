@@ -142,8 +142,8 @@ export default function Sidebar({
   ];
 
   return (
-    <aside id="ipfms-sidebar" className="w-68 bg-slate-900 text-white min-h-screen flex flex-col justify-between border-r border-slate-800 shrink-0">
-      <div className="flex flex-col flex-1 overflow-hidden">
+    <aside id="ipfms-sidebar" className="w-68 bg-slate-900 text-white h-full min-h-0 flex flex-col justify-between border-r border-slate-800 shrink-0">
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* LOGO AND BRAND IDENTIFIER */}
         <div className="p-4 border-b border-slate-800 flex items-center space-x-3 bg-slate-950">
           <HsacLogo size={36} className="shrink-0 bg-white rounded-full p-0.5 border border-blue-600/35" />
@@ -171,7 +171,7 @@ export default function Sidebar({
         </div>
 
         {/* NAVIGATION LIKS */}
-        <nav className="p-3 space-y-1 flex-1 overflow-y-auto mt-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/50 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600/80">
+        <nav className="p-3 space-y-1 flex-1 min-h-0 overflow-y-auto mt-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/50 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600/80">
           {menuItems.map((item) => {
             if (item.visible === false) return null;
 

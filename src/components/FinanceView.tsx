@@ -17,8 +17,7 @@ import {
   Filter, 
   Plus, 
   TrendingUp, 
-  FileText, 
-  Clock, 
+  Clock,
   CheckCircle, 
   AlertTriangle, 
   FileCheck,
@@ -41,7 +40,7 @@ import {
   Activity,
   ArrowRight
 } from "lucide-react";
-import ReimbursementQueue from "./finance/ReimbursementQueue";
+import LiquidationDeskView from "./finance/LiquidationDeskView";
 import { apiCall, formatCurrency, formatDate, downloadCSV } from "../utils";
 
 interface FinanceViewProps {
@@ -231,19 +230,6 @@ export default function FinanceView({
     }
   }
 
-  
-  const downloadBase64File = (name: string, content: string) => {
-    if (!content) {
-      alert("No printable file attachments scanned for this mock metadata row.");
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = content;
-    link.download = name;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
   // Load backend arrays on mount and updates
   useEffect(() => {
     setTxnList(transactions || []);
@@ -637,14 +623,14 @@ export default function FinanceView({
   // derives its totals the same way, so these agree with the summary tiles.
 
   return (
-    <div id="finance-workstation-container" className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+    <div id="finance-workstation-container" className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50">
       
       {/* CORE DESK VIEWPORT */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         
         {/* VIEW 1: FINANCES WORKSPACE OVERVIEW DASHBOARD */}
         {activeSubTab === "dashboard" && (
-          <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
             <div className="flex justify-between items-center bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm">
               <div>
                 <h1 className="text-md font-bold text-slate-900 flex items-center gap-1.5 leading-tight">
@@ -904,10 +890,10 @@ export default function FinanceView({
 
         {/* VIEW 2: TRANSACTIONS JOURNAL GRIDVIEW */}
         {activeSubTab === "journal" && (
-          <div className="flex-1 flex overflow-hidden bg-slate-50">
+          <div className="flex-1 flex min-h-0 overflow-hidden bg-slate-50">
             
             {/* LEADING RECORD WRAPPER */}
-            <div className="flex-1 flex flex-col overflow-hidden p-6 gap-4">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-6 gap-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
                   <h1 className="text-md font-bold text-slate-800">Financial Documents & Expenditure Registry</h1>
@@ -1230,7 +1216,7 @@ export default function FinanceView({
 
         {/* VIEW 3: RECEIPTS & DOCUMENTS VAULT */}
         {activeSubTab === "vault" && (
-          <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
             <div className="flex justify-between items-center bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm">
               <div>
                 <h1 className="text-md font-bold text-slate-900">Official Document Repository & Invoices Vault</h1>
@@ -1331,219 +1317,24 @@ export default function FinanceView({
 
         {/* VIEW 4: LIQUIDATION WORKFLOW MONITORING */}
         {activeSubTab === "liquidation" && (
-          <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
-            <div className="flex justify-between items-center bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm">
-              <div>
-                <h1 className="text-md font-bold text-slate-900">Regional Cash Advances & Liquidation Monitoring</h1>
-                <p className="text-xs text-slate-500 mt-1">Audit out-of-pocket cash advances. Enforce systematic workflow transitions from Submission to Review, of regional employees.</p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={exportMethods.liquidations}
-                  className="bg-white border text-slate-700 hover:bg-slate-100 px-3 py-2 rounded-lg text-xs font-semibold flex items-center shadow-sm"
-                >
-                  <Download size={13} className="mr-1.5" />
-                  <span>Report Excel</span>
-                </button>
-
-                
-              </div>
-            </div>
-
-            {/* FLOW PIPELINE STEPS CHEVRON HEADER */}
-            <div className="bg-slate-900 text-white p-4 rounded-xl shadow border space-y-1">
-              <span className="text-[9px] font-mono font-bold text-amber-400 tracking-wider uppercase block">Mandated Liquidation Progress Loop</span>
-              <div className="flex flex-wrap items-center gap-2 text-xs font-mono pt-1">
-                {["Pending Submission", "Submitted", "Under Review", "Approved", "Completed"].map((st, i) => (
-                  <div key={i} className="flex items-center space-x-1">
-                    <span className="px-2 py-0.5 rounded bg-slate-800 font-bold border border-slate-700 text-amber-400">{i + 1}</span>
-                    <span className="font-semibold text-slate-300">{st}</span>
-                    {i < 4 && <ArrowRight size={10} className="text-slate-500 mx-1.5" />}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* FINANCE LIQUIDATION VALIDATION QUEUE */}
-            {user.role === UserRole.FINANCE_OFFICER && (
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                <h2 className="text-xs font-bold font-sans text-slate-800 uppercase tracking-tight flex items-center">
-                  <Clock size={15} className="mr-2 text-emerald-600 animate-pulse" />
-                  Finance Liquidation Validation Queue ({submissions.filter(s => s.status === "Verified & Forwarded").length})
-                </h2>
-                <p className="text-[11px] text-slate-500">Validate receipts, invoices, and ledger documents approved by HR. Execute final validation to generate the Financial Transaction and update the budget.</p>
-
-                <div className="grid grid-cols-1 gap-4">
-                  {submissions.filter(s => s.status === "Verified & Forwarded").length > 0 ? (
-                    submissions.filter(s => s.status === "Verified & Forwarded").map((sub) => (
-                      <div key={sub.id} className="p-4 border border-emerald-100 rounded-xl bg-emerald-50/10 hover:border-emerald-200 transition-all flex flex-col md:flex-row justify-between gap-4">
-                        <div className="space-y-3 flex-1">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-[10px] font-mono bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                              {sub.submissionNo}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">{sub.createdAt?.split("T")[0]}</span>
-                          </div>
-
-                          <div>
-                            <h3 className="text-xs font-bold text-slate-800">{sub.employeeName}</h3>
-                            <p className="text-[11px] text-slate-500 mt-1">
-                              <strong>For:</strong> {sub.activityTitle || sub.activityId} • <span className="text-blue-600 font-medium">Verified by HR</span>
-                            </p>
-                          </div>
-
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-w-md">
-                            <div className="bg-white p-2 rounded border border-slate-100">
-                              <span className="text-[9px] text-slate-400 font-semibold block font-mono">Released Advance</span>
-                              <strong className="text-xs text-slate-700 font-mono">₱{sub.totalReleased.toLocaleString()}</strong>
-                            </div>
-                            <div className="bg-white p-2 rounded border border-slate-100">
-                              <span className="text-[9px] text-slate-400 font-semibold block font-mono">Liquidated Spent</span>
-                              <strong className="text-xs text-blue-600 font-mono">₱{sub.totalSpent.toLocaleString()}</strong>
-                            </div>
-                            <div className="bg-white p-2 rounded border border-slate-100">
-                              <span className="text-[9px] text-slate-400 font-semibold block font-mono">Net Balance / Refund</span>
-                              <strong className="text-xs text-amber-700 font-black font-mono">₱{sub.remainingBalance.toLocaleString()}</strong>
-                            </div>
-                          </div>
-
-                          {sub.remarks && (
-                            <div className="bg-white p-2 rounded border border-slate-100 text-[11px] text-slate-500 italic">
-                              "{sub.remarks}"
-                            </div>
-                          )}
-
-                          {/* HR Verification remarks summary */}
-                          <div className="bg-blue-50/40 p-2.5 rounded border border-blue-100 max-w-md text-[10px] text-slate-600">
-                            <strong>HR Verification Remarks:</strong>
-                            <p className="mt-0.5 font-sans">"{sub.hrRemarks || 'Verified expenditures relative to assigned activity.'}"</p>
-                          </div>
-
-                          {/* Render Supporting Docs / Receipts */}
-                          {sub.supportingDocs && sub.supportingDocs.length > 0 && (
-                            <div className="space-y-1.5 max-w-md">
-                              <span className="text-[9px] text-slate-400 font-bold uppercase block font-mono tracking-wider">Receipts & Slips File Vouchers</span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {sub.supportingDocs.map((doc: any, i: number) => (
-                                  <div key={i} onClick={() => downloadBase64File(doc.name || doc.filename, doc.content)} className="flex items-center space-x-1 py-1 px-2.5 bg-white border border-slate-150 rounded text-[10px] text-slate-600 font-mono cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-colors" title="Click to view/download attachment">
-                                    <FileText size={10} className="text-slate-405" />
-                                    <span>{doc.name}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* FINANCE ACTION BAR */}
-                        <div className="w-full md:w-64 border-t md:border-t-0 md:border-l border-slate-100 pt-3 md:pt-0 md:pl-4 flex flex-col justify-between">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold block">Ledger Validation remarks</label>
-                            <textarea
-                              placeholder="Add ledger match audit logs..."
-                              value={selectedSub?.id === sub.id ? subRemarks : ""}
-                              onChange={(e) => {
-                                setSelectedSub(sub);
-                                setSubRemarks(e.target.value);
-                              }}
-                              className="w-full border border-slate-200 bg-white p-2 rounded-lg text-xs h-16 resize-none focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </div>
-
-                          <div className="flex gap-2 justify-end pt-3">
-                            <button
-                              type="button"
-                              onClick={() => handleFinanceLiquidationAction(sub.id, "Return", selectedSub?.id === sub.id ? subRemarks : "")}
-                              className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
-                            >
-                              Return
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleFinanceLiquidationAction(sub.id, "Validate", selectedSub?.id === sub.id ? subRemarks : "")}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 px-3 py-1.5 rounded-lg text-xs font-semibold shadow shadow-emerald-600/10 cursor-pointer"
-                            >
-                              Validate & Finalize
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-slate-400 font-mono text-[10px] py-8 border border-dashed border-slate-200 rounded-xl text-center bg-slate-50/50">
-                      No liquidation reports verified by HR awaiting Financial validation.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* OUT-OF-POCKET CLAIMS. Validation does not release money, so these stay
-                open until Finance records the disbursement voucher. */}
-            {(user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN) && (
-              <ReimbursementQueue submissions={submissions} onRecorded={() => { fetchFinanceAddons(); onRefresh(); }} />
-            )}
-
-            {/* LIQUIDATIONS INDEX TABLE */}
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
-                    <th className="p-4">Liquidation Code</th>
-                    <th className="p-4">Reference Request</th>
-                    <th className="p-4">Employee Recipient</th>
-                    <th className="p-4">Department division</th>
-                    <th className="p-4 text-right">Advance Released</th>
-                    <th className="p-4 text-right">Liquidated Spends</th>
-                    <th className="p-4 text-right">Refund / Balance</th>
-                    <th className="p-4 text-center">Status Loop</th>
-                    
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {yearFilteredSubmissions.map((liq) => (
-                    <tr key={liq.id} className="hover:bg-slate-50/50">
-                      <td className="p-4 font-mono font-black text-slate-700">{liq.submissionNo}</td>
-                      <td className="p-4 font-mono text-slate-400">{liq.activityId}</td>
-                      <td className="p-4 font-bold text-slate-850">{liq.employeeName}</td>
-                      <td className="p-4 text-slate-500 truncate max-w-[120px]" title="N/A">N/A</td>
-                      <td className="p-4 text-right font-mono font-medium text-slate-600">{formatCurrency(liq.totalReleased)}</td>
-                      <td className="p-4 text-right font-mono font-bold text-slate-700">{formatCurrency(liq.totalSpent)}</td>
-                      <td className="p-4 text-right font-mono font-black text-amber-700">
-                        {formatCurrency(liq.remainingBalance)}
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border uppercase ${
-                          liq.status === "Completed" 
-                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                            : liq.status === "Approved"
-                            ? "bg-blue-50 text-blue-800 border-blue-200"
-                            : liq.status === "Under Review"
-                            ? "bg-amber-50 text-amber-800 border-amber-200 animate-pulse"
-                            : "bg-slate-100 text-slate-700 border-slate-250"
-                        }`}>
-                          {liq.status}
-                        </span>
-                      </td>
-                      
-                    </tr>
-                  ))}
-                  {yearFilteredSubmissions.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="text-center py-12 text-slate-400 font-mono italic">No liquidation advances currently monitored.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-          </div>
+          <LiquidationDeskView
+            user={user}
+            submissions={submissions}
+            yearFilteredSubmissions={yearFilteredSubmissions}
+            activeFiscalYear={activeFiscalYear}
+            selectedSub={selectedSub}
+            subRemarks={subRemarks}
+            setSelectedSub={setSelectedSub}
+            setSubRemarks={setSubRemarks}
+            onFinanceAction={handleFinanceLiquidationAction}
+            onExport={exportMethods.liquidations}
+            onQueueRefresh={() => { fetchFinanceAddons(); onRefresh(); }}
+          />
         )}
 
         {/* VIEW 5: BUDGET ALLOCATION & UTILIZATION */}
         {activeSubTab === "budgets" && (
-          <div id="budget-officer-container" className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
+          <div id="budget-officer-container" className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
             
             {/* COMPREHENSIVE BUDGET OFFICER ROLE ROLE HEADER */}
             <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -2364,7 +2155,7 @@ export default function FinanceView({
 
         {/* VIEW 6: FINANCE AUDIT TRAIL REVISIONS TABLE */}
         {activeSubTab === "auditLogs" && (
-          <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
             <div className="flex justify-between items-center bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm">
               <div>
                 <h1 className="text-md font-bold text-slate-900 flex items-center gap-1">
