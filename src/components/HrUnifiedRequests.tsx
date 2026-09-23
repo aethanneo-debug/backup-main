@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { User, RequestStatus } from "../types";
-import { apiCall } from "../utils";
+import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
 
@@ -49,8 +49,8 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
               ...r,
               _unifiedId: `req-${r.id}`,
               _category: "Personnel Request",
-              _date: new Date(r.dateRequested || r.createdAt).getTime(),
-              _displayDate: r.dateRequested || r.createdAt,
+              _date: firstTimestamp(r.dateRequested, r.createdAt),
+              _displayDate: firstDateString(r.dateRequested, r.createdAt),
               _title: r.leaveType ? `${r.requestType} (${r.leaveType})` : r.requestType,
               _requester: r.employeeName,
               _amount: null,
@@ -66,8 +66,8 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
               ...s,
               _unifiedId: `liq-${s.id}`,
               _category: "Liquidation",
-              _date: new Date(s.createdAt).getTime(),
-              _displayDate: s.createdAt,
+              _date: firstTimestamp(s.createdAt, s.dateSubmitted),
+              _displayDate: firstDateString(s.createdAt, s.dateSubmitted),
               _title: `Liquidation ${s.submissionNo}`,
               _requester: s.employeeName,
               _amount: s.totalReleased, // totalReleased or totalSpent depending on HR view
@@ -77,8 +77,13 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
       }
 
       // Sort LIFO (Newest First)
+      // LIFO: newest first, falling back to insertion order for identical dates.
+      // Number(... ) || 0 keeps a malformed date from returning NaN here, which would
+      // make the comparator inconsistent and scramble unrelated rows.
       combined.sort((a, b) => {
-        if (b._date !== a._date) return b._date - a._date;
+        const bd = Number(b._date) || 0;
+        const ad = Number(a._date) || 0;
+        if (bd !== ad) return bd - ad;
         return b._sequence - a._sequence;
       });
       setAllItems(combined);

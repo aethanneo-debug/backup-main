@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { User, AnyRequest, RequestStatus } from "../types";
-import { apiCall, formatDate } from "../utils";
+import { apiCall, formatDate, firstTimestamp, firstDateString } from "../utils";
 import { Check, X, Undo2, Filter, RefreshCcw, Info, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -61,8 +61,8 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
             ...r,
             _unifiedId: `req-${r.id}`,
             _category: "Personnel Request",
-            _date: new Date(r.dateRequested || r.createdAt).getTime(),
-            _displayDate: r.dateRequested || r.createdAt,
+            _date: firstTimestamp(r.dateRequested, r.createdAt),
+            _displayDate: firstDateString(r.dateRequested, r.createdAt),
             _title: r.leaveType ? `${r.requestType} (${r.leaveType})` : r.requestType,
             _requester: r.employeeName,
             _division: getDivision(r.employeeId, null),
@@ -78,8 +78,8 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
             ...s,
             _unifiedId: `liq-${s.id}`,
             _category: "Liquidation",
-            _date: new Date(s.createdAt).getTime(),
-            _displayDate: s.createdAt,
+            _date: firstTimestamp(s.createdAt, s.dateSubmitted),
+            _displayDate: firstDateString(s.createdAt, s.dateSubmitted),
             _title: `Liquidation ${s.submissionNo}`,
             _requester: s.employeeName,
             _division: getDivision(s.employeeId, null),
@@ -95,8 +95,8 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
             ...b,
             _unifiedId: `bud-${b.id}`,
             _category: "Budget Request",
-            _date: new Date(b.createdAt).getTime(),
-            _displayDate: b.createdAt,
+            _date: firstTimestamp(b.createdAt),
+            _displayDate: firstDateString(b.createdAt),
             _title: `${b.requestType} Request`,
             _requester: b.department,
             _division: b.department,
@@ -107,8 +107,13 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
       }
 
       // Sort LIFO (Newest First)
+      // LIFO: newest first, falling back to insertion order for identical dates.
+      // Number(... ) || 0 keeps a malformed date from returning NaN here, which would
+      // make the comparator inconsistent and scramble unrelated rows.
       combined.sort((a, b) => {
-        if (b._date !== a._date) return b._date - a._date;
+        const bd = Number(b._date) || 0;
+        const ad = Number(a._date) || 0;
+        if (bd !== ad) return bd - ad;
         return b._sequence - a._sequence;
       });
       setAllItems(combined);

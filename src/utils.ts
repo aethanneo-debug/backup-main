@@ -120,3 +120,30 @@ export function daysUntil(dateString: string): number {
   const [ty, tm, td] = getLocalTodayString().split("-").map(Number);
   return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
 }
+
+/**
+ * First usable timestamp among candidate date fields, or 0 — never NaN.
+ *
+ * The unified request lists merge sources that name their date differently: personnel
+ * requests carry `dateRequested`, liquidation submissions `dateSubmitted`, and only
+ * newer records have `createdAt`. `new Date(undefined).getTime()` is NaN, and a NaN
+ * comparator makes Array.sort behave unpredictably — so a single dateless row does not
+ * merely sort itself last, it scrambles the ordering of everything around it.
+ */
+export function firstTimestamp(...candidates: (string | undefined | null)[]): number {
+  for (const c of candidates) {
+    if (!c) continue;
+    const t = new Date(c).getTime();
+    if (!isNaN(t)) return t;
+  }
+  return 0;
+}
+
+/** The first candidate that parses as a date, for display. Empty string when none do. */
+export function firstDateString(...candidates: (string | undefined | null)[]): string {
+  for (const c of candidates) {
+    if (!c) continue;
+    if (!isNaN(new Date(c).getTime())) return c;
+  }
+  return "";
+}
