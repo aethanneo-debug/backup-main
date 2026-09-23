@@ -302,8 +302,20 @@ export interface ServiceRecordRequest extends BaseRequest {
 export interface VehicleRequest extends BaseRequest {
   destination: string;
   purpose: string;
-  dateNeeded: string;
+  dateNeeded: string; // the form's "Reservation date"
   passengers: string;
+
+  // --- Vehicle Reservation Slip (form AS-GSD.VRS.012.02) ---
+  // Optional so requests filed before the slip existed stay valid.
+  // Both signature boxes on the printed slip — "Authorized by: Division Head" and
+  // "Approved by: Chief Administrative Officer" — are signed by the same person:
+  // whoever holds Administrator / Division Chief and approved it. That name comes
+  // from BaseRequest.approvedBy, so it is never stored twice here.
+  vrsNo?: string;           // e.g. "VRS-2026-09-014"
+  departureDate?: string;   // YYYY-MM-DD
+  departureTime?: string;   // HH:mm, rendered as AM/PM on the slip
+  arrivalDate?: string;     // YYYY-MM-DD
+  arrivalTime?: string;     // HH:mm
 }
 
 export interface ZoomRequest extends BaseRequest {
@@ -380,6 +392,82 @@ export const TRAINING_EXPENSE_CATEGORIES: TrainingExpenseCategory[] = [
   "Speaker Fees",
   "Miscellaneous"
 ];
+
+// --- POST-TRAINING PERFORMANCE EVALUATION REPORT ---
+// The printed HSAC instrument: five scored statements, then five narrative prompts.
+
+export type TrainingEvaluationRating = 1 | 2 | 3 | 4;
+export type TrainingQualitativeRating =
+  | "Needs Improvement"
+  | "Satisfactory"
+  | "Very Satisfactory"
+  | "Outstanding";
+
+/** The 4-point scale printed above Part I. Index order is the point value. */
+export const TRAINING_EVALUATION_SCALE: { value: TrainingEvaluationRating; label: TrainingQualitativeRating }[] = [
+  { value: 1, label: "Needs Improvement" },
+  { value: 2, label: "Satisfactory" },
+  { value: 3, label: "Very Satisfactory" },
+  { value: 4, label: "Outstanding" }
+];
+
+/** Part I, verbatim and in printed order. Five statements, each scored 1-4. */
+export const TRAINING_EVALUATION_STATEMENTS: string[] = [
+  "The employee can effectively express his/her acquired knowledge from the training's subject matter.",
+  "The employee's knowledge and skills with regards to the training's subject matter has improved.",
+  "The employee has shown evident improvements in terms of his/her performance.",
+  "The employee has applied his newly acquired knowledge and skills in the performance of his/her duties and responsibilities.",
+  "The employee has generated new ideas or recommendations for improvement in relation to the training's subject matter."
+];
+
+/** Part II, verbatim and in printed order. Five narrative answers. */
+export const TRAINING_EVALUATION_PROMPTS: string[] = [
+  "Have you found the skills/information that the trainee learned in training relevant to his/her day to day working practices? If yes, please cite example(s) of any changes in his/her working practices.",
+  "Was the trainee given the opportunity to echo/cascade the information/skills learned with his/her colleagues? How was the sharing done?",
+  "In view of the above (#2), what improvements on practices or policies were suggested by the trainee as a result of this training? Please give details.",
+  "Please narrate in two or three sentences the marked improvement in the attitude/personality/interpersonal relationships/values (as the case maybe) of the employee as a result of the subject training attended.",
+  "Comments/Suggestions on the conduct of the training/workshop"
+];
+
+/**
+ * The band table printed under Part I. Note it starts at 0 even though five statements
+ * scored 1-4 can never total below 5 - that is the paper form's own quirk, reproduced
+ * faithfully rather than silently corrected.
+ */
+export const TRAINING_EVALUATION_BANDS: { label: TrainingQualitativeRating; min: number; max: number }[] = [
+  { label: "Needs Improvement", min: 0, max: 5 },
+  { label: "Satisfactory", min: 6, max: 10 },
+  { label: "Very Satisfactory", min: 11, max: 15 },
+  { label: "Outstanding", min: 16, max: 20 }
+];
+
+export interface TrainingEvaluation {
+  id: string;
+  // One evaluation per person per seminar - this is already that unique pairing.
+  trainingParticipantId: string;
+  trainingProgramId: string;
+  employeeId: string; // Employee.id, the form TrainingParticipant uses
+
+  dateOfEvaluation: string; // YYYY-MM-DD
+  // The form is signed by the Immediate Supervisor, who is not modelled anywhere in the
+  // system, so HR types both. The report prints them above a blank signature line.
+  supervisorName: string;
+  supervisorPosition: string;
+
+  /** Exactly 5 entries, in printed order. null = not yet rated. */
+  ratings: (TrainingEvaluationRating | null)[];
+  /** Exactly 5 entries, in printed order. */
+  comments: string[];
+
+  // Derived server-side from `ratings` and never accepted from the client, so the
+  // printed total can never disagree with the ticks above it.
+  overallRating: number;
+  qualitativeRating: TrainingQualitativeRating;
+
+  status: "Draft" | "Finalized";
+  evaluatedBy: string;  // the HR user who keyed it - distinct from the signatory
+  evaluatedAt: string;
+}
 
 // Money going OUT: the disbursement voucher Finance releases to an employee before an
 // activity. The COA Liquidation Report's "AMOUNT OF CASH ADVANCE PER DV NO. __ DTD __"

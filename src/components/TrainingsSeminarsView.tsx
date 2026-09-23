@@ -221,11 +221,26 @@ export default function TrainingsSeminarsView({ user, employees }) {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {assignedActivities.map(activity => (
-                      <div key={activity.id} className="border border-blue-200 bg-blue-50/50 rounded-lg p-4 shadow-sm flex flex-col justify-between">
+                      <div
+                        key={activity.id}
+                        className={`rounded-lg p-4 shadow-sm flex flex-col justify-between border ${
+                          activity.status === "Liquidated"
+                            ? "border-emerald-200 bg-emerald-50/40"
+                            : "border-blue-200 bg-blue-50/50"
+                        }`}
+                      >
                         <div>
                           <div className="flex justify-between items-start mb-2">
-                            <h3 className="font-bold text-blue-900 text-sm">{activity.title}</h3>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800">
+                            <h3 className={`font-bold text-sm ${activity.status === "Liquidated" ? "text-emerald-900" : "text-blue-900"}`}>
+                              {activity.title}
+                            </h3>
+                            {/* Settled seminars stay listed so the employee can see their own
+                                completed record; amber would wrongly read as still pending. */}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              activity.status === "Liquidated"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-amber-100 text-amber-800"
+                            }`}>
                               {activity.status}
                             </span>
                           </div>

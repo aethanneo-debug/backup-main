@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, Banknote, Loader2, RefreshCw } from "lucide-react";
 import { apiCall, formatCurrency } from "../../utils";
-import SectionCard, { SectionCount } from "./SectionCard";
+import SectionCard, { SectionCount } from "../ui/SectionCard";
 
 interface Props {
   /** Bumped by the parent so a liquidation elsewhere refreshes the funding state here. */

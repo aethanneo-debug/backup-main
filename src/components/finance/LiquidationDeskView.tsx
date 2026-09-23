@@ -15,7 +15,8 @@ import { User, UserRole } from "../../types";
 import { formatCurrency } from "../../utils";
 import CashAdvanceDesk from "./CashAdvanceDesk";
 import ReimbursementQueue from "./ReimbursementQueue";
-import SectionCard, { SectionCount } from "./SectionCard";
+import SectionCard, { SectionCount } from "../ui/SectionCard";
+import { overspendOf, OverspendBadge, OverspendNotice } from "../liquidation/overspend";
 
 /** The mandated sequence a liquidation dossier must travel, in order. */
 const PIPELINE_STEPS = ["Pending Submission", "Submitted", "Under Review", "Approved", "Completed"];
@@ -192,6 +193,10 @@ export default function LiquidationDeskView({
                       </p>
                     </div>
 
+                    {/* Finance is the second approver of an excess, so it is shown
+                        before the Validate button, not after. */}
+                    {overspendOf(sub) && <OverspendNotice over={overspendOf(sub)!} />}
+
                     <div className="grid max-w-md grid-cols-2 gap-2 md:grid-cols-3">
                       <div className="rounded border border-slate-200 bg-white p-2">
                         <span className="block font-mono text-[9px] font-semibold text-slate-400">Released Advance</span>
@@ -343,7 +348,12 @@ export default function LiquidationDeskView({
             <tbody className="divide-y divide-slate-100">
               {yearFilteredSubmissions.map((liq) => (
                 <tr key={liq.id} className="hover:bg-blue-50/40">
-                  <td className="px-4 py-3 font-mono font-bold text-slate-800">{liq.submissionNo}</td>
+                  <td className="px-4 py-3 font-mono font-bold text-slate-800">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {liq.submissionNo}
+                      {overspendOf(liq) && <OverspendBadge over={overspendOf(liq)!} />}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 font-mono text-slate-400">{liq.activityId}</td>
                   <td className="px-4 py-3 font-semibold text-slate-800">{liq.employeeName}</td>
                   <td className="max-w-[140px] truncate px-4 py-3 text-slate-400" title="N/A">N/A</td>

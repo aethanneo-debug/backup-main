@@ -13,6 +13,7 @@ import LiquidationCoaFields, {
   SettlementSummary
 } from "./liquidation/LiquidationCoaFields";
 import LiquidationReportModal from "./liquidation/LiquidationReportModal";
+import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal";
 import {
   User as UserIcon,
   Send,
@@ -68,6 +69,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   const [copies, setCopies] = useState(1);
   const [destination, setDestination] = useState("");
   const [passengers, setPassengers] = useState("");
+  // Vehicle Reservation Slip: departure and arrival are separate on the printed form.
+  const [vrsTimes, setVrsTimes] = useState({ departureDate: "", departureTime: "", arrivalDate: "", arrivalTime: "" });
+  const [slipRequest, setSlipRequest] = useState<any | null>(null);
   const [customRemarks, setCustomRemarks] = useState("");
 
   // Liquidation Upload Form
@@ -296,6 +300,11 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
         payload.passengers = passengers || "Self";
         payload.dateNeeded = startDate;
         payload.purpose = reason;
+        // Blank is allowed - the slip then prints ruled lines to fill in by hand.
+        payload.departureDate = vrsTimes.departureDate;
+        payload.departureTime = vrsTimes.departureTime;
+        payload.arrivalDate = vrsTimes.arrivalDate;
+        payload.arrivalTime = vrsTimes.arrivalTime;
       }
 
       const res = await apiCall("/api/requests", {
@@ -498,6 +507,12 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
     <>
       {/* Printable COA Liquidation Report. Mounted here so it overlays the whole portal
           and so `.lr-printing` on <body> can hide every other pixel when printing. */}
+      <VehicleReservationSlipModal
+        request={slipRequest}
+        division={profile?.division}
+        onClose={() => setSlipRequest(null)}
+      />
+
       <LiquidationReportModal
         submission={reportSubmission}
         activityLabel={reportSubmission ? activityLabelFor(reportSubmission.activityId) : undefined}
@@ -896,6 +911,32 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                         className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs"
                       />
                     </div>
+
+                    {/* Printed on the Vehicle Reservation Slip as Departure / Arrival. */}
+                    <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 p-2">
+                      <p className="col-span-2 text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                        Reservation Slip &mdash; Departure &amp; Arrival
+                      </p>
+                      {([
+                        ["departureDate", "Departure Date", "date"],
+                        ["departureTime", "Departure Time", "time"],
+                        ["arrivalDate", "Arrival Date", "date"],
+                        ["arrivalTime", "Arrival Time", "time"]
+                      ] as const).map(([key, label, kind]) => (
+                        <div key={key} className="space-y-1">
+                          <label className="text-[9px] font-bold text-slate-400 uppercase font-mono">{label}</label>
+                          <input
+                            type={kind}
+                            value={vrsTimes[key]}
+                            onChange={e => setVrsTimes(prev => ({ ...prev, [key]: e.target.value }))}
+                            className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono"
+                          />
+                        </div>
+                      ))}
+                      <p className="col-span-2 text-[9px] text-slate-400 font-mono leading-snug">
+                        Optional &mdash; left blank, the slip prints ruled lines for these.
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -957,6 +998,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                         }`}>
                           {r.status}
                         </span>
+                        {r.requestType === RequestType.VEHICLE && (
+                          <button
+                            onClick={() => setSlipRequest(r)}
+                            className="mt-2 px-3 py-1 bg-white border border-slate-300 text-slate-600 text-[10px] font-bold rounded hover:bg-slate-50 cursor-pointer"
+                          >
+                            View Slip
+                          </button>
+                        )}
                         {(r.status === "Rejected" || r.status === "Returned by HR" || r.status === "Returned by Division Chief") && (
                           <button
                             onClick={() => {

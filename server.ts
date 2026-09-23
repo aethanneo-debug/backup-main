@@ -59,7 +59,10 @@ import {
   SpendingCategory,
   SPENDING_CATEGORIES,
   TrainingExpenseCategory,
-  TRAINING_EXPENSE_CATEGORIES
+  TRAINING_EXPENSE_CATEGORIES,
+  TrainingEvaluationRating,
+  TrainingQualitativeRating,
+  TRAINING_EVALUATION_BANDS
 } from "./src/types";
 
 const app = express();
@@ -90,6 +93,7 @@ interface DBStructure {
   activities: any[];
   liquidationSubmissions: any[];
   cashAdvances: any[];
+  trainingEvaluations: any[];
   activityBudgetLinks: any[];
   pds: PDS[];
   fiscalYears: any[];
@@ -434,6 +438,10 @@ function getInitialData(): DBStructure {
       }
       if (!loaded.cashAdvances) {
         loaded.cashAdvances = [];
+        changed = true;
+      }
+      if (!loaded.trainingEvaluations) {
+        loaded.trainingEvaluations = [];
         changed = true;
       }
 
@@ -936,6 +944,7 @@ function getInitialData(): DBStructure {
     activities: [],
     liquidationSubmissions: [],
     cashAdvances: [],
+    trainingEvaluations: [],
     activityBudgetLinks: [
       { id: "bl-1", liquidationNo: "LIQ-2026-001", employee: "Andres B. Bonifacio", department: "Adjudication Division", amount: 12000.00, budgetId: "b-1", timestamp: "2026-06-14T10:00:00Z" },
       { id: "bl-2", liquidationNo: "LIQ-2026-002", employee: "Apolinario M. Mabini", department: "Legal Division", amount: 25000.00, budgetId: "b-3", timestamp: "2026-06-15T11:30:00Z" }
@@ -1777,7 +1786,11 @@ app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (re
     return res.status(403).json({ status: "error", message: "You can only view your own assigned seminars." });
   }
   const assignedRecords = db.trainingParticipants
-    .filter(p => forms.includes(p.employeeId) && p.status !== "Liquidated" && p.status !== "Archived" && p.status !== "Cancelled")
+    // "Liquidated" deliberately stays in the list. Dropping it made a seminar the
+    // employee had fully settled disappear from their own records with no trace that it
+    // completed, which reads as the liquidation having gone missing. Callers that need
+    // only open items — the liquidation picker — filter it out themselves.
+    .filter(p => forms.includes(p.employeeId) && p.status !== "Archived" && p.status !== "Cancelled")
     .map(p => {
       const prog = db.trainingPrograms.find(tp => tp.id === p.trainingProgramId);
       if (prog) {
@@ -2725,7 +2738,14 @@ app.post("/api/requests", authenticateToken, (req: any, res) => {
         destination: data.destination,
         purpose: data.purpose,
         dateNeeded: data.dateNeeded,
-        passengers: data.passengers
+        passengers: data.passengers,
+        // Vehicle Reservation Slip fields. The serial is issued here rather than typed,
+        // so the printed slip carries a number the office can file against.
+        vrsNo: nextVrsNo(new Date()),
+        departureDate: data.departureDate || "",
+        departureTime: data.departureTime || "",
+        arrivalDate: data.arrivalDate || "",
+        arrivalTime: data.arrivalTime || ""
       } as any;
       break;
     case RequestType.ZOOM:
@@ -3625,7 +3645,10 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
 
 app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const { dateRequested, startDate, endDate, dateNeeded, meetingDate } = req.body;
+  const {
+    dateRequested, startDate, endDate, dateNeeded, meetingDate,
+    departureDate, departureTime, arrivalDate, arrivalTime
+  } = req.body;
 
   const request = db.requests.find((r: any) => r.id === id);
   if (!request) {
@@ -3646,6 +3669,13 @@ app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
   } else if (request.requestType === RequestType.VEHICLE) {
     const vehicleReq = request as any;
     if (dateNeeded) vehicleReq.dateNeeded = dateNeeded;
+    // Reservation slip times, only overwritten when the correction supplies them.
+    if (departureDate !== undefined) vehicleReq.departureDate = departureDate;
+    if (departureTime !== undefined) vehicleReq.departureTime = departureTime;
+    if (arrivalDate !== undefined) vehicleReq.arrivalDate = arrivalDate;
+    if (arrivalTime !== undefined) vehicleReq.arrivalTime = arrivalTime;
+    // A slip filed before serials existed gets one on its first correction.
+    if (!vehicleReq.vrsNo) vehicleReq.vrsNo = nextVrsNo(new Date());
   } else if (request.requestType === RequestType.ZOOM) {
     const zoomReq = request as any;
     if (meetingDate) zoomReq.meetingDate = meetingDate;
@@ -4006,6 +4036,17 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
   saveDB();
   res.json({ status: "success", data: sub });
 });
+// Serial for the Vehicle Reservation Slip, e.g. "VRS-2026-09-014". Numbering restarts
+// each month, matching the liquidation serial's shape.
+function nextVrsNo(when: Date): string {
+  const scope = `VRS-${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-`;
+  const used = (db.requests || [])
+    .map((r: any) => String(r.vrsNo || ""))
+    .filter((n: string) => n.startsWith(scope))
+    .map((n: string) => Number(n.slice(scope.length)) || 0);
+  return `${scope}${String((used.length ? Math.max(...used) : 0) + 1).padStart(3, "0")}`;
+}
+
 // --- CASH ADVANCES: the money-out record ---
 
 function isCashAdvanceRole(role: UserRole) {
@@ -5098,6 +5139,175 @@ function activeFiscalYearLabel(): string {
 
 // The distinct needed trainings in a year's plan — what HR ticks when saying which
 // of them a seminar covers.
+// --- POST-TRAINING PERFORMANCE EVALUATION REPORT ---
+
+const EVALUATION_ITEM_COUNT = 5;
+
+/**
+ * Normalises the five scored statements. Anything that is not 1-4 becomes null ("not yet
+ * rated") rather than an error, so a half-finished draft can still be saved; the total is
+ * simply lower until every statement is scored.
+ */
+function normalizeEvaluationRatings(raw: any): (TrainingEvaluationRating | null)[] {
+  const out: (TrainingEvaluationRating | null)[] = [];
+  for (let i = 0; i < EVALUATION_ITEM_COUNT; i++) {
+    const v = Number(Array.isArray(raw) ? raw[i] : undefined);
+    out.push(v === 1 || v === 2 || v === 3 || v === 4 ? (v as TrainingEvaluationRating) : null);
+  }
+  return out;
+}
+
+function normalizeEvaluationComments(raw: any): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < EVALUATION_ITEM_COUNT; i++) {
+    out.push(String((Array.isArray(raw) ? raw[i] : "") ?? "").trim());
+  }
+  return out;
+}
+
+/**
+ * Overall Rating is the sum of the five ticks and the Qualitative Rating is its band —
+ * both derived here and never accepted from the client, so the printed rating can never
+ * disagree with the boxes above it.
+ */
+function evaluationTotals(ratings: (TrainingEvaluationRating | null)[]) {
+  const overallRating = ratings.reduce((sum: number, r) => sum + (r || 0), 0);
+  const band = TRAINING_EVALUATION_BANDS.find(b => overallRating >= b.min && overallRating <= b.max);
+  // The printed table stops at 20, which is also the maximum, so a miss can only mean a
+  // malformed ratings array; fall back to the lowest band rather than leaving it blank.
+  const qualitativeRating: TrainingQualitativeRating = band ? band.label : TRAINING_EVALUATION_BANDS[0].label;
+  return { overallRating, qualitativeRating };
+}
+
+/** Everyone whose seminar has finished, with their evaluation if one exists. */
+app.get("/api/training/evaluations", authenticateToken, (req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Training evaluations are restricted to HR." });
+  }
+
+  const today = manilaToday();
+  const rows: any[] = [];
+
+  for (const p of (db.trainingParticipants || [])) {
+    if (p.status === "Cancelled" || p.status === "Archived") continue;
+    const prog = (db.trainingPrograms || []).find((tp: any) => tp.id === p.trainingProgramId);
+    if (!prog) continue;
+
+    // Evaluation is about performance after the fact, so it opens when the seminar has
+    // ended — not when the money is settled.
+    const ended = toIsoDateLoose(prog.endDate);
+    if (!ended || !onOrBeforeAsOf(ended, today)) continue;
+
+    const emp = (db.employees || []).find((e: any) => e.id === p.employeeId || e.employeeId === p.employeeId);
+    const evaluation = (db.trainingEvaluations || []).find((e: any) => e.trainingParticipantId === p.id) || null;
+
+    rows.push({
+      trainingParticipantId: p.id,
+      trainingProgramId: prog.id,
+      employeeId: p.employeeId,
+      employeeName: emp ? emp.fullName : p.employeeId,
+      // Printed on the report; read here so HR never retypes them.
+      position: emp ? emp.position : "",
+      division: emp ? emp.division : "",
+      trainingTitle: String(prog.title || "").trim(),
+      dateConducted: prog.startDate,
+      dateEnded: prog.endDate,
+      organizer: prog.facilitator || "",
+      participantStatus: p.status,
+      evaluation
+    });
+  }
+
+  rows.sort((a, b) =>
+    Number(!!a.evaluation) - Number(!!b.evaluation) ||
+    String(a.employeeName).localeCompare(String(b.employeeName)));
+  res.json({ status: "success", data: rows });
+});
+
+/** Create or update the evaluation for one participant. One per person per seminar. */
+app.post("/api/training/evaluations", authenticateToken, (req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Only HR may record a training evaluation." });
+  }
+
+  const {
+    trainingParticipantId, dateOfEvaluation, supervisorName, supervisorPosition,
+    ratings, comments, status
+  } = req.body || {};
+
+  if (!trainingParticipantId) {
+    return res.status(400).json({ status: "error", message: "Choose the participant this evaluation is for." });
+  }
+
+  const participant = (db.trainingParticipants || []).find((p: any) => p.id === trainingParticipantId);
+  if (!participant) {
+    return res.status(404).json({ status: "error", message: "That seminar participant no longer exists." });
+  }
+
+  const prog = (db.trainingPrograms || []).find((tp: any) => tp.id === participant.trainingProgramId);
+  if (!prog) {
+    return res.status(404).json({ status: "error", message: "That seminar no longer exists." });
+  }
+
+  const ended = toIsoDateLoose(prog.endDate);
+  if (!ended || !onOrBeforeAsOf(ended, manilaToday())) {
+    return res.status(400).json({ status: "error", message: "This seminar has not finished yet, so it cannot be evaluated." });
+  }
+
+  const finalising = status === "Finalized";
+  const cleanRatings = normalizeEvaluationRatings(ratings);
+  const cleanComments = normalizeEvaluationComments(comments);
+
+  // A draft may be incomplete; a finalised report is a signed record and may not be.
+  if (finalising) {
+    if (cleanRatings.some(r => r === null)) {
+      return res.status(400).json({ status: "error", message: "Score all five statements before finalising." });
+    }
+    if (!String(supervisorName || "").trim()) {
+      return res.status(400).json({ status: "error", message: "Enter the immediate supervisor's name before finalising." });
+    }
+    if (!isIsoDate(dateOfEvaluation)) {
+      return res.status(400).json({ status: "error", message: "Enter the date of evaluation before finalising." });
+    }
+  }
+
+  const totals = evaluationTotals(cleanRatings);
+  const existing = (db.trainingEvaluations || []).find((e: any) => e.trainingParticipantId === trainingParticipantId);
+
+  if (existing && existing.status === "Finalized") {
+    return res.status(400).json({
+      status: "error",
+      message: `This evaluation was finalised on ${existing.dateOfEvaluation || existing.evaluatedAt?.split("T")[0]} and can no longer be changed.`
+    });
+  }
+
+  const record = {
+    id: existing ? existing.id : `tev-${Date.now()}`,
+    trainingParticipantId,
+    trainingProgramId: prog.id,
+    employeeId: participant.employeeId,
+    dateOfEvaluation: dateOfEvaluation || "",
+    supervisorName: String(supervisorName || "").trim(),
+    supervisorPosition: String(supervisorPosition || "").trim(),
+    ratings: cleanRatings,
+    comments: cleanComments,
+    overallRating: totals.overallRating,
+    qualitativeRating: totals.qualitativeRating,
+    status: finalising ? "Finalized" : "Draft",
+    evaluatedBy: (req as any).user.fullName,
+    evaluatedAt: new Date().toISOString()
+  };
+
+  if (existing) Object.assign(existing, record);
+  else db.trainingEvaluations.push(record);
+
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role,
+    finalising ? "Finalize Training Evaluation" : "Save Training Evaluation",
+    `${finalising ? "Finalised" : "Saved draft"} post-training evaluation for participant ${trainingParticipantId} — ${totals.overallRating}/20 (${totals.qualitativeRating})`);
+  saveDB();
+  res.json({ status: "success", data: record });
+});
+
 app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Wallet } from "lucide-react";
 import { apiCall, formatCurrency, formatDate } from "../../utils";
-import SectionCard, { SectionCount } from "./SectionCard";
+import SectionCard, { SectionCount } from "../ui/SectionCard";
+import { overspendOf, OverspendBadge } from "../liquidation/overspend";
 
 interface Props {
   /** Every liquidation submission Finance can see. Filtered here, not by the caller. */
@@ -161,6 +162,8 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
                   <span className="text-[10px] font-mono bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
                     {sub.serialNo || sub.submissionNo}
                   </span>
+                  {/* An out-of-pocket claim often IS an overspend; say so at payment time. */}
+                  {overspendOf(sub) && <OverspendBadge over={overspendOf(sub)!} />}
                   <span className="text-[10px] text-slate-400 font-mono">
                     {formatDate(sub.createdAt || sub.dateSubmitted)}
                   </span>

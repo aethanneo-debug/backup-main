@@ -102,6 +102,12 @@ export default function RequestsView({ user, requests, supplies, fetchSummary, o
     destination: "",
     purpose: "",
     dateNeeded: "",
+    // Vehicle Reservation Slip: the printed form asks for departure and arrival
+    // separately, with a time on each.
+    departureDate: "",
+    departureTime: "",
+    arrivalDate: "",
+    arrivalTime: "",
     passengers: ""
   });
 
@@ -177,7 +183,7 @@ export default function RequestsView({ user, requests, supplies, fetchSummary, o
         // Reset forms
         setLeaveForm({ leaveType: "Sick Leave", startDate: "", endDate: "", reason: "" });
         setServiceForm({ purpose: "", copies: 1 });
-        setVehicleForm({ destination: "", purpose: "", dateNeeded: "", passengers: "" });
+        setVehicleForm({ destination: "", purpose: "", dateNeeded: "", departureDate: "", departureTime: "", arrivalDate: "", arrivalTime: "", passengers: "" });
         setZoomForm({ meetingTitle: "", meetingDate: "", startTime: "", endTime: "", alternativeHost: "" });
         setSupplyForm({ supplyId: "", quantity: 1, purpose: "" });
       }
@@ -669,6 +675,54 @@ export default function RequestsView({ user, requests, supplies, fetchSummary, o
                       className="w-full border border-slate-200 bg-slate-50 p-2 rounded-lg text-xs h-16"
                     />
                   </div>
+
+                  {/* Printed on the Vehicle Reservation Slip as Departure / Arrival. */}
+                  <fieldset className="rounded-lg border border-slate-200 p-3 space-y-3">
+                    <legend className="px-1 text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold">
+                      Reservation Slip &mdash; Departure &amp; Arrival
+                    </legend>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block">Departure Date</label>
+                        <input
+                          type="date"
+                          value={vehicleForm.departureDate}
+                          onChange={(e) => setVehicleForm({ ...vehicleForm, departureDate: e.target.value })}
+                          className="w-full border border-slate-200 bg-slate-50 p-2 rounded-lg text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block">Departure Time</label>
+                        <input
+                          type="time"
+                          value={vehicleForm.departureTime}
+                          onChange={(e) => setVehicleForm({ ...vehicleForm, departureTime: e.target.value })}
+                          className="w-full border border-slate-200 bg-slate-50 p-2 rounded-lg text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block">Arrival Date</label>
+                        <input
+                          type="date"
+                          value={vehicleForm.arrivalDate}
+                          onChange={(e) => setVehicleForm({ ...vehicleForm, arrivalDate: e.target.value })}
+                          className="w-full border border-slate-200 bg-slate-50 p-2 rounded-lg text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block">Arrival Time</label>
+                        <input
+                          type="time"
+                          value={vehicleForm.arrivalTime}
+                          onChange={(e) => setVehicleForm({ ...vehicleForm, arrivalTime: e.target.value })}
+                          className="w-full border border-slate-200 bg-slate-50 p-2 rounded-lg text-xs"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-slate-400 font-mono leading-snug">
+                      Left blank, the slip prints ruled lines for these to be filled in by hand.
+                    </p>
+                  </fieldset>
                 </div>
               )}
 

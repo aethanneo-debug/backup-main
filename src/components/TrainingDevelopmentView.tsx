@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee } from "../types";
 import { apiCall } from "../utils";
-import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart } from "lucide-react";
+import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import NeedCoverageModal from "./training/NeedCoverageModal";
 import TrainingNeedsPlanA from "./training/TrainingNeedsPlanA";
 import TrainingMonitoringPlanD from "./training/TrainingMonitoringPlanD";
+import TrainingEvaluationsDesk from "./training/evaluation/TrainingEvaluationsDesk";
+
+// The four steps of the cycle, in the order the office works through them.
+const TAB_BLURB: Record<string, string> = {
+  "plan-a": "Step 1 — list what each employee still needs.",
+  "programs": "Step 2 — run the seminar: create it, link it to the plan, pick participants.",
+  "plan-d": "Step 3 — see which needs have been accomplished.",
+  "evaluations": "Step 4 — evaluate what each participant brought back from the seminar."
+};
 
 // Shared with the Plan A / Plan D sheets so all three tabs read as one document.
 const CELL_INPUT = "w-full border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none";
@@ -22,7 +31,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
   const [employees, setEmployees] = useState<Employee[]>([]);
   
   // Opens on Plan A: the plan is written before the seminars that answer it.
-  const [activeTab, setActiveTab] = useState<"programs" | "plan-a" | "plan-d">("plan-a");
+  const [activeTab, setActiveTab] = useState<"programs" | "plan-a" | "plan-d" | "evaluations">("plan-a");
   const [coverageModalData, setCoverageModalData] = useState<{ rowId: string; isNew: boolean; seminarTitle: string; fiscalYear?: string; selectedTitles: string[] } | null>(null);
   const [showLiqModal, setShowLiqModal] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState("");
@@ -425,7 +434,16 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
                 ))}
               </div>
             ) : (
-              <span className="text-[10px] text-slate-400 italic">Not linked to the plan</span>
+              /* A seminar with no covered need can never mark anything accomplished in
+                 Plan D, and its participants lose the "Needs this" ranking. That used to
+                 read as grey italic small print, which is how it went unnoticed. */
+              <div className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 leading-snug">
+                <span className="block text-[10px] font-semibold text-amber-800">Not linked to the plan</span>
+                <span className="block text-[9px] text-amber-700">
+                  Edit this row and tick the need it answers &mdash; otherwise Plan D can never
+                  mark it accomplished.
+                </span>
+              </div>
             )
           )}
         </td>
@@ -591,13 +609,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Training Development Plan</h2>
-          <p className="text-slate-500">
-            {activeTab === "plan-a"
-              ? "Step 1 — list what each employee still needs."
-              : activeTab === "programs"
-              ? "Step 2 — run the seminar: create it, link it to the plan, pick participants."
-              : "Step 3 — see which needs have been accomplished."}
-          </p>
+          <p className="text-slate-500">{TAB_BLURB[activeTab]}</p>
         </div>
         {activeTab === "programs" && (
           <div className="flex gap-3">
@@ -616,12 +628,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
         )}
       </div>
 
-      {/* Ordered as the work actually flows: plan the needs, run the seminar, monitor the result. */}
+      {/* Ordered as the work actually flows: plan the needs, run the seminar, monitor the
+          result, then evaluate the people who attended. */}
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white p-1 rounded-xl shadow-xs">
         {([
           { key: "plan-a", step: 1, label: "Plan A — Training Needs", icon: <Target size={14} /> },
           { key: "programs", step: 2, label: "Programs & Budget", icon: <BookOpen size={14} /> },
-          { key: "plan-d", step: 3, label: "Plan D — Monitoring", icon: <CheckCircle2 size={14} /> }
+          { key: "plan-d", step: 3, label: "Plan D — Monitoring", icon: <CheckCircle2 size={14} /> },
+          { key: "evaluations", step: 4, label: "Evaluations", icon: <ClipboardCheck size={14} /> }
         ] as const).map((tab, i) => (
           <div key={tab.key} className="flex items-center gap-1">
             {i > 0 && <ChevronRight size={14} className="text-slate-300 shrink-0" />}
@@ -651,7 +665,18 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
           </div>
         </>
       )}
-      {activeTab === "plan-d" && <TrainingMonitoringPlanD />}
+      {activeTab === "plan-d" && (
+        <>
+          <TrainingMonitoringPlanD />
+          <div className="flex justify-end">
+            <button onClick={() => setActiveTab("evaluations")} className="text-xs font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1.5 cursor-pointer">
+              Next: evaluate the participants <ChevronRight size={14} />
+            </button>
+          </div>
+        </>
+      )}
+
+      {activeTab === "evaluations" && <TrainingEvaluationsDesk />}
 
       {activeTab === "programs" && (<>
 

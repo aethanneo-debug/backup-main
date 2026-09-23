@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { User, RequestStatus } from "../types";
 import { apiCall } from "../utils";
+import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
 
 interface HrUnifiedRequestsProps {
@@ -269,6 +270,12 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
                 </div>
               )}
               
+              {/* HR is one of the two approvers of an excess, so the variance belongs
+                  here - on the screen where the endorsement is given. */}
+              {viewItem._category === "Liquidation" && overspendOf(viewItem) && (
+                <OverspendNotice over={overspendOf(viewItem)!} />
+              )}
+
               {viewItem.destination && (
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase font-mono mb-1">Destination</p>
@@ -424,7 +431,12 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
                     </span>
                   </td>
                   <td className="p-3 text-xs text-slate-800 font-medium">
-                    {item._title}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {item._title}
+                      {/* Visible before opening the row, so a queue of ten shows at a
+                          glance which ones carry an excess. */}
+                      {overspendOf(item) && <OverspendBadge over={overspendOf(item)!} />}
+                    </span>
                     {(item.purpose || item.reason || item.meetingTitle) && <p className="text-[9px] font-normal text-slate-500 mt-0.5 truncate max-w-[200px]">{item.purpose || item.reason || item.meetingTitle}</p>}
                   </td>
                   <td className="p-3 text-xs text-slate-600">{item._requester}</td>
