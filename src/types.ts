@@ -675,6 +675,11 @@ export interface TrainingNeed {
   // Plan D: HR's decision overrides whatever the evidence says.
   accomplishedOverride?: boolean;
   remarks?: string;
+  // Set when the fiscal-year rollover brought this need forward because it was still
+  // unmet. It holds the year the need was FIRST raised, not merely the previous one, so
+  // a need that has rolled twice still reads "carried from 2025" and its true age stays
+  // visible in Plan A.
+  carriedFromFiscalYear?: string;
   createdAt: string;
   createdBy: string;
 }

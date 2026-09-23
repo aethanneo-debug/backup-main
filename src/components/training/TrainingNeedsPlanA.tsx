@@ -139,7 +139,20 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
                           <ul className="space-y-1">
                             {rows.map(need => (
                               <li key={need.id} className="group flex items-start justify-between gap-2">
-                                <span className="text-slate-700 leading-snug">{need.title}</span>
+                                <span className="min-w-0 text-slate-700 leading-snug">
+                                  {need.title}
+                                  {/* Brought forward unmet by the fiscal-year rollover. The year shown
+                                      is when it was first raised, so a need outstanding for two plan
+                                      years reads as two years old rather than looking new. */}
+                                  {need.carriedFromFiscalYear && (
+                                    <span
+                                      title={`Still unmet since CY ${need.carriedFromFiscalYear}`}
+                                      className="ml-1.5 inline-block rounded border border-amber-200 bg-amber-50 px-1 py-px align-middle font-mono text-[9px] font-bold uppercase tracking-wider text-amber-700"
+                                    >
+                                      from {need.carriedFromFiscalYear}
+                                    </span>
+                                  )}
+                                </span>
                                 <button
                                   onClick={() => removeNeed(need.id, need.title)}
                                   disabled={busy}

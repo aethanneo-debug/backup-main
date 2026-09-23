@@ -1104,6 +1104,63 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
           totalBudget: carryOver
         }];
       }
+
+      // Carry Plan A forward. A new plan year inherits the PREVIOUS year's unmet needs —
+      // HR does not re-interview from a blank sheet. Needs that were accomplished stay
+      // with the closed year as its record and are deliberately not repeated.
+      //
+      // This also repairs the link the programme copy above would otherwise break: those
+      // copies keep their `fulfillsNeedTitles`, and without the matching need in the new
+      // year the participant ranking and the Plan D checkoff would both find nothing.
+      const asOf = manilaToday();
+      const oldNeeds = (db.trainingNeeds || []).filter((n: TrainingNeed) => n.fiscalYear === activeFy.label);
+      const carriedNeeds: TrainingNeed[] = [];
+
+      for (const need of oldNeeds) {
+        if (needAccomplishment(need, asOf).accomplished) continue;
+
+        // Someone who has left should not reappear in next year's plan.
+        const emp = (db.employees || []).find((e: any) => e.id === need.employeeId || e.employeeId === need.employeeId);
+        if (!emp || emp.isActive === false) continue;
+
+        // Never raise the same need twice for the same person in one year.
+        const needKey = normalizeTitle(need.title);
+        const alreadyThere = (db.trainingNeeds || []).some((n: TrainingNeed) =>
+          n.fiscalYear === newFy.label && n.employeeId === need.employeeId && normalizeTitle(n.title) === needKey);
+        if (alreadyThere) continue;
+
+        carriedNeeds.push({
+          ...need,
+          id: `tn-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+          fiscalYear: newFy.label,
+          // Keep the ORIGINAL year, so a need rolled twice still shows its true age.
+          carriedFromFiscalYear: need.carriedFromFiscalYear || activeFy.label,
+          // The evidence is re-evaluated against the new year; a stale manual override
+          // would otherwise mark it accomplished before anything has happened.
+          accomplishedOverride: undefined,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      if (carriedNeeds.length > 0) {
+        db.trainingNeeds = [...(db.trainingNeeds || []), ...carriedNeeds];
+
+        // Creating plan entries silently is how HR ends up confused about where they
+        // came from, so say it plainly.
+        if (!db.notifications) db.notifications = [];
+        db.notifications.push({
+          id: `notif-${Date.now()}-needs`,
+          title: `${carriedNeeds.length} unmet training need${carriedNeeds.length === 1 ? "" : "s"} carried to ${newFy.label}`,
+          message: `Plan A for ${newFy.label} starts with ${carriedNeeds.length} need${carriedNeeds.length === 1 ? "" : "s"} still unmet from ${activeFy.label}. Accomplished needs were left with ${activeFy.label}.`,
+          isRead: false,
+          type: "info",
+          timestamp: new Date().toISOString(),
+          targetRole: UserRole.HR_OFFICER
+        });
+      }
+
+      logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Carry Training Needs",
+        `Carried ${carriedNeeds.length} unmet need(s) from ${activeFy.label} to ${newFy.label}; ${oldNeeds.length - carriedNeeds.length} not carried (accomplished, inactive employee, or duplicate)`);
     }
 
   db.fiscalYears.unshift(newFy);
