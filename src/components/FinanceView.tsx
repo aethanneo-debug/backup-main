@@ -41,7 +41,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import LiquidationDeskView from "./finance/LiquidationDeskView";
-import { apiCall, formatCurrency, formatDate, downloadCSV } from "../utils";
+import { apiCall, formatCurrency, formatDate, downloadCSV, firstDateString } from "../utils";
 
 interface FinanceViewProps {
   user: User;
@@ -556,7 +556,15 @@ export default function FinanceView({
 
   // Live filter matching for Transactions
   const yearFilteredTxns = txnList.filter(tx => tx.transactionDate.startsWith(activeFiscalYear));
-  const yearFilteredSubmissions = submissions.filter(s => s.createdAt && s.createdAt.startsWith(activeFiscalYear));
+  // Liquidation submissions name their date differently depending on when they were
+  // filed: only records created after the recent work carry `createdAt`, older ones have
+  // `dateSubmitted`. Filtering on `createdAt` alone dropped every older report out of the
+  // whole Finance view - the index table, the pending count and the CSV export - so a
+  // real liquidation was simply invisible to the Financial Officer.
+  const yearFilteredSubmissions = submissions.filter(s => {
+    const when = firstDateString(s.createdAt, s.dateSubmitted);
+    return !!when && when.startsWith(activeFiscalYear);
+  });
 
   const filteredTxns = yearFilteredTxns.filter((tx) => {
     const matchesSearch = 

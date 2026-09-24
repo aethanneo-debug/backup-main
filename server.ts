@@ -5785,6 +5785,66 @@ app.post("/api/training/liquidations", authenticateToken, (req: any, res: any) =
 });
 
 
+// Models tried in order when reading an uploaded PDS, best-known-working first.
+//
+// gemini-3.6-flash answers plain prompts and accepts a PDF, and accepts a responseSchema
+// — but returns 503 "high demand" for a PDF and a responseSchema TOGETHER, which is
+// exactly this request. The wording sent us chasing Google's capacity for days; it is a
+// fixed incompatibility, not a busy period, so it would never have recovered on its own.
+// It stays in the list so the route self-heals if Google fixes it.
+//
+// The free tier meters requests per day PER MODEL, so this list also multiplies the
+// daily ceiling rather than only providing a fallback.
+const PDS_PARSE_MODELS = [
+  "gemini-3-flash-preview",
+  "gemini-3.6-flash",
+  "gemini-3.1-flash-lite"
+];
+
+/** Statuses where a different model is worth trying. Anything else fails identically. */
+const PDS_RETRYABLE = new Set([429, 500, 502, 503, 504, 404]);
+
+/**
+ * Runs the extraction against each model in turn, returning the first success.
+ * Throws the last error, tagged with what was tried, when every model fails.
+ */
+async function generatePdsExtraction(ai: any, request: any) {
+  let lastError: any = null;
+
+  for (const model of PDS_PARSE_MODELS) {
+    try {
+      const response = await ai.models.generateContent({ ...request, model });
+      if (model !== PDS_PARSE_MODELS[0]) {
+        console.log(`[pds-parse] ${PDS_PARSE_MODELS[0]} unavailable; parsed with ${model}`);
+      }
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      const status = Number(err?.status);
+      console.warn(`[pds-parse] ${model} failed with ${status || "unknown"}`);
+      // A bad key or a malformed request fails the same way everywhere — stop rather
+      // than burn the daily quota of every model in the list proving it.
+      if (!PDS_RETRYABLE.has(status)) break;
+    }
+  }
+
+  const err: any = new Error(lastError?.message || "All PDS reader models failed.");
+  err.status = Number(lastError?.status) || 502;
+  err.triedAll = true;
+  throw err;
+}
+
+/** What an HSAC clerk should read, rather than Google's raw JSON. */
+function pdsParseUserMessage(status: number): string {
+  if (status === 429) {
+    return "The PDS reader has reached today's usage limit. Please enter your details manually, or try again tomorrow.";
+  }
+  if (status === 401 || status === 403) {
+    return "The PDS reader is not configured correctly. Please tell your system administrator, and enter your details manually for now.";
+  }
+  return "The PDS reader is unavailable right now. Please try again in a few minutes, or enter your details manually.";
+}
+
 app.post("/api/pds/parse", authenticateToken, async (req: any, res) => {
   try {
     const { base64Data, mimeType } = req.body;
@@ -5802,8 +5862,7 @@ app.post("/api/pds/parse", authenticateToken, async (req: any, res) => {
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
     });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    const response = await generatePdsExtraction(ai, {
       contents: [
         { inlineData: { data: base64Data, mimeType: mimeType || "application/pdf" } },
         "Extract the personal information from this Personal Data Sheet (PDS). If the document is missing some fields, leave them empty."
@@ -5934,8 +5993,17 @@ app.post("/api/pds/parse", authenticateToken, async (req: any, res) => {
     
     res.json({ status: "success", data: parsed });
   } catch (err: any) {
-    console.error("PDS Parsing error:", err);
-    res.status(500).json({ status: "error", message: err.message });
+    // Keep the upstream detail in the server log for diagnosis, but never render
+    // Google's raw JSON to an HSAC clerk filling in their own PDS.
+    console.error("PDS Parsing error:", err?.status || "", err?.message || err);
+    const status = Number(err?.status) || 502;
+    res.status(502).json({
+      status: "error",
+      message: pdsParseUserMessage(status),
+      // The frontend keeps manual entry available regardless; this just makes the
+      // reason explicit for anyone reading the response.
+      canEnterManually: true
+    });
   }
 });
 
