@@ -758,6 +758,105 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1790683169808-468",
+      "timestamp": "2026-09-29T11:59:29.808Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790683118904-189",
+      "timestamp": "2026-09-29T11:58:38.904Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790682383285-64",
+      "timestamp": "2026-09-29T11:46:23.285Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790682378240-250",
+      "timestamp": "2026-09-29T11:46:18.240Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790682216968-230",
+      "timestamp": "2026-09-29T11:43:36.968Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790682212105-806",
+      "timestamp": "2026-09-29T11:43:32.105Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790682011884-421",
+      "timestamp": "2026-09-29T11:40:11.884Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790682007150-274",
+      "timestamp": "2026-09-29T11:40:07.150Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790681785650-550",
+      "timestamp": "2026-09-29T11:36:25.650Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790681780866-502",
+      "timestamp": "2026-09-29T11:36:20.866Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790681745374-776",
+      "timestamp": "2026-09-29T11:35:45.374Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
       "id": "log-1790679947981-747",
       "timestamp": "2026-09-29T11:05:47.981Z",
       "userId": "u-2",
@@ -4859,7 +4958,7 @@
       "id": "part-1789755275183-876",
       "trainingProgramId": "tp-1789755275182",
       "employeeId": "emp-7",
-      "status": "Assigned",
+      "status": "Liquidation Pending",
       "allowanceAllocated": 5000
     },
     {
@@ -4954,5 +5053,21 @@
     }
   ],
   "cashAdvances": [],
-  "trainingEvaluations": []
+  "trainingEvaluations": [],
+  "backups": [
+    {
+      "id": "bkp-1",
+      "filename": "hsac_rab1_backup_2026-07-01.sql",
+      "date": "2026-07-01T00:00:00Z",
+      "size": "4.2 MB",
+      "status": "Completed"
+    },
+    {
+      "id": "bkp-2",
+      "filename": "hsac_rab1_backup_2026-07-05.sql",
+      "date": "2026-07-05T00:00:00Z",
+      "size": "4.5 MB",
+      "status": "Completed"
+    }
+  ]
 }
