@@ -19,7 +19,9 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
     children: [], education: [], civilService: [], serviceRecords: [], trainings: []
   };
 
-  const [formData, setFormData] = useState(emptyPdsDefaults);
+  // Salary and Position arrive from their own inputs and the PDS upload, never from the
+  // blank defaults, so the type has to name them.
+  const [formData, setFormData] = useState<typeof emptyPdsDefaults & { salary?: string | number; position?: string }>(emptyPdsDefaults);
   const [trainingsLedger, setTrainingsLedger] = useState([]);
   const [serviceRecordsLedger, setServiceRecordsLedger] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -984,7 +986,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
                   onClick={() => activeTab < 5 ? setActiveTab(activeTab + 1) : handleSave()} 
                   className={`px-4 py-2 ${activeTab === 5 ? 'bg-blue-600 hover:bg-blue-700 text-white shadow' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'} rounded text-xs font-bold`}
                 >
-                  {activeTab === 5 ? 'Save Final Changes' : 'Next Section &rarr;'}
+                  {activeTab === 5 ? 'Save Final Changes' : 'Next Section'}
                 </button>
               </div>
 
