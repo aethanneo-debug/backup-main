@@ -105,7 +105,7 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
       <PlanHeader planTitle="Training and Development Plan - A (Training)" subtitle={`For CY ${fiscalYear}`} />
 
       <p className="text-xs text-slate-500 mb-3">
-        List what each employee still needs. Seminars they actually attend are checked off automatically in <strong>Plan D</strong>.
+        List what each employee still needs. Seminars they actually attend are checked off automatically in <strong>Monitoring</strong>.
       </p>
 
       {/* Reading the official workbook instead of retyping it. load() is the same

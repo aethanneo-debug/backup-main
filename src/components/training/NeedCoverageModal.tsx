@@ -79,7 +79,7 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
             </div>
           ) : needs.length === 0 ? (
             <p className="text-xs text-slate-500 italic py-6 text-center">
-              Nothing listed in Plan A for this fiscal year yet. Add needed trainings in the <strong>Plan A — Training Needs</strong> tab first.
+              No training needs are listed for this fiscal year yet. Add them in the <strong>Training Needs</strong> tab first.
             </p>
           ) : (
             <>

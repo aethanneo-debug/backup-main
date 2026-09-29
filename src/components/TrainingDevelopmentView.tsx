@@ -632,9 +632,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
           result, then evaluate the people who attended. */}
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white p-1 rounded-xl shadow-xs">
         {([
-          { key: "plan-a", step: 1, label: "Plan A — Training Needs", icon: <Target size={14} /> },
+          { key: "plan-a", step: 1, label: "Training Needs", icon: <Target size={14} /> },
           { key: "programs", step: 2, label: "Programs & Budget", icon: <BookOpen size={14} /> },
-          { key: "plan-d", step: 3, label: "Plan D — Monitoring", icon: <CheckCircle2 size={14} /> },
+          { key: "plan-d", step: 3, label: "Monitoring", icon: <CheckCircle2 size={14} /> },
           { key: "evaluations", step: 4, label: "Evaluations", icon: <ClipboardCheck size={14} /> }
         ] as const).map((tab, i) => (
           <div key={tab.key} className="flex items-center gap-1">
