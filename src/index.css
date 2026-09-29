@@ -137,3 +137,44 @@
     page-break-inside: avoid;
   }
 }
+
+
+
+/* --- Training and Development Plan - D printing ---
+   The same mechanism once more: PlanDPrintModal renders through a React portal into <body>
+   as #tdpd-print-portal and adds `.tdpd-printing` to <body> while it is open, with its own
+   class/id pair like the three above. The sheet is eight columns wide, so it prints
+   landscape through a NAMED page: `@page` cannot be scoped by a body class, and a bare
+   `@page { size: landscape }` would turn every other printout in the app sideways too. */
+@page tdpd {
+  size: landscape;
+  margin: 10mm;
+}
+
+@media print {
+  body.tdpd-printing {
+    background: #fff;
+  }
+
+  body.tdpd-printing > *:not(#tdpd-print-portal) {
+    display: none !important;
+  }
+
+  body.tdpd-printing #tdpd-print-portal {
+    display: block !important;
+    position: static !important;
+    page: tdpd;
+  }
+
+  /* Keep the sheet's rules and shaded heading cells on paper. */
+  body.tdpd-printing #tdpd-print-root {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* A need line never splits across pages; the heading row repeats on each page by itself. */
+  body.tdpd-printing #tdpd-print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

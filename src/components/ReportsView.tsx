@@ -1,5 +1,5 @@
 import React from "react";
-import { Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest, User } from "../types";
+import { Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest, User, UserRole } from "../types";
 import { 
   FileSpreadsheet, 
   Download, 
@@ -13,6 +13,7 @@ import {
   BadgeAlert
 } from "lucide-react";
 import { formatDate } from "../utils";
+import PlanDReportCard from "./training/planD/PlanDReportCard";
 
 // Fully self-contained compliant CSV exporter
 function exportCSV(headers: string[], rows: string[][], filename: string) {
@@ -47,6 +48,10 @@ interface ReportsViewProps {
 }
 
 export default function ReportsView({ user, employees, transactions, assets, supplies, requests }: ReportsViewProps) {
+
+  // Plan D is HR's record, and GET /api/training/needs answers only HR and the Admin.
+  // Finance and Budget reach this page too, so they don't get a card that can only fail.
+  const canExportPlanD = user.role === UserRole.SUPER_ADMIN || user.role === UserRole.HR_OFFICER;
 
   // Report 1: Regional HR Personnel Master List
   function exportEmployeesCSV() {
@@ -392,6 +397,7 @@ export default function ReportsView({ user, employees, transactions, assets, sup
             </div>
           );
         })}
+        {canExportPlanD && <PlanDReportCard />}
       </div>
 
     </div>
