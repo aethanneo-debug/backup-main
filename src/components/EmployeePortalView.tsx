@@ -250,10 +250,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
 
       const merged = [...generalActivities, ...seminarActivities];
       setLiquidatable(merged);
-      if (merged.length > 0 && !selectedActivityId) {
-        setSelectedActivityId(merged[0].id);
-        setTotalReleased(merged[0].allocated);
-      }
+      // Nothing is pre-selected: the employee picks the assignment, and the dropdown's
+      // onChange fills the advance from Finance's record. Pre-selecting merged[0] used to
+      // seed HR's allocation as money received, and could land on an assignment the
+      // dropdown hides because it already has a report.
 
       // 4. Load submissions
       const subRes = await apiCall("/api/liquidation-submissions");
@@ -1156,6 +1156,18 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                           cashAdvanceDvNo: advance.dvNo || "",
                           cashAdvanceDvDate: advance.dvDate || ""
                         }));
+                      } else {
+                        // A DV filled in from another assignment's advance is that
+                        // assignment's voucher, not this one's. One the employee typed
+                        // for an unrecorded advance is left alone.
+                        setCoaFields(prev => {
+                          const fromAnotherAdvance = !!prev.cashAdvanceDvNo && (myAdvances ?? []).some(
+                            (a: any) => a.status === "Released" && a.dvNo === prev.cashAdvanceDvNo
+                          );
+                          return fromAnotherAdvance
+                            ? { ...prev, cashAdvanceDvNo: "", cashAdvanceDvDate: "" }
+                            : prev;
+                        });
                       }
                     }}
                     className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold"

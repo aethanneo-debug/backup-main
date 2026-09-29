@@ -3531,6 +3531,22 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   if (!activityId) {
     return res.status(400).json({ status: "error", message: "Please choose the activity this report settles." });
   }
+  // One report per assignment per employee. A returned report is corrected through
+  // /resubmit, and the employee's dropdown already hides an assignment that has a report;
+  // this makes the server agree, so a stale or pre-filled form cannot file a second one
+  // that Finance validation would then charge to the programme a second time.
+  if (employeeId) {
+    const forms = employeeIdForms(employeeId);
+    const existing = (db.liquidationSubmissions || []).find(
+      (l: any) => l.activityId === activityId && forms.includes(l.employeeId)
+    );
+    if (existing) {
+      return res.status(400).json({
+        status: "error",
+        message: `You already filed ${existing.submissionNo} for this assignment. Open it under My Settlement Log Entries to check its status or correct it.`
+      });
+    }
+  }
   // A cash advance of zero is legitimate: an employee assigned to a seminar who never
   // received the advance pays out of pocket, and this report is how they claim it back.
   // Only a missing or negative figure is rejected.
