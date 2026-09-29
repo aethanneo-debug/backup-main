@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ClipboardList, Loader2, Search, X } from "lucide-react";
-import { TrainingNeedCatalogItem } from "../../types";
+import {
+  TrainingNeedCatalogItem,
+  TrainingNeedCategory,
+  TRAINING_NEED_CATEGORIES,
+  TRAINING_NEED_COLUMN_LABELS
+} from "../../types";
 import { apiCall } from "../../utils";
 
 interface Props {
@@ -21,6 +26,8 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<string[]>(selectedTitles ?? []);
   const [query, setQuery] = useState("");
+  // One column of the official form, or "all" — the list as it has always been shown.
+  const [column, setColumn] = useState<TrainingNeedCategory | "all">("all");
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -39,7 +46,23 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
   }, [fiscalYear, reloadKey]);
 
   const selectedKeys = useMemo(() => new Set(selected.map(norm)), [selected]);
-  const visible = needs.filter(n => !query.trim() || norm(n.title).includes(norm(query)));
+  // A training listed under two columns (by different employees) belongs to both, so it
+  // is counted, and shown, under each of them.
+  const columnCounts = useMemo(() => {
+    const counts = {} as Record<TrainingNeedCategory, number>;
+    for (const c of TRAINING_NEED_CATEGORIES) counts[c] = needs.filter(n => (n.categories ?? []).includes(c)).length;
+    return counts;
+  }, [needs]);
+  const columnLabel = column === "all" ? "" : TRAINING_NEED_COLUMN_LABELS[column];
+  const visible = needs.filter(n =>
+    (column === "all" || (n.categories ?? []).includes(column)) &&
+    (!query.trim() || norm(n.title).includes(norm(query)))
+  );
+  // Filtering never unticks anything, so say when ticks are out of view. Only trainings in
+  // the plan count: a title the seminar kept from an older plan was never in this list.
+  const visibleKeys = new Set(visible.map(n => norm(n.title)));
+  const planKeys = new Set(needs.map(n => norm(n.title)));
+  const notShown = selected.filter(t => planKeys.has(norm(t)) && !visibleKeys.has(norm(t))).length;
 
   const toggle = (title: string) => {
     setSelected(prev => prev.some(t => norm(t) === norm(title))
@@ -83,18 +106,37 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
             </p>
           ) : (
             <>
-              <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
-                <input
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="Search the plan…"
-                  className="w-full border border-slate-300 rounded-lg pl-8 pr-2 py-2 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                />
+              <div className="space-y-2">
+                {/* The official form's three columns. Its own row: the labels are too long
+                    to share one with the search box at this width. */}
+                <select
+                  value={column}
+                  onChange={e => setColumn(e.target.value as TrainingNeedCategory | "all")}
+                  aria-label="Filter by column"
+                  className="w-full border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-700 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                >
+                  <option value="all">All columns ({needs.length})</option>
+                  {TRAINING_NEED_CATEGORIES.map(c => (
+                    <option key={c} value={c}>{TRAINING_NEED_COLUMN_LABELS[c]} ({columnCounts[c]})</option>
+                  ))}
+                </select>
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+                  <input
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Search the plan…"
+                    className="w-full border border-slate-300 rounded-lg pl-8 pr-2 py-2 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
               </div>
 
               {visible.length === 0 ? (
-                <p className="text-xs text-slate-500 italic">Nothing in the plan matches "{query}".</p>
+                <p className="text-xs text-slate-500 italic">
+                  {query.trim()
+                    ? `Nothing ${columnLabel ? `under ${columnLabel}` : "in the plan"} matches "${query}".`
+                    : `No trainings are listed under ${columnLabel}.`}
+                </p>
               ) : (
                 <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100">
                   {visible.map(need => {
@@ -125,7 +167,9 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
         </div>
 
         <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between items-center gap-3 shrink-0">
-          <span className="text-[11px] text-slate-500">{selected.length} selected</span>
+          <span className="text-[11px] text-slate-500">
+            {selected.length} selected{notShown > 0 ? ` (${notShown} not shown)` : ""}
+          </span>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-4 py-2 text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
             <button onClick={() => onConfirm(selected)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Confirm</button>
