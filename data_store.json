@@ -83,6 +83,29 @@
       "createdAt": "2026-09-19T16:55:52.451Z",
       "passwordHash": "0f5ea79acd281d24b9e16b7f04a1b6de:18ad501735a7353e1be38ef1ed0978f374b4e3b7c40cf2740fe8a9e5c0b9179013ac146cf76e1884f100b00ae303e58d139837fd54ab7f80d326daeb81c1eaa8",
       "requirePasswordChange": false
+    },
+    {
+      "id": "u-1790318864433",
+      "username": "Test Account",
+      "email": "czhonell@gmail.com",
+      "fullName": "Test Account",
+      "role": "Personnel",
+      "status": "Pending Password Change",
+      "employeeId": "EMP-301",
+      "createdAt": "2026-09-25T06:47:44.433Z",
+      "passwordHash": "d45a1efbfc80e5cba3a288c82d692a93:a0dc3e300f2abed599899d538b292938ac4f2ca3d00875a75f75e3a85b760e2c0bda80c595b1813ac40ec5e78c1532501a6cc4339d3a43ec6044feb3eb09bff7"
+    },
+    {
+      "id": "u-1790319091309",
+      "username": "Test Account 1",
+      "email": "23100867@slc-sflu.edu.ph",
+      "fullName": "Test Account 1",
+      "role": "Personnel",
+      "status": "Active",
+      "employeeId": "EMP-302",
+      "createdAt": "2026-09-25T06:51:31.309Z",
+      "passwordHash": "82fa9610766c1e17c6f8b04cdbc526a4:cd8aaedd6609133d80bfb4e3c3ed4c7c38a22b3e064099ad7e06c61a0330f781a1794daba2b4a5760c197af9371faa90a3a2df2a1e17d77ff1408854def60f30",
+      "requirePasswordChange": false
     }
   ],
   "employees": [
@@ -240,6 +263,30 @@
       "email": "custodiojayzerkien@gmail.com",
       "dateHired": "2026-09-19",
       "isActive": true
+    },
+    {
+      "id": "emp-1790318864431",
+      "employeeId": "EMP-301",
+      "fullName": "Test Account",
+      "position": "Attorney 3",
+      "division": "Adjudication Division",
+      "employmentStatus": "Regular",
+      "email": "czhonell@gmail.com",
+      "dateHired": "2026-09-25",
+      "isActive": true
+    },
+    {
+      "id": "emp-1790319091306",
+      "employeeId": "EMP-302",
+      "fullName": "Test Account 1",
+      "position": "attorney3",
+      "division": "Adjudication Division",
+      "employmentStatus": "Regular",
+      "email": "23100867@slc-sflu.edu.ph",
+      "dateHired": "2026-09-25",
+      "isActive": true,
+      "pdsFieldName": "PDS-Saavedra-2026 (1).pdf",
+      "pdsUploadedAt": "2026-09-25T06:54:42.693Z"
     }
   ],
   "employmentHistory": [
@@ -442,6 +489,30 @@
       "category": "Travel",
       "createdBy": "Francisco F. Balagtas",
       "dateCreated": "2026-09-20T10:46:21.794Z"
+    },
+    {
+      "id": "tx-1790317833873",
+      "transactionId": "TX-LIQ-3873",
+      "transactionDate": "2026-09-25",
+      "supplier": "Regional Expenses",
+      "amount": 15000,
+      "description": "Official travel liquidation for activity: LIQSUB-2026-02",
+      "status": "Liquidated",
+      "supportingDocuments": [],
+      "history": [
+        {
+          "id": "his-1790317833873",
+          "status": "Liquidated",
+          "changedBy": "Juan dela Cruz",
+          "changedAt": "2026-09-25T06:30:33.873Z",
+          "remarks": "Approved and finalized by Finance"
+        }
+      ],
+      "employeeRef": "EMP006",
+      "department": "Administrative and Finance Division",
+      "category": "Travel",
+      "createdBy": "Andres B. Bonifacio",
+      "dateCreated": "2026-09-25T06:30:33.873Z"
     }
   ],
   "assets": [
@@ -686,6 +757,465 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1790679947981-747",
+      "timestamp": "2026-09-29T11:05:47.981Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790679930029-111",
+      "timestamp": "2026-09-29T11:05:30.029Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790679695279-270",
+      "timestamp": "2026-09-29T11:01:35.279Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Remove Training Need",
+      "details": "Removed \"ZZ regression probe\" (Function) for Jolly Joy A. Almoite from the 2026 plan."
+    },
+    {
+      "id": "log-1790679694980-57",
+      "timestamp": "2026-09-29T11:01:34.980Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790679665903-744",
+      "timestamp": "2026-09-29T11:01:05.903Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"ZZ regression probe\" (Function) for Jolly Joy A. Almoite in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1790679665606-593",
+      "timestamp": "2026-09-29T11:01:05.606Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790679546394-745",
+      "timestamp": "2026-09-29T10:59:06.394Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790679450059-763",
+      "timestamp": "2026-09-29T10:57:30.059Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Preview Plan A Import",
+      "details": "Previewed \"RAB-1-Training-and-Development-Plan-2026-4.23.26-ABC-D.xlsx\" sheet \"Plan A - 2026\" — 15 row(s), 480 need(s), 2 matched. Nothing was saved."
+    },
+    {
+      "id": "log-1790679449782-374",
+      "timestamp": "2026-09-29T10:57:29.782Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790679423968-829",
+      "timestamp": "2026-09-29T10:57:03.968Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Preview Plan A Import",
+      "details": "Previewed \"RAB-1-Training-and-Development-Plan-2026-4.23.26-ABC-D.xlsx\" sheet \"Plan A - 2026\" — 15 row(s), 480 need(s), 2 matched. Nothing was saved."
+    },
+    {
+      "id": "log-1790679423597-563",
+      "timestamp": "2026-09-29T10:57:03.597Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790677333375-350",
+      "timestamp": "2026-09-29T10:22:13.375Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790319502540-942",
+      "timestamp": "2026-09-25T06:58:22.540Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790319345691-400",
+      "timestamp": "2026-09-25T06:55:45.691Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790319282693-138",
+      "timestamp": "2026-09-25T06:54:42.693Z",
+      "userId": "u-1790319091309",
+      "username": "Test Account 1",
+      "role": "Personnel",
+      "action": "Upload PDS",
+      "details": "Updated Personal Data Sheet (PDS) for Test Account 1 (EMP-302)"
+    },
+    {
+      "id": "log-1790319155137-308",
+      "timestamp": "2026-09-25T06:52:35.137Z",
+      "userId": "u-1790319091309",
+      "username": "Test Account 1",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790319148688-269",
+      "timestamp": "2026-09-25T06:52:28.689Z",
+      "userId": "u-1790319091309",
+      "username": "Test Account 1",
+      "role": "Personnel",
+      "action": "Change Password",
+      "details": "User successfully modified/updated login credentials."
+    },
+    {
+      "id": "log-1790319123029-297",
+      "timestamp": "2026-09-25T06:52:03.029Z",
+      "userId": "u-1790319091309",
+      "username": "Test Account 1",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790319091309-449",
+      "timestamp": "2026-09-25T06:51:31.309Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create User Account",
+      "details": "Created digital user: Test Account 1 and employee EMP-302"
+    },
+    {
+      "id": "log-1790319032304-1",
+      "timestamp": "2026-09-25T06:50:32.304Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790319026129-913",
+      "timestamp": "2026-09-25T06:50:26.129Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318864433-798",
+      "timestamp": "2026-09-25T06:47:44.433Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create User Account",
+      "details": "Created digital user: Test Account and employee EMP-301"
+    },
+    {
+      "id": "log-1790318803532-729",
+      "timestamp": "2026-09-25T06:46:43.532Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318384808-94",
+      "timestamp": "2026-09-25T06:39:44.808Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318324609-490",
+      "timestamp": "2026-09-25T06:38:44.609Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318298353-406",
+      "timestamp": "2026-09-25T06:38:18.353Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318104746-806",
+      "timestamp": "2026-09-25T06:35:04.746Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318076904-425",
+      "timestamp": "2026-09-25T06:34:36.904Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318069550-488",
+      "timestamp": "2026-09-25T06:34:29.550Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318039744-532",
+      "timestamp": "2026-09-25T06:33:59.744Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790318005928-253",
+      "timestamp": "2026-09-25T06:33:25.928Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317993529-678",
+      "timestamp": "2026-09-25T06:33:13.529Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317960522-268",
+      "timestamp": "2026-09-25T06:32:40.522Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317898103-936",
+      "timestamp": "2026-09-25T06:31:38.103Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317873219-770",
+      "timestamp": "2026-09-25T06:31:13.219Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317853709-38",
+      "timestamp": "2026-09-25T06:30:53.709Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317833873-162",
+      "timestamp": "2026-09-25T06:30:33.873Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Finance Validate Liquidation",
+      "details": "Finance evaluated liquidation LIQSUB-2026-02 with action Validate"
+    },
+    {
+      "id": "log-1790317833858-477",
+      "timestamp": "2026-09-25T06:30:33.858Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Auto-Deduct Budget",
+      "details": "Liquidation LIQSUB-2026-02 (Training) auto-deducted ₱15,000 from Adjudication Division bucket b-1788711585995 for FY 2026."
+    },
+    {
+      "id": "log-1790317803899-888",
+      "timestamp": "2026-09-25T06:30:03.899Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317788288-599",
+      "timestamp": "2026-09-25T06:29:48.288Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317777361-514",
+      "timestamp": "2026-09-25T06:29:37.361Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "HR Verify Liquidation",
+      "details": "HR evaluated liquidation LIQSUB-2026-02 with action Verify"
+    },
+    {
+      "id": "log-1790317766527-942",
+      "timestamp": "2026-09-25T06:29:26.527Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317760198-163",
+      "timestamp": "2026-09-25T06:29:20.198Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Submit Liquidation",
+      "details": "Submitted liquidation report: LIQSUB-2026-02"
+    },
+    {
+      "id": "log-1790317729236-692",
+      "timestamp": "2026-09-25T06:28:49.236Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317711759-952",
+      "timestamp": "2026-09-25T06:28:31.759Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317701482-736",
+      "timestamp": "2026-09-25T06:28:21.482Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317651351-458",
+      "timestamp": "2026-09-25T06:27:31.351Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317639319-250",
+      "timestamp": "2026-09-25T06:27:19.319Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"sheesh\" (Function) for Jolly Joy A. Almoite in the 2026 Training and Development Plan."
+    },
+    {
+      "id": "log-1790317621355-816",
+      "timestamp": "2026-09-25T06:27:01.355Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317585535-896",
+      "timestamp": "2026-09-25T06:26:25.535Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1790317572009-186",
+      "timestamp": "2026-09-25T06:26:12.009Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
     {
       "id": "log-1790270868527-463",
       "timestamp": "2026-09-24T17:27:48.527Z",
@@ -2777,9 +3307,9 @@
       "department": "Adjudication Division",
       "category": "Training",
       "budgetAllocation": 69000,
-      "budgetUtilized": 17000,
-      "remainingBudget": 52000,
-      "budgetPercentageUsed": 25,
+      "budgetUtilized": 32000,
+      "remainingBudget": 37000,
+      "budgetPercentageUsed": 46,
       "allocatedPS": 23000,
       "utilizedPS": 0,
       "remainingPS": 23000,
@@ -3017,6 +3547,45 @@
       "type": "info",
       "timestamp": "2026-09-23T18:22:12.124Z",
       "targetRole": "HR Officer"
+    },
+    {
+      "id": "notif-1790317692646-29579",
+      "title": "Seminar assignment: sheesh",
+      "message": "You are assigned to \"sheesh\" on September 25, 2026. Your liquidation is due on October 25, 2026 (30 days after the seminar ends).",
+      "type": "info",
+      "isRead": false,
+      "timestamp": "2026-09-25T06:28:12.646Z",
+      "targetRole": "Personnel",
+      "targetEmployeeId": "EMP006",
+      "dedupeKey": "assign:part-1790317692388-7827"
+    },
+    {
+      "id": "notif-1790317760198",
+      "title": "Liquidation Report Submitted",
+      "message": "Andres B. Bonifacio submitted a liquidation report for activity relationship evaluation.",
+      "isRead": false,
+      "type": "info",
+      "timestamp": "2026-09-25T06:29:20.198Z",
+      "targetRole": "HR Officer"
+    },
+    {
+      "id": "notif-1790317777361",
+      "title": "HR Verification Completed",
+      "message": "Liquidation submission LIQSUB-2026-02 verified by HR & forwarded to Finance.",
+      "isRead": false,
+      "type": "success",
+      "timestamp": "2026-09-25T06:29:37.361Z",
+      "targetRole": "Financial Officer"
+    },
+    {
+      "id": "notif-1790317833873",
+      "title": "Liquidation APPROVED & FINALIZED",
+      "message": "Your liquidation report LIQSUB-2026-02 has been validated and finalized by Finance.",
+      "isRead": false,
+      "type": "success",
+      "timestamp": "2026-09-25T06:30:33.873Z",
+      "targetRole": "Personnel",
+      "targetEmployeeId": "EMP006"
     }
   ],
   "activities": [],
@@ -3048,9 +3617,79 @@
       "divisionChiefApprovedAt": "2026-09-16T03:50:14.263Z",
       "allocatedAtFiling": 15000,
       "activityTitle": "Seminar - Sabee"
+    },
+    {
+      "id": "liqsub-1790317760198",
+      "submissionNo": "LIQSUB-2026-02",
+      "activityId": "part-1790317692388-7827",
+      "employeeId": "EMP006",
+      "employeeName": "Andres B. Bonifacio",
+      "totalReleased": 15000,
+      "totalSpent": 15000,
+      "remainingBalance": 0,
+      "remarks": "",
+      "supportingDocs": [],
+      "particulars": [
+        {
+          "id": "lp-1790317729252-8n1r",
+          "description": "meals",
+          "amount": 13000,
+          "category": "Meals"
+        },
+        {
+          "id": "lp-1790317747187-gd7m",
+          "description": "transport",
+          "amount": 2000,
+          "category": "Transportation"
+        }
+      ],
+      "serialNo": "LR-101-2026-09-001",
+      "entityName": "HSAC-RAB I",
+      "fundCluster": "01 - Regular Fund",
+      "periodCoveredFrom": "",
+      "periodCoveredTo": "",
+      "responsibilityCenterCode": "",
+      "cashAdvanceDvNo": "",
+      "cashAdvanceDvDate": "",
+      "refundOrNo": "",
+      "refundOrDate": "",
+      "jevNo": "",
+      "reimbursementAmount": 0,
+      "reimbursementStatus": "Not Required",
+      "reimbursementDvNo": "",
+      "reimbursementDate": "",
+      "reimbursedBy": "",
+      "allocatedAtFiling": 15000,
+      "activityTitle": "Seminar - sheesh",
+      "status": "Completed",
+      "createdAt": "2026-09-25T06:29:20.198Z",
+      "dateSubmitted": "2026-09-25T06:29:20.198Z",
+      "hrStatus": "Verified & Forwarded",
+      "financeStatus": "Validated & Approved",
+      "divisionChiefStatus": "Certified by Authorized Representative",
+      "hrRemarks": "HR Verify",
+      "hrVerifiedBy": "Maria Clara V. Santos",
+      "hrVerifiedAt": "2026-09-25T06:29:37.361Z",
+      "financeRemarks": "Financial documentations validated & finalized.",
+      "financeValidatedBy": "Juan dela Cruz",
+      "financeValidatedAt": "2026-09-25T06:30:33.784Z",
+      "divisionChiefRemarks": "Certified by the Financial Officer under delegated authority.",
+      "divisionChiefApprovedBy": "Juan dela Cruz",
+      "divisionChiefApprovedAt": "2026-09-25T06:30:33.784Z"
     }
   ],
   "activityBudgetLinks": [
+    {
+      "id": "bl-1790317833792-879",
+      "liquidationNo": "LIQSUB-2026-02",
+      "employee": "Andres B. Bonifacio",
+      "department": "Adjudication Division",
+      "amount": 15000,
+      "budgetId": "b-1788711585995",
+      "category": "Training",
+      "source": "auto",
+      "timestamp": "2026-09-25T06:30:33.792Z"
+    },
     {
       "id": "bl-1789530614264-717",
       "liquidationNo": "LIQSUB-2026-01",
@@ -3847,6 +4486,235 @@
       ],
       "salary": "",
       "position": "Adjudication Assistant"
+    },
+    {
+      "id": "pds-1790319282693",
+      "employeeId": "EMP-302",
+      "surname": "SAAVEDRA",
+      "firstName": "NIÑO ROMYR",
+      "middleName": "HUFANO",
+      "nameExtension": "",
+      "dateOfBirth": "1981-08-04",
+      "placeOfBirth": "STA. CRUZ, MANILA",
+      "sex": "Male",
+      "civilStatus": "Single",
+      "heightM": "1.65",
+      "weightKg": "72",
+      "bloodType": "A+",
+      "gsisId": "BP No. 2005932929",
+      "pagibigId": "1280-0088-4072",
+      "philhealthId": "19-089854774-8",
+      "sssId": "",
+      "tinNo": "929-346-979",
+      "agencyEmployeeNo": "2021-0718-24",
+      "citizenshipType": "Filipino",
+      "dualCitizenshipBy": "",
+      "dualCountry": "",
+      "rHouseNo": "PUROK 2",
+      "rStreet": "FRANCISCO ORTEGA HIGHWAY",
+      "rSubdivision": "",
+      "rBarangay": "CAMANSI",
+      "rCityMunicipality": "SAN FERNANDO CITY",
+      "rProvince": "LA UNION",
+      "rZipCode": "2500",
+      "pHouseNo": "",
+      "pStreet": "",
+      "pSubdivision": "",
+      "pBarangay": "",
+      "pCityMunicipality": "",
+      "pProvince": "",
+      "pZipCode": "",
+      "telephoneNo": "N/A",
+      "mobileNo": "09176807060",
+      "emailAddress": "ninoromyr.saavedra@gmail.com",
+      "spouseSurname": "N/A",
+      "spouseFirstName": "N/A",
+      "spouseMiddleName": "N/A",
+      "spouseExtension": "N/A",
+      "spouseOccupation": "N/A",
+      "spouseEmployer": "N/A",
+      "spouseBusinessAddress": "N/A",
+      "spouseTelephone": "N/A",
+      "fatherSurname": "N/A",
+      "fatherFirstName": "N/A",
+      "fatherMiddleName": "N/A",
+      "fatherExtension": "N/A",
+      "motherMaidenSurname": "HUFANO",
+      "motherFirstName": "MYRNA",
+      "motherMiddleName": "MADAYAG",
+      "children": [],
+      "education": [
+        {
+          "attendanceFrom": "01/06/1982",
+          "attendanceTo": "01/04/1993",
+          "degreeCourse": "PRIMARY EDUCATION",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "ELEMENTARY",
+          "scholarshipsHonorsReceived": "LOYALTY AWARD",
+          "schoolName": "FELKRIS GRADE SCHOOL",
+          "yearGraduated": "1993"
+        },
+        {
+          "attendanceFrom": "01/06/1994",
+          "attendanceTo": "01/04/1998",
+          "degreeCourse": "SECONDARY",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "SECONDARY",
+          "scholarshipsHonorsReceived": "N/A",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "1998"
+        },
+        {
+          "attendanceFrom": "08/06/1998",
+          "attendanceTo": "03/11/2002",
+          "degreeCourse": "BS IN COMMERCE",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "COLLEGE",
+          "scholarshipsHonorsReceived": "CUM LAUDE, RECOGNITION AWARD, LOYALTY AWARD",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "2002"
+        },
+        {
+          "attendanceFrom": "01/10/2002",
+          "attendanceTo": "03/31/2006",
+          "degreeCourse": "MASTERS IN BUSINESS ADMINISTRATION",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "GRADUATE STUDIES",
+          "scholarshipsHonorsReceived": "N/A",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "2006"
+        },
+        {
+          "attendanceFrom": "15/06/2009",
+          "attendanceTo": "17/06/2019",
+          "degreeCourse": "DOCTOR OF PHILOSOPHY IN MANAGEMENT",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "POST GRADUATE STUDIES",
+          "scholarshipsHonorsReceived": "N/A",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "2019"
+        }
+      ],
+      "civilService": [
+        {
+          "dateOfExamination": "08/12/2024",
+          "eligibilityName": "CAREER EXECUTIVE SERVICE WRITTEN EXAMINATION (CESWE)",
+          "licenseNumber": "N/A",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "NEW ERA UNIVERSITY, QUEZON CITY",
+          "rating": "85.4"
+        },
+        {
+          "dateOfExamination": "28/09/2008",
+          "eligibilityName": "LICENSURE EXAMINATION FOR TEACHERS (LET)",
+          "licenseNumber": "1013838",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "BAGUIO CITY",
+          "rating": "81.0"
+        },
+        {
+          "dateOfExamination": "NA",
+          "eligibilityName": "CIVIL SERVICE PROFESSIONAL ELIGIBILITY",
+          "licenseNumber": "10010077",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "N/A",
+          "rating": "PD 907 - HONOR GRADUATE"
+        },
+        {
+          "dateOfExamination": "25/11/2000",
+          "eligibilityName": "CIVIL SERVICE SUB-PROFESSIONAL ELIGIBILITY",
+          "licenseNumber": "01030001",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "CIVIL SERVICE COMMISSION - SAN FERNANDO CITY",
+          "rating": "80.3"
+        }
+      ],
+      "serviceRecords": [
+        {
+          "departmentAgency": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH I",
+          "govService": "Y",
+          "inclusiveDateFrom": "16/07/2021",
+          "inclusiveDateTo": "PRESENT",
+          "monthlySalary": "",
+          "positionTitle": "CHIEF ADMINISTRATIVE OFFICER",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "11/06/2011",
+          "inclusiveDateTo": "15/07/2021",
+          "monthlySalary": "",
+          "positionTitle": "DEAN",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "01/04/2018",
+          "inclusiveDateTo": "01/07/2018",
+          "monthlySalary": "",
+          "positionTitle": "DEPUTY ASSISTANT EXECUTIVE DIRECTOR",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "15/07/2010",
+          "inclusiveDateTo": "31/05/2011",
+          "monthlySalary": "",
+          "positionTitle": "OFFICER-IN-CHARGE - DEAN",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "01/10/2008",
+          "inclusiveDateTo": "25/06/2021",
+          "monthlySalary": "",
+          "positionTitle": "PROFESSOR",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        }
+      ],
+      "trainings": [
+        {
+          "dateFrom": "11/12/2025",
+          "dateTo": "11/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "LEARNING 2 LEARN SESSION 13: EMERGENCY RESPONSE DRILL AND SIMULATION",
+          "trainingHours": "4 HOURS",
+          "typeOfLAndD": "TECHNICAL"
+        },
+        {
+          "dateFrom": "11/12/2025",
+          "dateTo": "11/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "LEARNING 2 LEARN SESSION 13: EXPANDED ANTI-TRAFFICKING IN PERSONS ACT (RA 11862)",
+          "trainingHours": "1.5 HOURS",
+          "typeOfLAndD": "TECHNICAL"
+        },
+        {
+          "dateFrom": "11/12/2025",
+          "dateTo": "11/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "LEARNING 2 LEARN SESSION 13: ANTI-SEXUAL HARASSMENT (RA 7877)",
+          "trainingHours": "1.5 HOURS",
+          "typeOfLAndD": "TECHNICAL"
+        },
+        {
+          "dateFrom": "10/12/2025",
+          "dateTo": "12/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "2025 YEAR-END PERFORMANCE REVIEW; STRATEGIC PLANNING",
+          "trainingHours": "12 HOURS",
+          "typeOfLAndD": "FOUNDATION"
+        }
+      ]
     }
   ],
   "fiscalYears": [
@@ -3947,6 +4815,36 @@
         "Materials": 10
       },
       "createdAt": "2026-09-18T18:14:35.182Z"
+    },
+    {
+      "id": "tp-1790317692387",
+      "seriesId": "tp-1790317692387",
+      "title": "sheesh",
+      "description": "dff",
+      "category": "Legal/Judicial",
+      "allocatedBudget": 15000,
+      "usedBudget": 15000,
+      "fiscalYear": "2026",
+      "startDate": "2026-09-25",
+      "endDate": "2026-09-25",
+      "startTime": "08:00",
+      "endTime": "17:00",
+      "durationDays": 1,
+      "totalHours": 9,
+      "venue": "",
+      "facilitator": "EWAN",
+      "maxParticipants": 1,
+      "targetDivision": "Legal Division",
+      "budgetSplit": {
+        "Meals": 40,
+        "Transportation": 30,
+        "Accommodation": 20,
+        "Materials": 10
+      },
+      "fulfillsNeedTitles": [
+        "sheesh"
+      ],
+      "createdAt": "2026-09-25T06:28:12.388Z"
     }
   ],
   "trainingParticipants": [
@@ -3963,6 +4861,13 @@
       "employeeId": "emp-7",
       "status": "Assigned",
       "allowanceAllocated": 5000
+    },
+    {
+      "id": "part-1790317692388-7827",
+      "trainingProgramId": "tp-1790317692387",
+      "employeeId": "emp-6",
+      "status": "Liquidated",
+      "allowanceAllocated": 15000
     }
   ],
   "trainingLiquidations": [
@@ -3974,6 +4879,30 @@
       "amount": 17000,
       "dateIncurred": "2026-09-16",
       "submittedBy": "HSAC-9123697",
+      "status": "Approved"
+    },
+    {
+      "id": "tliq-1790317833785-0",
+      "trainingProgramId": "tp-1790317692387",
+      "trainingParticipantId": "part-1790317692388-7827",
+      "employeeId": "EMP006",
+      "expenseCategory": "Meals",
+      "description": "meals",
+      "amount": 13000,
+      "dateIncurred": "2026-09-25",
+      "submittedBy": "EMP006",
+      "status": "Approved"
+    },
+    {
+      "id": "tliq-1790317833785-1",
+      "trainingProgramId": "tp-1790317692387",
+      "trainingParticipantId": "part-1790317692388-7827",
+      "employeeId": "EMP006",
+      "expenseCategory": "Transportation",
+      "description": "transport",
+      "amount": 2000,
+      "dateIncurred": "2026-09-25",
+      "submittedBy": "EMP006",
       "status": "Approved"
     }
   ],
@@ -4012,6 +4941,15 @@
       "category": "Additional Function",
       "title": "RA 12009 (New Government Procurement Act)",
       "createdAt": "2026-09-19T14:53:45.740Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1790317639319-73726",
+      "employeeId": "emp-6",
+      "fiscalYear": "2026",
+      "category": "Function",
+      "title": "sheesh",
+      "createdAt": "2026-09-25T06:27:19.319Z",
       "createdBy": "hr"
     }
   ],

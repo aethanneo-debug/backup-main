@@ -6,6 +6,9 @@ dotenv.config();
 
 import { GoogleGenAI, Type } from "@google/genai";
 import crypto from "crypto";
+import { readXlsxWorkbook, XlsxReadError } from "./src/server/xlsx/readXlsx";
+import { parsePlanASheet, PlanABlock } from "./src/server/xlsx/parsePlanA";
+import { matchWorkbookName } from "./src/server/xlsx/matchEmployeeName";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -5308,6 +5311,288 @@ app.post("/api/training/evaluations", authenticateToken, (req: any, res: any) =>
   res.json({ status: "success", data: record });
 });
 
+// --- PLAN A WORKBOOK IMPORT ---
+
+/** Decodes the uploaded file and refuses anything that is not a zip, before any parsing. */
+function decodePlanAUpload(base64Data: any): Buffer {
+  const buf = Buffer.from(String(base64Data || ""), "base64");
+  if (buf.length === 0) {
+    throw new XlsxReadError("No file was received. Please choose the workbook and try again.");
+  }
+  if (buf.length > 20 * 1024 * 1024) {
+    throw new XlsxReadError("That file is too large. The Plan A workbook should be well under 20 MB.");
+  }
+  // "PK\x03\x04" - every .xlsx starts here. A PDF or an older .xls fails immediately,
+  // with a message that names the likely mistake.
+  if (buf.length < 4 || buf.readUInt32LE(0) !== 0x04034b50) {
+    throw new XlsxReadError("That is not an .xlsx workbook — please upload the Excel file, not a PDF or an older .xls.");
+  }
+  return buf;
+}
+
+/** Scans every sheet once; used by both routes so they can never disagree. */
+function scanPlanAWorkbook(buf: Buffer) {
+  const wb = readXlsxWorkbook(buf);
+  return wb.sheets.map(s => ({ ref: s, scan: parsePlanASheet(wb.grid(s.part), s.name) }));
+}
+
+/**
+ * Reads the workbook and reports what it found. Writes NOTHING — no saveDB() on this
+ * path — so HR can upload, look, switch sheets and cancel without touching the plan.
+ */
+app.post("/api/training/needs/import/preview", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+
+  const { base64Data, filename, sheetName } = req.body || {};
+  const fiscalYear = req.body?.fiscalYear || activeFiscalYearLabel();
+
+  let scanned: ReturnType<typeof scanPlanAWorkbook>;
+  let buf: Buffer;
+  try {
+    buf = decodePlanAUpload(base64Data);
+    scanned = scanPlanAWorkbook(buf);
+  } catch (err: any) {
+    const msg = err instanceof XlsxReadError ? err.message : "That workbook could not be read.";
+    if (!(err instanceof XlsxReadError)) console.error("[plan-a-import] read failed:", err?.message || err);
+    return res.status(400).json({ status: "error", message: msg });
+  }
+
+  const planASheets = scanned.filter(s => s.scan.isPlanA);
+  if (planASheets.length === 0) {
+    const detail = scanned.map(s => `"${s.ref.name}": ${s.scan.reason}`).join(" ");
+    return res.status(400).json({
+      status: "error",
+      message: `No Plan A sheet was found in that workbook. ${detail}`
+    });
+  }
+
+  // Prefer the sheet HR asked for, then the one whose year matches the plan being
+  // edited, then the only Plan A sheet, then the most recent.
+  const chosen =
+    (sheetName && planASheets.find(s => s.ref.name === sheetName)) ||
+    planASheets.find(s => s.scan.detectedYear === fiscalYear) ||
+    (planASheets.length === 1 ? planASheets[0] : null) ||
+    [...planASheets].sort((a, b) => String(b.scan.detectedYear || "").localeCompare(String(a.scan.detectedYear || "")))[0];
+
+  if (sheetName && !planASheets.find(s => s.ref.name === sheetName)) {
+    const bad = scanned.find(s => s.ref.name === sheetName);
+    return res.status(400).json({
+      status: "error",
+      message: bad ? `${bad.scan.reason}` : `That workbook has no sheet named "${sheetName}".`
+    });
+  }
+
+  const employees = db.employees || [];
+  // Needs already in the target year, so the preview can say what would be skipped.
+  const existing = new Set(
+    (db.trainingNeeds || [])
+      .filter((n: any) => n.fiscalYear === fiscalYear)
+      .map((n: any) => trainingNeedKey(employeeIdForms(n.employeeId)[0], n.category, n.title))
+  );
+
+  const seenInFile = new Set<string>();
+  let duplicatesInFile = 0;
+  let alreadyInPlanTotal = 0;
+
+  const blocks = chosen.scan.blocks.map(b => {
+    const m = matchWorkbookName(b.name, employees);
+    const emp = m.employeeId ? employees.find((e: any) => e.id === m.employeeId) : null;
+
+    const needCounts: any = { "Function": 0, "Additional Function": 0, "Career Advancement": 0 };
+    let alreadyInPlan = 0;
+    for (const need of b.needs) {
+      needCounts[need.category]++;
+      // Count what a commit would skip, using the id it would actually be filed under.
+      const key = trainingNeedKey(emp ? emp.id : `?${b.key}`, need.category, need.title);
+      if (seenInFile.has(key)) duplicatesInFile++;
+      else {
+        seenInFile.add(key);
+        if (emp && existing.has(key)) alreadyInPlan++;
+      }
+    }
+    alreadyInPlanTotal += alreadyInPlan;
+
+    return {
+      key: b.key,
+      startRow: b.startRow,
+      workbookName: b.name,
+      workbookPosition: b.position,
+      workbookOffice: b.office,
+      match: emp ? {
+        employeeId: emp.id, fullName: emp.fullName,
+        storedPosition: emp.position || "", storedDivision: emp.division || ""
+      } : null,
+      suggestions: m.suggestions,
+      needCounts,
+      sampleTitles: b.needs.slice(0, 3).map(n => n.title),
+      alreadyInPlan,
+      positionDiffers: !!(emp && b.position &&
+        normalizeTitle(emp.position || "") !== normalizeTitle(b.position))
+    };
+  });
+
+  const needs = chosen.scan.blocks.reduce((n, b) => n + b.needs.length, 0);
+  const matched = blocks.filter(b => b.match).length;
+
+  const preview = {
+    fileDigest: crypto.createHash("sha256").update(buf).digest("hex"),
+    filename: String(filename || "").slice(0, 200).replace(/[\u0000-\u001f]/g, ""),
+    fiscalYear,
+    sheets: scanned.map(s => ({
+      name: s.ref.name,
+      isPlanA: s.scan.isPlanA,
+      reason: s.scan.reason,
+      detectedYear: s.scan.detectedYear,
+      employeeCount: s.scan.blocks.length,
+      needCount: s.scan.blocks.reduce((n, b) => n + b.needs.length, 0)
+    })),
+    selectedSheet: chosen.ref.name,
+    detectedYear: chosen.scan.detectedYear,
+    yearMatchesFiscalYear: chosen.scan.detectedYear === fiscalYear,
+    offices: chosen.scan.offices,
+    totals: {
+      blocks: blocks.length,
+      matched,
+      unmatched: blocks.length - matched,
+      needs,
+      duplicatesInFile,
+      alreadyInPlan: alreadyInPlanTotal,
+      netNewNeeds: needs - duplicatesInFile - alreadyInPlanTotal
+    },
+    warnings: chosen.scan.warnings,
+    blocks
+  };
+
+  // Deliberately NOT logEvent'd. logEvent calls saveDB(), which rewrites the whole of
+  // data_store.json synchronously and non-atomically — so logging a preview would mean a
+  // full-file write every time HR switches sheets in the picker, and would break the one
+  // invariant this whole design rests on: that looking at a workbook cannot change the
+  // plan. The commit is logged; reading a file the user just uploaded is not an event
+  // worth risking the database for.
+  console.log(`[plan-a-import] preview by ${req.user.username}: "${preview.filename}" sheet "${chosen.ref.name}" — ${blocks.length} row(s), ${needs} need(s), ${matched} matched`);
+  res.json({ status: "success", data: preview });
+});
+
+/**
+ * Writes a confirmed import. Takes the same file back rather than the parsed rows, so
+ * the titles stored are provably the ones HR previewed and a client cannot substitute
+ * its own text.
+ */
+app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+
+  const { base64Data, fileDigest, sheetName, filename } = req.body || {};
+  const fiscalYear = req.body?.fiscalYear || activeFiscalYearLabel();
+  const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+
+  let buf: Buffer;
+  let scanned: ReturnType<typeof scanPlanAWorkbook>;
+  try {
+    buf = decodePlanAUpload(base64Data);
+    scanned = scanPlanAWorkbook(buf);
+  } catch (err: any) {
+    const msg = err instanceof XlsxReadError ? err.message : "That workbook could not be read.";
+    return res.status(400).json({ status: "error", message: msg });
+  }
+
+  if (crypto.createHash("sha256").update(buf).digest("hex") !== String(fileDigest || "")) {
+    return res.status(400).json({ status: "error", message: "The file changed since the preview. Please upload it again." });
+  }
+
+  const chosen = scanned.find(s => s.ref.name === sheetName);
+  if (!chosen) return res.status(400).json({ status: "error", message: `That workbook has no sheet named "${sheetName}".` });
+  if (!chosen.scan.isPlanA) return res.status(400).json({ status: "error", message: chosen.scan.reason || "That sheet is not Plan A." });
+
+  // Writing into a closed year would put 480 needs somewhere nothing ever shows them.
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === fiscalYear);
+  if (!fy) return res.status(400).json({ status: "error", message: `There is no fiscal year "${fiscalYear}".` });
+  if (fy.status === "Closed") return res.status(400).json({ status: "error", message: `The ${fiscalYear} plan is closed and cannot be changed.` });
+
+  if (assignments.length > 200) {
+    return res.status(400).json({ status: "error", message: "That is more rows than one import can handle." });
+  }
+
+  // --- Validate every assignment BEFORE writing anything, so there are no partial imports.
+  const byKey = new Map<string, PlanABlock>(chosen.scan.blocks.map(b => [b.key, b] as [string, PlanABlock]));
+  const chosenEmployees = new Map<string, any>();
+  const resolved: { block: any; emp: any }[] = [];
+
+  for (const a of assignments) {
+    const block = byKey.get(a?.key);
+    if (!block) return res.status(400).json({ status: "error", message: `Row "${a?.key}" is no longer in that sheet. Please upload the file again.` });
+    if (String(a?.workbookName ?? "") !== block.name) {
+      return res.status(400).json({ status: "error", message: `Row ${block.startRow} changed since the preview. Please upload the file again.` });
+    }
+    if (!a.employeeId) continue; // deliberately skipped
+
+    const emp = (db.employees || []).find((e: any) => e.id === a.employeeId || e.employeeId === a.employeeId);
+    if (!emp) return res.status(404).json({ status: "error", message: `Row ${block.startRow} is mapped to an employee who no longer exists.` });
+    if (emp.isActive === false) {
+      return res.status(400).json({ status: "error", message: `${emp.fullName} is inactive, so their needs would not appear in the plan.` });
+    }
+    if (chosenEmployees.has(emp.id)) {
+      return res.status(400).json({ status: "error", message: `Two rows are mapped to ${emp.fullName}. Each row must be a different employee.` });
+    }
+    chosenEmployees.set(emp.id, emp);
+    resolved.push({ block, emp });
+  }
+
+  // --- Write. One dedupe index for the whole batch: the per-need scan the single-add
+  // path uses would be O(n^2) with an employee lookup inside it at this volume.
+  const seen = new Set<string>(
+    (db.trainingNeeds || [])
+      .filter((n: any) => n.fiscalYear === fiscalYear)
+      .map((n: any) => trainingNeedKey(employeeIdForms(n.employeeId)[0], n.category, n.title))
+  );
+  const before = seen.size;
+
+  let imported = 0, skippedDuplicateInFile = 0, skippedAlreadyInPlan = 0, i = 0;
+  const perEmployee: any[] = [];
+
+  for (const { block, emp } of resolved) {
+    let mine = 0, skipped = 0;
+    for (const need of block.needs) {
+      const key = trainingNeedKey(emp.id, need.category, need.title);
+      const wasThereBefore = seen.has(key);
+      const r = createTrainingNeed(emp, need.category, need.title, fiscalYear, req.user.username, seen, String(i++));
+      if (r.need) { imported++; mine++; }
+      else {
+        skipped++;
+        if (r.code === "duplicate") { if (wasThereBefore && before > 0) skippedAlreadyInPlan++; else skippedDuplicateInFile++; }
+      }
+    }
+    perEmployee.push({ employeeId: emp.id, fullName: emp.fullName, imported: mine, skipped });
+  }
+
+  const skippedRows = chosen.scan.blocks.length - resolved.length;
+  const safeName = String(filename || "").slice(0, 200).replace(/[\u0000-\u001f]/g, "");
+
+  // One audit entry, not one per need - 480 rows would bury the log and rewrite
+  // data_store.json each time.
+  logEvent(req.user.id, req.user.username, req.user.role, "Import Plan A Workbook",
+    `Imported ${imported} training need(s) from "${safeName}" sheet "${chosen.ref.name}" into the ${fiscalYear} plan for ${resolved.length} employee(s); ` +
+    `${skippedRows} row(s) skipped, ${skippedDuplicateInFile} duplicate(s) in the file, ${skippedAlreadyInPlan} already in the plan.`);
+
+  if (imported > 0) {
+    if (!db.notifications) db.notifications = [];
+    db.notifications.push({
+      id: `notif-${Date.now()}-planA`,
+      title: `${imported} training need(s) imported into Plan A`,
+      message: `Plan A for ${fiscalYear} gained ${imported} need(s) from the uploaded workbook "${safeName}".`,
+      isRead: false,
+      type: "info",
+      timestamp: new Date().toISOString(),
+      targetRole: UserRole.HR_OFFICER
+    });
+  }
+
+  saveDB();
+  res.json({
+    status: "success",
+    data: { fiscalYear, sheetName: chosen.ref.name, imported, skippedRows, skippedDuplicateInFile, skippedAlreadyInPlan, perEmployee }
+  });
+});
+
 app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();
@@ -5338,6 +5623,74 @@ app.get("/api/training/needs", authenticateToken, (req: any, res: any) => {
   res.json({ status: "success", data: { fiscalYear, asOf, offices: buildTrainingPlan(fiscalYear, asOf) } });
 });
 
+interface CreateNeedResult {
+  /** null when nothing was created; `code` and `message` then say why. */
+  need: TrainingNeed | null;
+  code: "bad-category" | "empty" | "too-long" | "duplicate" | null;
+  message: string;
+}
+
+/** The dedupe key a training need occupies: one title, per person, per column, per year. */
+function trainingNeedKey(employeeInternalId: string, category: string, title: string): string {
+  return `${employeeInternalId}|${category}|${normalizeTitle(title)}`;
+}
+
+/**
+ * The single place a training need is validated and created.
+ *
+ * Shared by the inline add-box and the workbook import so there is exactly one set of
+ * rules. `seen` is the caller's dedupe index: the inline path omits it and pays for a
+ * scan of db.trainingNeeds, while the bulk path pre-seeds it once — without that, 480
+ * inserts would each re-scan every need and call employeeIdForms (itself a linear scan
+ * of db.employees) inside the loop.
+ *
+ * `idSuffix` exists because `Date.now()` is not unique across a bulk insert: hundreds of
+ * needs created in the same millisecond collide often enough that two could share an id,
+ * which would make DELETE /api/training/needs/:id remove the wrong row.
+ */
+function createTrainingNeed(
+  emp: any,
+  category: any,
+  rawTitle: string,
+  fiscalYear: string,
+  username: string,
+  seen?: Set<string>,
+  idSuffix?: string
+): CreateNeedResult {
+
+  if (!TRAINING_NEED_CATEGORIES.includes(category)) {
+    return { need: null, code: "bad-category", message: "Category must be Function, Additional Function or Career Advancement." };
+  }
+  const cleanTitle = String(rawTitle || "").trim();
+  if (!cleanTitle) return { need: null, code: "empty", message: "Enter the needed training." };
+  if (cleanTitle.length > 300) return { need: null, code: "too-long", message: "Keep the needed training under 300 characters." };
+
+  const key = trainingNeedKey(emp.id, category, cleanTitle);
+  const isDuplicate = seen
+    ? seen.has(key)
+    : (db.trainingNeeds || []).some(n =>
+        n.fiscalYear === fiscalYear && n.category === category &&
+        employeeIdForms(n.employeeId).includes(emp.id) &&
+        normalizeTitle(n.title) === normalizeTitle(cleanTitle));
+  if (isDuplicate) {
+    return { need: null, code: "duplicate", message: `"${cleanTitle}" is already listed for ${emp.fullName} under this column.` };
+  }
+
+  const need: TrainingNeed = {
+    id: `need-${Date.now()}-${idSuffix ?? Math.floor(Math.random() * 100000)}`,
+    employeeId: emp.id,
+    fiscalYear,
+    category,
+    title: cleanTitle,
+    createdAt: new Date().toISOString(),
+    createdBy: username
+  };
+  if (!db.trainingNeeds) db.trainingNeeds = [];
+  db.trainingNeeds.push(need);
+  if (seen) seen.add(key);
+  return { need, code: null, message: "" };
+}
+
 app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const { employeeId, category, title } = req.body || {};
@@ -5345,34 +5698,13 @@ app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
 
   const emp = (db.employees || []).find(e => e.id === employeeId || e.employeeId === employeeId);
   if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
-  if (!TRAINING_NEED_CATEGORIES.includes(category)) {
-    return res.status(400).json({ status: "error", message: "Category must be Function, Additional Function or Career Advancement." });
-  }
-  const cleanTitle = String(title || "").trim();
-  if (!cleanTitle) return res.status(400).json({ status: "error", message: "Enter the needed training." });
-  if (cleanTitle.length > 300) return res.status(400).json({ status: "error", message: "Keep the needed training under 300 characters." });
 
-  const duplicate = (db.trainingNeeds || []).some(n =>
-    n.fiscalYear === fiscalYear && n.category === category &&
-    employeeIdForms(n.employeeId).includes(emp.id) &&
-    normalizeTitle(n.title) === normalizeTitle(cleanTitle));
-  if (duplicate) {
-    return res.status(400).json({ status: "error", message: `"${cleanTitle}" is already listed for ${emp.fullName} under this column.` });
-  }
+  const result = createTrainingNeed(emp, category, title, fiscalYear, req.user.username);
+  if (!result.need) return res.status(400).json({ status: "error", message: result.message });
 
-  const need: TrainingNeed = {
-    id: `need-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-    employeeId: emp.id,
-    fiscalYear,
-    category,
-    title: cleanTitle,
-    createdAt: new Date().toISOString(),
-    createdBy: req.user.username
-  };
-  if (!db.trainingNeeds) db.trainingNeeds = [];
-  db.trainingNeeds.push(need);
+  const need = result.need;
   logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need",
-    `Added "${cleanTitle}" (${category}) for ${emp.fullName} in the ${fiscalYear} Training and Development Plan.`);
+    `Added "${need.title}" (${category}) for ${emp.fullName} in the ${fiscalYear} Training and Development Plan.`);
   saveDB();
   res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
 });

@@ -393,6 +393,76 @@ export const TRAINING_EXPENSE_CATEGORIES: TrainingExpenseCategory[] = [
   "Miscellaneous"
 ];
 
+// --- PLAN A WORKBOOK IMPORT ---
+// The contract between the two import routes and the Plan A upload panel.
+
+/** One employee block read from the workbook, with whatever we could match it to. */
+export interface PlanAImportBlock {
+  /** Stable identity across preview and commit, e.g. "Plan A - 2026!A82". */
+  key: string;
+  startRow: number;
+  workbookName: string;        // "" when the sheet has a position but no name
+  workbookPosition: string;
+  workbookOffice: string;
+  match: { employeeId: string; fullName: string; storedPosition: string; storedDivision: string } | null;
+  suggestions: { employeeId: string; fullName: string; score: number }[];
+  needCounts: Record<TrainingNeedCategory, number>;
+  /** First few titles, so HR can sanity-check the row without opening the file. */
+  sampleTitles: string[];
+  /** Needs this employee already has for the target year; skipped on commit. */
+  alreadyInPlan: number;
+  /** The workbook files them under a different office/position than the system stores. */
+  positionDiffers: boolean;
+}
+
+export interface PlanAImportPreview {
+  /** sha256 of the uploaded bytes; the commit must present the same file. */
+  fileDigest: string;
+  filename: string;
+  /** The year the needs will be written into - not necessarily the sheet's year. */
+  fiscalYear: string;
+  sheets: {
+    name: string;
+    isPlanA: boolean;
+    reason?: string;
+    detectedYear: string | null;
+    employeeCount: number;
+    needCount: number;
+  }[];
+  selectedSheet: string;
+  detectedYear: string | null;
+  yearMatchesFiscalYear: boolean;
+  offices: string[];
+  totals: {
+    blocks: number;
+    matched: number;
+    unmatched: number;
+    needs: number;
+    duplicatesInFile: number;
+    alreadyInPlan: number;
+    netNewNeeds: number;
+  };
+  warnings: string[];
+  blocks: PlanAImportBlock[];
+}
+
+/** One row's decision. A null employeeId means "skip this row". */
+export interface PlanAImportAssignment {
+  key: string;
+  workbookName: string;
+  employeeId: string | null;
+}
+
+export interface PlanAImportResult {
+  fiscalYear: string;
+  sheetName: string;
+  imported: number;
+  skippedRows: number;
+  skippedDuplicateInFile: number;
+  skippedAlreadyInPlan: number;
+  perEmployee: { employeeId: string; fullName: string; imported: number; skipped: number }[];
+}
+
 // --- POST-TRAINING PERFORMANCE EVALUATION REPORT ---
 // The printed HSAC instrument: five scored statements, then five narrative prompts.
 

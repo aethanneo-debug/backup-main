@@ -8,6 +8,7 @@ import {
 } from "../../types";
 import { apiCall } from "../../utils";
 import PlanHeader from "./PlanHeader";
+import PlanAImportPanel from "./import/PlanAImportPanel";
 
 // Plan A of the official form: per employee, the trainings they still need,
 // in three columns, grouped under their office.
@@ -106,6 +107,10 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
       <p className="text-xs text-slate-500 mb-3">
         List what each employee still needs. Seminars they actually attend are checked off automatically in <strong>Plan D</strong>.
       </p>
+
+      {/* Reading the official workbook instead of retyping it. load() is the same
+          refetch every other change here uses. */}
+      <PlanAImportPanel fiscalYear={fiscalYear} onImported={load} />
 
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
         <table className="w-full text-left text-xs border-collapse">
