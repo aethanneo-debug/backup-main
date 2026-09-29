@@ -27,12 +27,7 @@ Prioritized. When you fix one, remove or update its entry here.
 18. `package.json` name is still `"react-example"`; `metadata.json` name is "Remix Remix: Remix: …".
 19. Files (PDS, documents) are stored as base64 inside the JSON DB with a 50 MB body limit.
 
-## 🧩 Existing TypeScript errors (`npm run lint` fails with 13 errors as of the initial analysis)
+## 🧩 Existing TypeScript errors (`npm run lint` fails with 2 errors as of 2026-09-30; 13 at the initial analysis)
 The PostToolUse typecheck hook only reports errors in files you edit, so these won't block unrelated work — but fix them when you touch the file.
-- `src/components/HrUnifiedRequests.tsx:461` — comparison `"return"` vs `"verify"` can never be true → **likely a real logic bug** (a branch that never runs).
-- `src/components/FinanceView.tsx:2580` — `uacsCode` missing from `BudgetAllocation` type (type drift).
-- `src/App.tsx:423` — `requirePdsUpload` missing from `User` type (server returns it; add to type).
-- `src/components/UserAccountsView.tsx:90` — status state typed too narrowly (`"Archived" | "Active"`) but receives `"Deactivated"` / `"Pending Password Change"`.
-- `src/components/PersonalDataSheetForm.tsx:373,378,701` — `salary`, `position` missing from PDS form type.
-- `src/components/EmployeePortalView.tsx:276,983,986,989` — two incompatible document shapes mixed in one state array (`filename` vs `size`/`content`).
+- `src/components/HrUnifiedRequests.tsx:478` — comparison `"return"` vs `"verify"` can never be true → **likely a real logic bug** (a branch that never runs).
 - `src/components/AssetsView.tsx:415` — `title` prop on a lucide icon (wrap in a `<span title>` instead).
