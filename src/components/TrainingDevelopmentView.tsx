@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee } from "../types";
 import { apiCall } from "../utils";
+import { seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import NeedCoverageModal from "./training/NeedCoverageModal";
@@ -122,8 +123,25 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
   newRows.forEach(nr => {
     draftTotalAllocated += Number(nr.allocatedBudget || 0);
   });
-  
-  const remainingAnnualBudget = activeBudget - draftTotalAllocated;
+
+  // Remaining follows the same rule as the server and Budget Monitoring
+  // (src/trainingBudget.ts): a settled seminar counts what it spent, any other its
+  // allocation — including an edit or a new row that hasn't been saved yet.
+  // A draft that enrols someone new reopens a settled seminar, as it will on save.
+  const draftAddsParticipants = (programId: string) => {
+    const enrolled = participants
+      .filter(part => part.trainingProgramId === programId && part.status !== "Cancelled" && part.status !== "Archived")
+      .map(part => part.employeeId);
+    return (editingRows[programId]?.participantIds || []).some((empId: string) => !enrolled.includes(empId));
+  };
+  const savedCommitted = activePrograms.reduce((sum, p) => sum + seminarCommitment(p, participants), 0);
+  const draftCommitted =
+    activePrograms.reduce((sum, p) => sum + (editingRows[p.id]
+      ? commitmentAfterEdit(p, participants, Number(editingRows[p.id].allocatedBudget || 0), draftAddsParticipants(p.id))
+      : seminarCommitment(p, participants)
+    ), 0) +
+    newRows.reduce((sum, nr) => sum + Number(nr.allocatedBudget || 0), 0);
+  const remainingAnnualBudget = Math.round((activeBudget - draftCommitted) * 100) / 100;
 
   const handleAddRow = () => {
     const newId = `new-${Date.now()}`;
@@ -161,8 +179,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
       return;
     }
 
-    if (remainingAnnualBudget < 0) {
-      alert("Error: Total allocated budget exceeds the available fiscal year budget. Please adjust allocations.");
+    // Same check as the server (trainingAllocationExceeds): only what this save adds needs
+    // room in the budget, so an edit that adds nothing is never blocked by an overspend.
+    const saved = isNew ? undefined : programs.find(p => p.id === id);
+    const increase = allocationIncrease(saved, participants, Number(row.allocatedBudget || 0), !isNew && draftAddsParticipants(id));
+    const projected = Math.round((savedCommitted + increase) * 100) / 100;
+    if (increase > 0 && projected > Math.round(activeBudget * 100) / 100) {
+      alert(`Seminars would then take ₱${projected.toLocaleString()} of the FY ${activeFy?.label || ""} training budget of ₱${activeBudget.toLocaleString()}. Lower this allocation, or another seminar's first.`);
       return;
     }
 

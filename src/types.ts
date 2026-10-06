@@ -889,6 +889,10 @@ export interface TrainingLiquidationExpense {
   dateIncurred: string;
   submittedBy: string; // user id
   status: "Pending" | "Approved" | "Rejected";
+  // Where the row came from: typed by HR, or copied from a validated liquidation report.
+  // Rows saved before this existed have none; a report's rows carry the employee's id in
+  // submittedBy, HR's carry a user id.
+  source?: "hr" | "report";
 }
 
 

@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Wallet
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { User, UserRole } from "../../types";
 import { formatCurrency } from "../../utils";
 import CashAdvanceDesk from "./CashAdvanceDesk";
@@ -32,6 +33,8 @@ interface LiquidationDeskViewProps {
   /** Submissions already narrowed to the active fiscal year (drives the index + export). */
   yearFilteredSubmissions: any[];
   activeFiscalYear: string;
+  /** FinanceView's fiscal-year chooser, shown in the header beside the export. */
+  yearControl?: ReactNode;
   selectedSub: any;
   subRemarks: string;
   setSelectedSub: (sub: any) => void;
@@ -62,6 +65,7 @@ export default function LiquidationDeskView({
   submissions,
   yearFilteredSubmissions,
   activeFiscalYear,
+  yearControl,
   selectedSub,
   subRemarks,
   setSelectedSub,
@@ -108,6 +112,7 @@ export default function LiquidationDeskView({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {yearControl}
           <button
             type="button"
             onClick={onExport}

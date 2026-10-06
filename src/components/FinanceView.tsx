@@ -38,7 +38,8 @@ import {
   FileSpreadsheet,
   UserCheck,
   Activity,
-  ArrowRight
+  ArrowRight,
+  ChevronDown
 } from "lucide-react";
 import LiquidationDeskView from "./finance/LiquidationDeskView";
 import { apiCall, formatCurrency, formatDate, downloadCSV, firstDateString } from "../utils";
@@ -114,7 +115,10 @@ export default function FinanceView({
   const [consolidationPeriod, setConsolidationPeriod] = useState<"Monthly" | "Quarterly">("Quarterly");
   const [consolidationValue, setConsolidationValue] = useState("Q2"); // Q1, Q2, Q3, Q4, or Month Names
 
-  const [activeFiscalYear, setActiveFiscalYear] = useState<string>("2026");
+  // The fiscal year being viewed. Empty until the years load, then the active one (see
+  // fetchFinanceAddons). It used to start at a hardcoded "2026", which was never
+  // replaced, so the whole Finance view stayed on 2026 after 2027 became active.
+  const [activeFiscalYear, setActiveFiscalYear] = useState<string>("");
   const [fiscalYears, setFiscalYears] = useState<any[]>([]);
   const [isFiscalYearModalOpen, setIsFiscalYearModalOpen] = useState(false);
   const [isConfirmingNewFy, setIsConfirmingNewFy] = useState(false);
@@ -181,18 +185,22 @@ export default function FinanceView({
     try {
       setLoading(true);
       const resFy = await apiCall("/api/fiscal-years").catch(() => null);
-      if (resFy) {
-        setFiscalYears(resFy);
-        // Find active if none selected
-        const active = resFy.find((f: any) => f.status === "Active");
-        if (active && !activeFiscalYear) setActiveFiscalYear(active.label);
+      if (Array.isArray(resFy)) setFiscalYears(resFy);
+      // Open on the active fiscal year (the calendar year if none can be read), then stay
+      // on whichever year the user picks with the FY button.
+      let fyLabel = activeFiscalYear;
+      if (!fyLabel) {
+        const active = Array.isArray(resFy) ? resFy.find((f: any) => f.status === "Active") : null;
+        fyLabel = active?.label || String(new Date().getFullYear());
+        setActiveFiscalYear(fyLabel);
       }
-      
+
       const resLiq = await apiCall("/api/finance/liquidations").catch(() => ({ status: "error", data: [] }));
       if (resLiq.status === "success") {
         setLiquidations(resLiq.data || []);
       }
-      const resBud = await apiCall(`/api/budgets?fiscalYearLabel=${activeFiscalYear || ""}`).catch(() => ({ status: "error", data: [] }));
+      // Never without a year: an empty label returns every year's division budgets.
+      const resBud = await apiCall(`/api/budgets?fiscalYearLabel=${fyLabel}`).catch(() => ({ status: "error", data: [] }));
       if (Array.isArray(resBud)) {
         setBudgets(resBud); // Assuming endpoint returns array
       } else if (resBud.status === "success") {
@@ -555,7 +563,8 @@ export default function FinanceView({
   };
 
   // Live filter matching for Transactions
-  const yearFilteredTxns = txnList.filter(tx => tx.transactionDate.startsWith(activeFiscalYear));
+  // Nothing is listed until the year is known: startsWith("") would match every year.
+  const yearFilteredTxns = activeFiscalYear ? txnList.filter(tx => tx.transactionDate.startsWith(activeFiscalYear)) : [];
   // Liquidation submissions name their date differently depending on when they were
   // filed: only records created after the recent work carry `createdAt`, older ones have
   // `dateSubmitted`. Filtering on `createdAt` alone dropped every older report out of the
@@ -563,7 +572,7 @@ export default function FinanceView({
   // real liquidation was simply invisible to the Financial Officer.
   const yearFilteredSubmissions = submissions.filter(s => {
     const when = firstDateString(s.createdAt, s.dateSubmitted);
-    return !!when && when.startsWith(activeFiscalYear);
+    return !!activeFiscalYear && !!when && when.startsWith(activeFiscalYear);
   });
 
   const filteredTxns = yearFilteredTxns.filter((tx) => {
@@ -627,6 +636,22 @@ export default function FinanceView({
 
   const currentFy = fiscalYears.find(fy => fy.label === activeFiscalYear);
 
+  // The fiscal-year chooser; it opens the "Select Fiscal Year" dialog. Every page that
+  // lists one year's records shows it, so the year in view is never hidden.
+  const fyButton = (
+    <button
+      onClick={() => setIsFiscalYearModalOpen(true)}
+      title="Change the fiscal year shown"
+      aria-haspopup="dialog"
+      className="bg-slate-100 hover:bg-slate-200 text-slate-900 text-[10px] font-bold py-2 px-3 uppercase tracking-wider rounded-lg border flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+    >
+      <Calendar size={13} />
+      {/* The viewed year's real status: a past year reads CLOSED, not ACTIVE. */}
+      <span>FY {activeFiscalYear || "…"} {currentFy?.status?.toUpperCase()}</span>
+      <ChevronDown size={13} aria-hidden="true" />
+    </button>
+  );
+
   // Training programs carry the fiscal year LABEL ("2026"), not the id — the server
   // derives its totals the same way, so these agree with the summary tiles.
 
@@ -647,13 +672,7 @@ export default function FinanceView({
                 </h1>
                 <p className="text-xs text-slate-500 mt-1">Real-time fiscal reporting, regional ledger compliance monitors, and cash allocation statistics.</p>
               </div>
-              <button 
-                onClick={() => setIsFiscalYearModalOpen(true)}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold py-1.5 px-2.5 uppercase tracking-wider rounded-lg border flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                <Calendar size={11} />
-                <span>FY {activeFiscalYear} ACTIVE</span>
-              </button>
+              {fyButton}
             </div>
 
             {/* TEN METRICS CARD ROWS */}
@@ -909,6 +928,7 @@ export default function FinanceView({
                 </div>
                 
                 <div className="flex items-center gap-2">
+                  {fyButton}
                   <button
                     onClick={exportMethods.transactions}
                     className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 px-3 py-2 rounded-lg text-xs font-semibold flex items-center shadow-sm"
@@ -1230,6 +1250,7 @@ export default function FinanceView({
                 <h1 className="text-md font-bold text-slate-900">Official Document Repository & Invoices Vault</h1>
                 <p className="text-xs text-slate-500 mt-1 font-sans">Index, version-control and trace audit files including Purchase Requests (PR), Disbursement Vouchers (DV), official Supplier Invoices, and Liquidation Reports.</p>
               </div>
+              {fyButton}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 rounded-xl border border-slate-200/85">
@@ -1330,6 +1351,7 @@ export default function FinanceView({
             submissions={submissions}
             yearFilteredSubmissions={yearFilteredSubmissions}
             activeFiscalYear={activeFiscalYear}
+            yearControl={fyButton}
             selectedSub={selectedSub}
             subRemarks={subRemarks}
             setSelectedSub={setSelectedSub}
@@ -1359,13 +1381,7 @@ export default function FinanceView({
               </div>
 
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setIsFiscalYearModalOpen(true)}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-900 text-[10px] font-bold py-2 px-3 uppercase tracking-wider rounded-lg border flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
-                >
-                  <Calendar size={13} />
-                  <span>FY {activeFiscalYear} ACTIVE</span>
-                </button>
+                {fyButton}
                 {isBudgetOrAdmin && currentFy?.status === "Active" && (
                   <button 
                     onClick={() => setIsConfirmingNewFy(true)}
@@ -1524,9 +1540,12 @@ export default function FinanceView({
                             <span className="text-xl font-bold text-amber-700 tracking-tight">{formatCurrency(tb?.spent || 0)}</span>
                             <span className="text-[9px] font-mono text-slate-400 mt-0.5">{tb?.percentSpent || 0}% of total</span>
                           </div>
+                          {/* Remaining = total minus what the seminars take: actual spending once a
+                              seminar is settled, its allocation until then (src/trainingBudget.ts).
+                              The same figure carries over when the next fiscal year starts. */}
                           <div className="flex flex-col bg-blue-50/50 p-3 rounded-lg border border-blue-100">
-                            <span className="text-[10px] uppercase font-bold text-blue-800 mb-1">Unallocated</span>
-                            <span className={`text-2xl font-extrabold tracking-tight ${(tb?.unallocated ?? approved) < 0 ? "text-red-600" : "text-slate-900"}`}>{formatCurrency(tb?.unallocated ?? approved)}</span>
+                            <span className="text-[10px] uppercase font-bold text-blue-800 mb-1">Remaining</span>
+                            <span className={`text-2xl font-extrabold tracking-tight ${(tb?.remaining ?? approved) < 0 ? "text-red-600" : "text-slate-900"}`}>{formatCurrency(tb?.remaining ?? approved)}</span>
                             <span className="text-[9px] font-mono text-slate-400 mt-0.5">of {formatCurrency(approved)} total</span>
                           </div>
                         </div>

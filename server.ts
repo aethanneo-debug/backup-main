@@ -9,6 +9,7 @@ import crypto from "crypto";
 import { readXlsxWorkbook, XlsxReadError } from "./src/server/xlsx/readXlsx";
 import { parsePlanASheet, PlanABlock } from "./src/server/xlsx/parsePlanA";
 import { matchWorkbookName } from "./src/server/xlsx/matchEmployeeName";
+import { seminarCommitment, allocationIncrease, isSeminarSettled } from "./src/trainingBudget";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -1090,7 +1091,7 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
   }
 
 
-    // The new year's training budget starts at zero plus what last year left unallocated.
+    // The new year's training budget starts at zero plus what last year did not use.
     // Last year's seminars are NOT copied in: each copy brought its allocation with it, so
     // the new year opened with last year's "Total Allocated" already committed. HR plans
     // the new year's seminars itself; one with the same title still counts as the same
@@ -1100,8 +1101,10 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
 
       const activeTrainingBudget = (db.trainingBudgets || []).find(b => b.fiscalYearId === activeFy.id);
       if (activeTrainingBudget) {
-        const allocatedBudget = activePrograms.reduce((sum, p) => sum + Number(p.allocatedBudget || 0), 0);
-        const carryOver = Math.max(0, Number(activeTrainingBudget.totalBudget || 0) - allocatedBudget);
+        // Settled seminars count what they actually spent, the rest their allocation
+        // (src/trainingBudget.ts) — the same figure Budget Monitoring shows as Remaining.
+        const committed = activePrograms.reduce((sum, p) => sum + seminarCommitment(p, db.trainingParticipants || []), 0);
+        const carryOver = Math.max(0, round2(Number(activeTrainingBudget.totalBudget || 0) - committed));
 
         db.trainingBudgets = [...(db.trainingBudgets || []), {
           id: `atb-${Date.now()}`,
@@ -3843,6 +3846,22 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
     const tPart = db.trainingParticipants.find(p => p.id === sub.activityId);
     if (tPart) {
       tPart.status = "Liquidated";
+      const prog = db.trainingPrograms.find(p => p.id === tPart.trainingProgramId);
+
+      // The report is now this participant's record of spending. Anything HR typed for
+      // them before it arrived is replaced, so the seminar never counts it twice. Older
+      // rows have no `source`: HR's carry a user id in submittedBy, a report's the
+      // employee's own id.
+      const handRows = (db.trainingLiquidations || []).filter((r: any) =>
+        r.trainingParticipantId === tPart.id && (r.source === "hr" || (!r.source && r.submittedBy !== sub.employeeId)));
+      if (handRows.length > 0) {
+        const handTotal = round2(handRows.reduce((s: number, r: any) => s + Number(r.amount || 0), 0));
+        db.trainingLiquidations = db.trainingLiquidations.filter((r: any) => !handRows.includes(r));
+        if (prog) prog.usedBudget = Math.max(0, round2((prog.usedBudget || 0) - handTotal));
+        logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Replace Hand-Entered Expenses",
+          `${sub.submissionNo} replaced ${handRows.length} expense row(s) worth PHP ${handTotal.toFixed(2)} that HR had entered by hand for ${sub.employeeName}`);
+      }
+
       // Mirror the approved report into the training ledger. An itemised report copies
       // one row per PARTICULARS line so HR's breakdown shows what was actually bought;
       // a report with no line items still collapses to a single row, as before.
@@ -3866,14 +3885,14 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
           amount: line.amount,
           dateIncurred,
           submittedBy: sub.employeeId,
-          status: "Approved"
+          status: "Approved",
+          source: "report"
         });
       });
-      
+
       // Update the usedBudget in trainingPrograms
-      const prog = db.trainingPrograms.find(p => p.id === tPart.trainingProgramId);
       if (prog) {
-        prog.usedBudget = (prog.usedBudget || 0) + sub.totalSpent;
+        prog.usedBudget = round2((prog.usedBudget || 0) + sub.totalSpent);
       }
     }
 
@@ -5002,29 +5021,36 @@ function computeTrainingUsage(fiscalYearId: string) {
   const programs = (db.trainingPrograms || []).filter((p: any) => fy && p.fiscalYear === fy.label);
   const allocated = programs.reduce((s: number, p: any) => s + Number(p.allocatedBudget || 0), 0);
   const spent = programs.reduce((s: number, p: any) => s + Number(p.usedBudget || 0), 0);
+  // What the seminars take out of the budget: actual spending once a seminar is settled,
+  // its allocation until then (see src/trainingBudget.ts).
+  const committed = round2(programs.reduce((s: number, p: any) => s + seminarCommitment(p, db.trainingParticipants || []), 0));
   return {
     totalBudget,
     allocated,
     spent,
-    unallocated: totalBudget - allocated,
+    committed,
+    remaining: round2(totalBudget - committed),
     percentAllocated: totalBudget > 0 ? Math.round((allocated / totalBudget) * 100) : 0,
     percentSpent: totalBudget > 0 ? Math.round((spent / totalBudget) * 100) : 0,
     programCount: programs.length
   };
 }
 
-// Server-side ceiling check for training allocations. Returns null when the amount
-// fits, or the offending figures when it does not. When editing an existing program
-// its current allocation is excluded so re-saving an unchanged row never trips.
-function trainingAllocationExceeds(fyLabel: string, newAmount: number, excludeProgramId?: string) {
+// Server-side ceiling check for training allocations. Returns null when the change fits,
+// or the offending figures when it does not. Only what the change ADDS to the year's
+// seminars needs room (allocationIncrease in src/trainingBudget.ts): re-saving a row,
+// cutting it, or editing a settled seminar always passes, even after an approved
+// overspend has taken the year past its budget. `addsParticipants`: the save enrols
+// someone new, which reopens a settled seminar, so its allocation counts again.
+function trainingAllocationExceeds(fyLabel: string, newAmount: number, excludeProgramId?: string, addsParticipants = false) {
   const fy = (db.fiscalYears || []).find((f: any) => f.label === fyLabel);
   if (!fy) return null;
   const usage = computeTrainingUsage(fy.id);
-  const current = excludeProgramId
-    ? usage.allocated - Number((db.trainingPrograms || []).find((p: any) => p.id === excludeProgramId)?.allocatedBudget || 0)
-    : usage.allocated;
-  const projected = current + Number(newAmount || 0);
-  return projected > usage.totalBudget ? { projected, totalBudget: usage.totalBudget } : null;
+  const existing = excludeProgramId ? (db.trainingPrograms || []).find((p: any) => p.id === excludeProgramId) : undefined;
+  const increase = allocationIncrease(existing, db.trainingParticipants || [], Number(newAmount || 0), addsParticipants);
+  if (increase <= 0) return null;
+  const projected = round2(usage.committed + increase);
+  return projected > round2(usage.totalBudget) ? { projected, totalBudget: usage.totalBudget } : null;
 }
 
 app.get("/api/training/budgets", authenticateToken, (req: any, res: any) => {
@@ -5051,7 +5077,8 @@ app.post("/api/training/budgets", authenticateToken, (req: any, res: any) => {
   let budget = db.trainingBudgets.find(b => b.fiscalYearId === fiscalYearId);
   if (budget) {
     budget.newAnnualBudget = annualAmount;
-    budget.totalBudget = (budget.carryOverBudget || 0) + annualAmount;
+    // Rounded: a carry-over with centavos would otherwise store e.g. 51000.299999999996.
+    budget.totalBudget = round2((budget.carryOverBudget || 0) + annualAmount);
   } else {
     budget = {
       id: `tb-${Date.now()}`,
@@ -5755,7 +5782,7 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
   if (overBy) {
     return res.status(400).json({
       status: "error",
-      message: `Total allocated budget (PHP ${overBy.projected.toLocaleString()}) would exceed the ${body.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
+      message: `Seminars would then take PHP ${overBy.projected.toLocaleString()} of the ${body.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
     });
   }
 
@@ -5821,18 +5848,28 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
   const body = req.body;
   const existingProgram = db.trainingPrograms[programIndex];
 
-  // Same ceiling as on create. The program being edited is excluded from the running
-  // total so re-saving an unchanged row never trips the check.
-  if (body.allocatedBudget !== undefined) {
+  // Same ceiling as on create, checked against the year the seminar is in (an edit never
+  // moves a seminar to another year). Enrolling someone new reopens a settled seminar, so
+  // that is checked too, even when the allocation itself is unchanged.
+  const enrolledForms = new Set((db.trainingParticipants || [])
+    .filter(p => p.trainingProgramId === existingProgram.id && p.status !== "Cancelled" && p.status !== "Archived")
+    .flatMap(p => employeeIdForms(p.employeeId)));
+  const addsParticipants = Array.isArray(body.participantIds)
+    && body.participantIds.some((raw: string) => !employeeIdForms(raw).some(f => enrolledForms.has(f)));
+  if (body.allocatedBudget !== undefined || addsParticipants) {
     const overBy = trainingAllocationExceeds(
-      body.fiscalYear || existingProgram.fiscalYear,
-      parseFloat(body.allocatedBudget) || 0,
-      existingProgram.id
+      existingProgram.fiscalYear,
+      body.allocatedBudget !== undefined ? (parseFloat(body.allocatedBudget) || 0) : Number(existingProgram.allocatedBudget || 0),
+      existingProgram.id,
+      addsParticipants
     );
     if (overBy) {
+      const reopens = addsParticipants && isSeminarSettled(existingProgram.id, db.trainingParticipants || [])
+        ? "Adding a participant reopens this finished seminar, so its allocation counts again. "
+        : "";
       return res.status(400).json({
         status: "error",
-        message: `Total allocated budget (PHP ${overBy.projected.toLocaleString()}) would exceed the ${body.fiscalYear || existingProgram.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
+        message: `${reopens}Seminars would then take PHP ${overBy.projected.toLocaleString()} of the ${existingProgram.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
       });
     }
   }
@@ -5968,6 +6005,16 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
     return res.status(400).json({ status: "error", message: "Program has reached maximum capacity" });
   }
 
+  // Enrolling someone in a seminar everyone had settled reopens it: its allocation counts
+  // again, so it needs room in the year's training budget, as on the program edit.
+  const overBy = trainingAllocationExceeds(prog.fiscalYear, Number(prog.allocatedBudget || 0), prog.id, true);
+  if (overBy) {
+    return res.status(400).json({
+      status: "error",
+      message: `Adding a participant reopens this finished seminar, so its allocation counts again. Seminars would then take PHP ${overBy.projected.toLocaleString()} of the ${prog.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
+    });
+  }
+
   const { created, skipped } = enrollTrainingParticipants(prog, [employeeId], (req as any).user, enrolledCount);
   if (created.length === 0) {
     return res.status(400).json({ status: "error", message: skipped[0] || "Employee could not be enrolled." });
@@ -6061,7 +6108,7 @@ app.post("/api/training/liquidations", authenticateToken, (req: any, res: any) =
     return res.status(403).json({ status: "error", message: "Only HR can record training expenses." });
   }
   const { trainingProgramId, trainingParticipantId, expenseCategory, description, amount, receiptFileName, dateIncurred } = req.body;
-  const amt = parseFloat(amount);
+  const amt = round2(parseFloat(amount));
 
   const prog = db.trainingPrograms.find(p => p.id === trainingProgramId);
   if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
@@ -6078,6 +6125,16 @@ app.post("/api/training/liquidations", authenticateToken, (req: any, res: any) =
     if (!participant || participant.trainingProgramId !== trainingProgramId) {
       return res.status(400).json({ status: "error", message: "Selected participant is not enrolled in this training program." });
     }
+    // A participant who files a liquidation report is accounted for by that report, which
+    // Finance's validation copies into this ledger; a hand entry as well would count the
+    // same spending twice.
+    const report = (db.liquidationSubmissions || []).find((s: any) => s.activityId === participant.id);
+    if (report) {
+      return res.status(400).json({
+        status: "error",
+        message: `This participant's spending comes from their liquidation report ${report.submissionNo}, so it can't also be entered here. Program-wide costs (venue, speaker) can still be recorded without choosing a participant.`
+      });
+    }
   }
 
   const liq: TrainingLiquidationExpense = {
@@ -6091,14 +6148,15 @@ app.post("/api/training/liquidations", authenticateToken, (req: any, res: any) =
     receiptFileName,
     dateIncurred,
     submittedBy: (req as any).user.id,
-    status: "Approved" // auto-approved for simplicity, or "Pending" based on flow
+    status: "Approved", // auto-approved for simplicity, or "Pending" based on flow
+    source: "hr"
   };
 
-  if (prog.usedBudget + amt > prog.allocatedBudget) {
+  if (round2((prog.usedBudget || 0) + amt) > prog.allocatedBudget) {
     return res.status(400).json({ status: "error", message: "Liquidation exceeds allocated training budget." });
   }
 
-  prog.usedBudget += amt;
+  prog.usedBudget = round2((prog.usedBudget || 0) + amt);
   db.trainingLiquidations.push(liq);
   saveDB();
   res.json({ status: "success", data: liq });
