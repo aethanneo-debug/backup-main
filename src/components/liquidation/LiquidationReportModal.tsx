@@ -62,12 +62,16 @@ export default function LiquidationReportModal({
       <div className="my-auto w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl print:my-0 print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
         {/* Modal chrome - never printed */}
         <div className="flex items-center justify-between bg-blue-600 px-5 py-3 print:hidden">
-          <div>
+          <div className="min-w-0">
             <h2 className="font-mono text-xs font-bold uppercase tracking-widest text-white">
               Liquidation Report
             </h2>
-            <p className="mt-0.5 font-mono text-[10px] text-blue-200">
+            {/* The printed sheet has no line for the activity or the system's own reference,
+                so they are shown here, on screen only. */}
+            <p className="mt-0.5 truncate font-mono text-[10px] text-blue-200">
               Serial No. {submission.serialNo || submission.submissionNo}
+              {submission.serialNo && submission.submissionNo ? ` · ${submission.submissionNo}` : ""}
+              {activityLabel ? ` · ${activityLabel}` : ""}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -91,9 +95,9 @@ export default function LiquidationReportModal({
           </div>
         </div>
 
-        <div className="custom-scrollbar max-h-[78vh] overflow-y-auto bg-slate-100 p-4 print:max-h-none print:overflow-visible print:bg-white print:p-0">
+        <div className="custom-scrollbar max-h-[78vh] overflow-auto bg-slate-100 p-4 print:max-h-none print:overflow-visible print:bg-white print:p-0">
           <div className="shadow-sm print:shadow-none">
-            <LiquidationReportForm submission={submission} activityLabel={activityLabel} />
+            <LiquidationReportForm submission={submission} />
           </div>
         </div>
       </div>

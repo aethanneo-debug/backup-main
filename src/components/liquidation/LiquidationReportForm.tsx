@@ -1,107 +1,29 @@
 import React from "react";
 import { LiquidationSubmission, LiquidationParticular } from "../../types";
-import { formatCurrency, formatDate } from "../../utils";
-import HsacLogo from "../HsacLogo";
+import { SHEET_FONT, amountText, longDate, periodRange, sheetDate } from "./sheet/sheetFormat";
+import { CertificationCell, Fill, SheetTotalRow } from "./sheet/SheetParts";
 
 interface LiquidationReportFormProps {
   submission: LiquidationSubmission;
-  /** e.g. "ACT-2026-004 - Regional Orientation Seminar". Printed in the header grid. */
+  /**
+   * e.g. "ACT-2026-004 - Regional Orientation Seminar". The printed form has no line for
+   * it (the particulars describe the activity), so the modal shows it on screen instead.
+   */
   activityLabel?: string;
 }
 
-// A fill-in rule on the printed form. COA forms leave these to be hand-completed, so an
-// empty value must still print as a visible rule, never collapse to nothing.
-function FormValue({ value, className = "" }: { value?: string | null; className?: string }) {
-  const text = (value ?? "").toString().trim();
-  return (
-    <span className={`inline-block min-w-[60px] border-b border-slate-400 px-1 text-slate-900 ${className}`}>
-      {text || " "}
-    </span>
-  );
-}
-
-// One line of the totals block. `note` renders the inline "PER DV NO. __ DTD __" rules.
-function TotalRow({
-  label,
-  note,
-  amount,
-  strong = false,
-}: {
-  label: string;
-  note?: React.ReactNode;
-  amount: number;
-  strong?: boolean;
-}) {
-  return (
-    <tr className={strong ? "bg-slate-100" : ""}>
-      <td className="border border-slate-900 px-2 py-1.5 align-middle">
-        <span
-          className={`text-[10px] uppercase tracking-wide ${
-            strong ? "font-bold text-slate-900" : "font-semibold text-slate-700"
-          }`}
-        >
-          {label}
-        </span>
-        {note ? <span className="ml-1 text-[10px] text-slate-700">{note}</span> : null}
-      </td>
-      <td
-        className={`border border-slate-900 px-2 py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
-          strong ? "text-xs font-bold text-slate-900" : "text-xs text-slate-800"
-        }`}
-      >
-        {formatCurrency(amount)}
-      </td>
-    </tr>
-  );
-}
-
-// One of the three certification boxes at the foot of the form.
-function CertificationBox({
-  letter,
-  statement,
-  name,
-  role,
-  signedAt,
-  footer,
-}: {
-  letter: string;
-  statement: string;
-  name?: string;
-  role: string;
-  signedAt?: string;
-  footer?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col border border-slate-900 p-2.5 min-h-[132px]">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-900">
-        <span className="mr-1">{letter}</span>Certified:
-      </p>
-      <p className="mt-0.5 text-[10px] leading-snug text-slate-700">{statement}</p>
-
-      <div className="mt-auto pt-5 text-center">
-        <p className="border-b border-slate-900 pb-0.5 text-[11px] font-bold uppercase text-slate-900">
-          {name?.trim() || " "}
-        </p>
-        <p className="mt-1 text-[9px] uppercase tracking-wide text-slate-600">{role}</p>
-        <p className="mt-0.5 font-mono text-[9px] text-slate-500">
-          {signedAt ? formatDate(signedAt) : "Date: ______________"}
-        </p>
-      </div>
-
-      {footer ? <div className="mt-2 border-t border-slate-300 pt-1.5">{footer}</div> : null}
-    </div>
-  );
-}
+const Amount = ({ value }: { value: number }) => <span className="font-bold tabular-nums">{amountText(value)}</span>;
 
 /**
- * The official COA Liquidation Report as HSAC RAB 1 files it.
+ * The COA Liquidation Report, laid out exactly like HSAC RAB 1's Excel sheet. The filing
+ * form (sheet/LiquidationSheetForm) is the same sheet with inputs, built from the same parts.
  *
  * Presentational only - it never calls the API. `remainingBalance` is a single stored
  * figure: positive means the claimant refunded the excess (per OR No.), negative means
  * the agency still owes them. The two form lines below are that one figure split for
  * display, which is why both print and only one is ever non-zero.
  */
-export default function LiquidationReportForm({ submission, activityLabel }: LiquidationReportFormProps) {
+export default function LiquidationReportForm({ submission }: LiquidationReportFormProps) {
   const lines: LiquidationParticular[] = (submission.particulars ?? []).filter(
     (p) => p && ((p.description || "").trim() !== "" || Number(p.amount) > 0)
   );
@@ -129,213 +51,143 @@ export default function LiquidationReportForm({ submission, activityLabel }: Liq
           },
         ];
 
-  const periodFrom = submission.periodCoveredFrom ? formatDate(submission.periodCoveredFrom) : "";
-  const periodTo = submission.periodCoveredTo ? formatDate(submission.periodCoveredTo) : "";
-  const periodCovered =
-    periodFrom && periodTo ? `${periodFrom} to ${periodTo}` : periodFrom || periodTo || "";
-
-  // Box B is signed by the Financial Officer under delegated authority at RAB 1 - the
-  // form's own "Authorized Representative" line. This is not a skipped approval.
-  const delegatedBoxB =
-    submission.divisionChiefStatus === "Certified by Authorized Representative" ||
-    submission.divisionChiefStatus === "Bypassed (Auto-Approved by Finance)";
+  const period = periodRange(submission.periodCoveredFrom, submission.periodCoveredTo);
+  // Keeps the sheet's proportions: the body is mostly empty ruled space below the lines.
+  const bodySpace = Math.max(56, 320 - 44 * printableLines.length);
 
   return (
     <article
       id="lr-print-root"
-      className="mx-auto w-full max-w-[820px] bg-white p-6 text-slate-900 print:max-w-none print:p-0"
+      className="mx-auto w-full min-w-[680px] max-w-[800px] bg-white p-6 text-black print:min-w-0 print:max-w-none print:p-0"
+      style={{ fontFamily: SHEET_FONT }}
       aria-label={`Liquidation Report ${submission.serialNo || submission.submissionNo}`}
     >
-      {/* --- Agency header --- */}
-      <header className="mb-3 flex items-center justify-center gap-3 text-center">
-        <HsacLogo size={40} />
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-900">
-            Human Settlements Adjudication Commission
-          </p>
-          <p className="text-[10px] text-slate-600">Regional Adjudication Branch No. 1</p>
-          <p className="text-[9px] text-slate-500">
-            Dona Pepita Building, Quezon Avenue, Barangay II, San Fernando City, La Union
-          </p>
-        </div>
-      </header>
-
-      <h1 className="mb-3 text-center text-base font-extrabold uppercase tracking-[0.2em] text-blue-600 print:text-black">
-        Liquidation Report
-      </h1>
-
-      {/* --- Header grid --- */}
-      <table className="w-full table-fixed border-collapse text-[10px]">
+      <table className="w-full table-fixed border-collapse border border-black text-[13px] leading-snug">
+        {/* A and B share the PARTICULARS width; C sits under the AMOUNT column. */}
+        <colgroup>
+          <col style={{ width: "33%" }} />
+          <col style={{ width: "33%" }} />
+          <col style={{ width: "34%" }} />
+        </colgroup>
         <tbody>
+          {/* --- Title block --- */}
           <tr>
-            <td className="w-1/2 border border-slate-900 px-2 py-1.5">
-              <span className="font-semibold uppercase tracking-wide text-slate-600">Entity Name:</span>{" "}
-              <FormValue value={submission.entityName || "HSAC-RAB I"} className="font-mono font-bold" />
+            <td colSpan={2} className="border-r-2 border-b-2 border-black px-2 pt-3 pb-2 align-top">
+              <h1 className="text-center text-[17px] font-bold">LIQUIDATION REPORT</h1>
+              <p className="text-center">
+                Period Covered: <Fill value={period} className="font-bold" minWidth="10rem" />
+              </p>
+              <div className="mt-6 font-bold">
+                <p>Entity Name : {submission.entityName || "HSAC-RAB I"}</p>
+                <p>Fund Cluster : {submission.fundCluster || "01 - Regular Fund"}</p>
+              </div>
             </td>
-            <td className="w-1/2 border border-slate-900 px-2 py-1.5">
-              <span className="font-semibold uppercase tracking-wide text-slate-600">Serial No.:</span>{" "}
-              <FormValue
-                value={submission.serialNo || submission.submissionNo}
-                className="font-mono font-bold"
-              />
+            <td className="border-b-2 border-black p-0 align-top">
+              <div className="px-1.5 pt-3 pb-3">
+                <p>
+                  Serial No.: <Fill value={submission.serialNo || submission.submissionNo} className="font-bold" />
+                </p>
+                <p>
+                  Date: <Fill value={longDate(submission.dateSubmitted || submission.createdAt)} className="font-bold" />
+                </p>
+              </div>
+              <div className="border-t border-black px-1.5 pt-1 pb-2.5">
+                <p>Responsibility Center Code:</p>
+                <p className="mx-3 mt-2 min-h-[1.4em] border-b border-black text-center font-bold">
+                  {(submission.responsibilityCenterCode || "").trim() || " "}
+                </p>
+              </div>
             </td>
           </tr>
-          <tr>
-            <td className="border border-slate-900 px-2 py-1.5">
-              <span className="font-semibold uppercase tracking-wide text-slate-600">Fund Cluster:</span>{" "}
-              <FormValue value={submission.fundCluster || "01 - Regular Fund"} className="font-mono" />
-            </td>
-            <td className="border border-slate-900 px-2 py-1.5">
-              <span className="font-semibold uppercase tracking-wide text-slate-600">Date:</span>{" "}
-              <FormValue
-                value={formatDate(submission.dateSubmitted || submission.createdAt)}
-                className="font-mono"
-              />
-            </td>
-          </tr>
-          <tr>
-            <td className="border border-slate-900 px-2 py-1.5">
-              <span className="font-semibold uppercase tracking-wide text-slate-600">Period Covered:</span>{" "}
-              <FormValue value={periodCovered} className="font-mono" />
-            </td>
-            <td className="border border-slate-900 px-2 py-1.5">
-              <span className="font-semibold uppercase tracking-wide text-slate-600">
-                Responsibility Center Code:
-              </span>{" "}
-              <FormValue value={submission.responsibilityCenterCode} className="font-mono" />
-            </td>
-          </tr>
-          {activityLabel ? (
-            <tr>
-              <td colSpan={2} className="border border-slate-900 px-2 py-1.5">
-                <span className="font-semibold uppercase tracking-wide text-slate-600">
-                  Activity / Purpose:
-                </span>{" "}
-                <FormValue value={activityLabel} className="font-mono" />
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
 
-      {/* --- PARTICULARS --- */}
-      <table className="mt-3 w-full table-fixed border-collapse">
-        <thead>
-          <tr className="bg-slate-100">
-            <th
-              scope="col"
-              className="border border-slate-900 px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-[0.15em] text-slate-900"
-            >
-              Particulars
+          {/* --- Column headings --- */}
+          <tr>
+            <th colSpan={2} scope="col" className="border-r-2 border-b border-black py-2 text-center font-normal">
+              PARTICULARS
             </th>
-            <th
-              scope="col"
-              className="w-[180px] border border-slate-900 px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-[0.15em] text-slate-900"
-            >
-              Amount
+            <th scope="col" className="border-b border-black py-2 text-center font-bold">
+              AMOUNT
             </th>
           </tr>
-        </thead>
-        <tbody>
+
+          {/* --- Particulars: each amount sits on its description's last line --- */}
           {printableLines.map((line, idx) => (
             <tr key={line.id || idx}>
-              <td className="border-x border-slate-900 px-2 py-1 align-top text-[11px] text-slate-800">
-                <span className="mr-2 font-mono text-[10px] text-slate-500">{idx + 1}.</span>
+              <td colSpan={2} className="border-r-2 border-black px-2 pt-2 align-bottom font-bold">
                 {line.description}
               </td>
-              <td className="border-x border-slate-900 px-2 py-1 text-right font-mono text-[11px] tabular-nums text-slate-900">
-                {formatCurrency(Number(line.amount) || 0)}
+              <td className="px-2 pt-2 text-right align-bottom font-bold tabular-nums">
+                {amountText(Number(line.amount) || 0)}
               </td>
             </tr>
           ))}
 
           {/* COA closing rule - nothing may be added below this line. */}
           <tr>
-            <td className="border-x border-slate-900 px-2 py-2 text-center text-[10px] font-bold uppercase tracking-widest text-slate-600">
-              -- Nothing Follows ---
+            <td colSpan={2} className="border-r-2 border-black px-2 pb-1 text-center italic">
+              -- NOTHING FOLLOWS ---
             </td>
-            <td className="border-x border-slate-900 px-2 py-2" />
+            <td />
+          </tr>
+          <tr aria-hidden="true">
+            <td colSpan={2} className="border-r-2 border-b-2 border-black" style={{ height: bodySpace }} />
+            <td className="border-b-2 border-black" />
           </tr>
 
-          {/* Blank body space so the sheet keeps the official proportions. */}
+          {/* --- Totals --- */}
+          <SheetTotalRow label="TOTAL AMOUNT SPENT" amount={<Amount value={totalSpent} />} />
+          <SheetTotalRow
+            label={
+              <>
+                AMOUNT OF CASH ADVANCE PER DV NO.{" "}
+                <Fill value={submission.cashAdvanceDvNo} className="font-bold underline" /> DTD.{" "}
+                <Fill value={sheetDate(submission.cashAdvanceDvDate)} className="font-bold underline" />
+              </>
+            }
+            amount={<Amount value={totalReleased} />}
+          />
+          <SheetTotalRow
+            label={
+              <>
+                AMOUNT REFUNDED PER OR NO. <Fill value={submission.refundOrNo} /> DTD.{" "}
+                <Fill value={sheetDate(submission.refundOrDate)} />
+              </>
+            }
+            amount={<Amount value={amountRefunded} />}
+          />
+          <SheetTotalRow label="AMOUNT TO BE REIMBURSED" amount={<Amount value={amountToReimburse} />} />
+
+          {/* --- Certifications --- */}
           <tr>
-            <td className="h-16 border-x border-b border-slate-900" />
-            <td className="h-16 border-x border-b border-slate-900" />
+            <CertificationCell
+              letter="A"
+              statement="Correctness of the above data"
+              name={submission.employeeName}
+              caption="Employee Name"
+              signedAt={submission.dateSubmitted || submission.createdAt}
+              className="border-r border-black"
+            />
+            {/* Box B is signed by the Financial Officer under delegated authority at RAB 1 -
+                the form's "Representative". This is not a skipped approval. */}
+            <CertificationCell
+              letter="B"
+              statement="Purpose of travel / cash advance duly accomplished"
+              name={submission.divisionChiefApprovedBy}
+              caption="Representative"
+              signedAt={submission.divisionChiefApprovedAt}
+              className="border-r-2 border-black"
+            />
+            <CertificationCell
+              letter="C"
+              statement="Supporting documents complete and proper"
+              name={submission.financeValidatedBy}
+              caption="Accountant III"
+              signedAt={submission.financeValidatedAt}
+              jevNo={submission.jevNo ?? ""}
+            />
           </tr>
-
-          <TotalRow label="Total Amount Spent" amount={totalSpent} strong />
-          <TotalRow
-            label="Amount of Cash Advance per DV No."
-            note={
-              <>
-                <FormValue value={submission.cashAdvanceDvNo} className="font-mono text-[10px]" />
-                <span className="mx-1 uppercase">dtd</span>
-                <FormValue
-                  value={submission.cashAdvanceDvDate ? formatDate(submission.cashAdvanceDvDate) : ""}
-                  className="font-mono text-[10px]"
-                />
-              </>
-            }
-            amount={totalReleased}
-          />
-          <TotalRow
-            label="Amount Refunded per OR No."
-            note={
-              <>
-                <FormValue value={submission.refundOrNo} className="font-mono text-[10px]" />
-                <span className="mx-1 uppercase">dtd</span>
-                <FormValue
-                  value={submission.refundOrDate ? formatDate(submission.refundOrDate) : ""}
-                  className="font-mono text-[10px]"
-                />
-              </>
-            }
-            amount={amountRefunded}
-          />
-          <TotalRow label="Amount to be Reimbursed" amount={amountToReimburse} strong />
         </tbody>
       </table>
-
-      {/* --- Certification boxes --- */}
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3">
-        <CertificationBox
-          letter="A"
-          statement="Correctness of the above data."
-          name={submission.employeeName}
-          role="Claimant / Accountable Officer"
-          signedAt={submission.dateSubmitted || submission.createdAt}
-        />
-        <CertificationBox
-          letter="B"
-          statement="Purpose of travel / cash advance duly accomplished."
-          name={submission.divisionChiefApprovedBy}
-          role="Head of Agency / Authorized Representative"
-          signedAt={submission.divisionChiefApprovedAt}
-          footer={
-            delegatedBoxB ? (
-              <p className="text-[8px] leading-snug text-slate-500">
-                Signed by the Financial Officer as Authorized Representative under delegated authority.
-              </p>
-            ) : undefined
-          }
-        />
-        <CertificationBox
-          letter="C"
-          statement="Supporting documents complete and proper."
-          name={submission.financeValidatedBy}
-          role="Accountant III"
-          signedAt={submission.financeValidatedAt}
-          footer={
-            <p className="text-[9px] uppercase tracking-wide text-slate-600">
-              JEV No.: <FormValue value={submission.jevNo} className="font-mono normal-case" />
-            </p>
-          }
-        />
-      </div>
-
-      <p className="mt-2 text-[8px] uppercase tracking-wide text-slate-400">
-        System reference: {submission.submissionNo}
-      </p>
     </article>
   );
 }

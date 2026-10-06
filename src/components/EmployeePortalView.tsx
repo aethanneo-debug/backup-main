@@ -2,16 +2,14 @@ import React, { useState, useEffect, useMemo } from "react";
 import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission } from "../types";
 import { apiCall, getLocalTodayString, formatCurrency } from "../utils";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
-import ParticularsEditor, {
+import {
   newParticular,
   sumParticulars,
   filledParticulars
 } from "./liquidation/ParticularsEditor";
-import LiquidationCoaFields, {
-  CoaHeaderFields,
-  emptyCoaHeaderFields,
-  SettlementSummary
-} from "./liquidation/LiquidationCoaFields";
+import { CoaHeaderFields, emptyCoaHeaderFields } from "./liquidation/LiquidationCoaFields";
+import LiquidationSheetForm from "./liquidation/sheet/LiquidationSheetForm";
+import { amountText } from "./liquidation/sheet/sheetFormat";
 import LiquidationReportModal from "./liquidation/LiquidationReportModal";
 import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal";
 import {
@@ -1185,71 +1183,64 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                   </select>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Cash Advance Received (₱)</label>
-                  <input
-                    type={activeAdvance ? "text" : "number"}
-                    min="0"
-                    step="0.01"
-                    disabled={submittingLiq}
-                    readOnly={!!activeAdvance}
-                    aria-label={activeAdvance
-                      ? "Cash advance received, taken from the voucher Finance released"
-                      : "Cash advance actually received. Enter 0 if you received none."}
-                    value={activeAdvance ? formatCurrency(Number(activeAdvance.amount)) : (releasedDraft ?? String(totalReleased))}
-                    onChange={e => {
-                      if (activeAdvance) return;
-                      setReleasedDraft(e.target.value);
-                      const n = Number(e.target.value);
-                      if (isFinite(n) && n >= 0) setTotalReleased(n);
-                    }}
-                    onBlur={() => {
-                      if (activeAdvance) return;
-                      setReleasedDraft(null);
-                      setTotalReleased(v => Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
-                    }}
-                    className={`w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100 ${
-                      activeAdvance ? "bg-slate-100 text-slate-600" : "text-slate-800"
-                    }`}
-                  />
+                {/* The cash advance itself is entered on the sheet below, on its AMOUNT OF
+                    CASH ADVANCE line; this says where its figure comes from. */}
+                <div className="space-y-1 md:pt-5">
                   {activeAdvance ? (
-                    <p className="text-[9px] text-blue-700 font-mono leading-snug">
-                      From <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {activeAdvance.dvDate}.
+                    <p className="text-[10px] text-blue-700 font-mono leading-snug">
+                      Cash advance <strong>{formatCurrency(Number(activeAdvance.amount))}</strong> from{" "}
+                      <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {activeAdvance.dvDate}.
                       Taken from Finance&rsquo;s record, so it cannot be edited here.
                     </p>
                   ) : selectedActivityId ? (
-                    <p className="text-[9px] text-amber-700 font-mono leading-snug">
+                    <p className="text-[10px] text-amber-700 font-mono leading-snug">
                       <strong>No cash advance on record</strong> for this assignment. If you paid out of
-                      pocket, leave this at 0 &mdash; what you spent becomes a reimbursement claim.
+                      pocket, leave the cash advance at 0 &mdash; what you spent becomes a reimbursement claim.
                     </p>
                   ) : (
-                    <p className="text-[9px] text-slate-400 font-mono leading-snug">
+                    <p className="text-[10px] text-slate-400 font-mono leading-snug">
                       Choose an assignment first.
                     </p>
                   )}
                 </div>
               </div>
 
-              {/* PARTICULARS — the itemised body of the COA Liquidation Report */}
-              <ParticularsEditor
-                particulars={particulars}
-                onChange={setParticulars}
-                total={computedSpent}
-                errors={particularErrors}
-                disabled={submittingLiq}
-              />
-
-              {/* COA header fields: period covered, DV reference, refund OR */}
-              <LiquidationCoaFields
-                value={coaFields}
-                onChange={setCoaFields}
-                refundEnabled={refundDue}
-                disabled={submittingLiq}
-                advanceOnRecord={!!activeAdvance}
-              />
-
-              {/* Live derived figures — exactly what the printed form will show */}
-              <SettlementSummary totalReleased={totalReleased} totalSpent={effectiveSpent} />
+              {/* The COA Liquidation Report itself, filled in on the sheet it prints as */}
+              <div className="custom-scrollbar overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-3">
+                <LiquidationSheetForm
+                  serialNo={resubmittingItem?.serialNo}
+                  date={resubmittingItem ? (resubmittingItem.dateSubmitted || resubmittingItem.createdAt) : getLocalTodayString()}
+                  employeeName={resubmittingItem?.employeeName || user.fullName}
+                  coa={coaFields}
+                  onCoaChange={setCoaFields}
+                  advanceOnRecord={!!activeAdvance}
+                  refundDue={refundDue}
+                  particulars={particulars}
+                  onParticularsChange={setParticulars}
+                  particularErrors={particularErrors}
+                  totalSpent={effectiveSpent}
+                  totalReleased={totalReleased}
+                  disabled={submittingLiq}
+                  cashAdvance={{
+                    value: activeAdvance ? amountText(Number(activeAdvance.amount)) : (releasedDraft ?? String(totalReleased)),
+                    locked: !!activeAdvance,
+                    ariaLabel: activeAdvance
+                      ? "Cash advance received, taken from the voucher Finance released"
+                      : "Cash advance actually received. Enter 0 if you received none.",
+                    onChange: raw => {
+                      if (activeAdvance) return;
+                      setReleasedDraft(raw);
+                      const n = Number(raw);
+                      if (isFinite(n) && n >= 0) setTotalReleased(n);
+                    },
+                    onBlur: () => {
+                      if (activeAdvance) return;
+                      setReleasedDraft(null);
+                      setTotalReleased(v => Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
+                    }
+                  }}
+                />
+              </div>
 
               {/* REAL DRAG & DROP ATTACHMENT UPLOADER */}
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

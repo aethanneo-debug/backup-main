@@ -1090,19 +1090,14 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
   }
 
 
-    // Also copy training programs from active year to new year
+    // The new year's training budget starts at zero plus what last year left unallocated.
+    // Last year's seminars are NOT copied in: each copy brought its allocation with it, so
+    // the new year opened with last year's "Total Allocated" already committed. HR plans
+    // the new year's seminars itself; one with the same title still counts as the same
+    // seminar for the "attended before" rule, because sameSeminar() also matches by title.
     if (activeFy) {
       const activePrograms = (db.trainingPrograms || []).filter(p => p.fiscalYear === activeFy.label);
-      const newPrograms = activePrograms.map(p => ({
-        ...p,
-        id: `tp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        // Keep the copy in the original's series so past attendees stay blocked.
-        seriesId: p.seriesId || p.id,
-        fiscalYear: newFy.label,
-        usedBudget: 0
-      }));
-      db.trainingPrograms = [...(db.trainingPrograms || []), ...newPrograms];
-      
+
       const activeTrainingBudget = (db.trainingBudgets || []).find(b => b.fiscalYearId === activeFy.id);
       if (activeTrainingBudget) {
         const allocatedBudget = activePrograms.reduce((sum, p) => sum + Number(p.allocatedBudget || 0), 0);
@@ -1120,10 +1115,6 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
       // Carry Plan A forward. A new plan year inherits the PREVIOUS year's unmet needs —
       // HR does not re-interview from a blank sheet. Needs that were accomplished stay
       // with the closed year as its record and are deliberately not repeated.
-      //
-      // This also repairs the link the programme copy above would otherwise break: those
-      // copies keep their `fulfillsNeedTitles`, and without the matching need in the new
-      // year the participant ranking and the Plan D checkoff would both find nothing.
       const asOf = manilaToday();
       const oldNeeds = (db.trainingNeeds || []).filter((n: TrainingNeed) => n.fiscalYear === activeFy.label);
       const carriedNeeds: TrainingNeed[] = [];
@@ -3490,6 +3481,18 @@ function nextLiquidationSerialNo(when: Date): string {
   return `${scope}${String((used.length ? Math.max(...used) : 0) + 1).padStart(3, "0")}`;
 }
 
+// Report number, e.g. "LIQSUB-2026-03": one past the highest number in use, not the count
+// of reports — once a report is deleted, a count hands out a number that is still taken.
+// The format is exactly the one the count produced.
+function nextLiquidationSubmissionNo(): string {
+  const prefix = "LIQSUB-2026-";
+  const used = (db.liquidationSubmissions || [])
+    .map((s: any) => String(s.submissionNo || ""))
+    .filter((s: string) => s.startsWith(prefix))
+    .map((s: string) => Number(s.slice(prefix.length)) || 0);
+  return `${prefix}0${(used.length ? Math.max(...used) : 0) + 1}`;
+}
+
 app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   const { employeeId, fullName } = req.user;
   const {
@@ -3538,7 +3541,7 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     return res.status(403).json({ status: "error", message: "You can only liquidate your own assigned activity." });
   }
 
-  const subNo = `LIQSUB-2026-0${db.liquidationSubmissions.length + 1}`;
+  const subNo = nextLiquidationSubmissionNo();
   const now = new Date();
   const facts = liquidationActivityFacts(activityId);
 
