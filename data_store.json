@@ -704,6 +704,132 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1791522207680-931",
+      "timestamp": "2026-10-09T05:03:27.680Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791522117226-732",
+      "timestamp": "2026-10-09T05:01:57.226Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791522032059-613",
+      "timestamp": "2026-10-09T05:00:32.059Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791521943294-46",
+      "timestamp": "2026-10-09T04:59:03.294Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791521851005-191",
+      "timestamp": "2026-10-09T04:57:31.005Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791474101735-909",
+      "timestamp": "2026-10-08T15:41:41.735Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791474075215-398",
+      "timestamp": "2026-10-08T15:41:15.215Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791474051940-399",
+      "timestamp": "2026-10-08T15:40:51.940Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791474004589-986",
+      "timestamp": "2026-10-08T15:40:04.589Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791473930632-545",
+      "timestamp": "2026-10-08T15:38:50.632Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791468325282-reset-part-1789755275183-876",
+      "timestamp": "2026-10-08T14:05:25.332Z",
+      "userId": "system",
+      "username": "system",
+      "role": "System",
+      "action": "Reset Enrolment Status",
+      "details": "Enrolment part-1789755275183-876 reset from \"Liquidation Pending\" to \"Assigned\": it was marked by the retired upload button and no liquidation report exists."
+    },
+    {
+      "id": "log-1791392463576-526",
+      "timestamp": "2026-10-07T17:01:03.576Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791392398207-128",
+      "timestamp": "2026-10-07T16:59:58.207Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791392381598-794",
+      "timestamp": "2026-10-07T16:59:41.598Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
       "id": "log-1791325461013-320",
       "timestamp": "2026-10-06T22:24:21.013Z",
       "userId": "u-6",
@@ -4990,69 +5116,6 @@
         "Drafting of Compromise Agreement"
       ],
       "createdAt": "2026-10-05T07:21:02.639Z"
-    },
-    {
-      "id": "tp-1791185831307",
-      "seriesId": "tp-1791185831307",
-      "title": "Legal Ethics",
-      "description": "",
-      "category": "Technical",
-      "allocatedBudget": 3000,
-      "usedBudget": 0,
-      "fiscalYear": "2027",
-      "startDate": "2026-10-07",
-      "endDate": "2026-10-07",
-      "startTime": "08:00",
-      "endTime": "17:00",
-      "durationDays": 1,
-      "totalHours": 9,
-      "venue": "",
-      "facilitator": "asas",
-      "maxParticipants": 2,
-      "targetDivision": "",
-      "budgetSplit": {
-        "Meals": 40,
-        "Transportation": 30,
-        "Accommodation": 20,
-        "Materials": 10
-      },
-      "fulfillsNeedTitles": [
-        "Legal Ethics"
-      ],
-      "createdAt": "2026-10-05T07:37:11.307Z"
-    },
-    {
-      "id": "tp-1791186027126",
-      "seriesId": "tp-1791186027126",
-      "title": "Legal Ethics",
-      "description": "",
-      "category": "Technical",
-      "allocatedBudget": 2000,
-      "usedBudget": 0,
-      "fiscalYear": "2027",
-      "startDate": "2026-10-22",
-      "endDate": "2026-10-22",
-      "startTime": "08:00",
-      "endTime": "17:00",
-      "durationDays": 1,
-      "totalHours": 9,
-      "venue": "",
-      "facilitator": "sdd",
-      "maxParticipants": 2,
-      "targetDivision": "",
-      "budgetSplit": {
-        "Meals": 40,
-        "Transportation": 30,
-        "Accommodation": 20,
-        "Materials": 10
-      },
-      "fulfillsNeedTitles": [
-        "Legal Ethics",
-        "Legal Research",
-        "Legal Writing - Drafting of Oders, Resolutions and Decisions of Cases, Summons, Subpoeas, Order of Finality, Writ of Execution",
-        "Local Government Code of 1991"
-      ],
-      "createdAt": "2026-10-05T07:40:27.126Z"
     }
   ],
   "trainingParticipants": [
@@ -5060,7 +5123,7 @@
       "id": "part-1789755275183-876",
       "trainingProgramId": "tp-1789755275182",
       "employeeId": "emp-7",
-      "status": "Liquidation Pending",
+      "status": "Assigned",
       "allowanceAllocated": 5000
     },
     {
@@ -5068,7 +5131,10 @@
       "trainingProgramId": "tp-1790317692387",
       "employeeId": "emp-6",
       "status": "Liquidated",
-      "allowanceAllocated": 15000
+      "allowanceAllocated": 15000,
+      "attendance": "Attended",
+      "attendanceBy": "System (from the existing liquidation record)",
+      "attendanceAt": "2026-10-08T14:05:25.280Z"
     },
     {
       "id": "part-1791184862640-18164",
@@ -5082,7 +5148,10 @@
       "trainingProgramId": "tp-1791184862639",
       "employeeId": "emp-6",
       "status": "Liquidation Pending",
-      "allowanceAllocated": 7500
+      "allowanceAllocated": 7500,
+      "attendance": "Attended",
+      "attendanceBy": "System (from the existing liquidation record)",
+      "attendanceAt": "2026-10-08T14:05:25.282Z"
     }
   ],
   "trainingLiquidations": [
@@ -5129,5 +5198,6 @@
       "size": "4.5 MB",
       "status": "Completed"
     }
-  ]
+  ],
+  "signatories": []
 }
