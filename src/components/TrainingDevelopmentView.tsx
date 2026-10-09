@@ -2,8 +2,9 @@ import React, { useState, useEffect } from "react";
 import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee } from "../types";
 import { apiCall } from "../utils";
 import { seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
-import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck } from "lucide-react";
+import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
+import AttendanceModal from "./training/AttendanceModal";
 import NeedCoverageModal from "./training/NeedCoverageModal";
 import TrainingNeedsPlanA from "./training/TrainingNeedsPlanA";
 import TrainingMonitoringPlanD from "./training/TrainingMonitoringPlanD";
@@ -30,6 +31,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
   const [participants, setParticipants] = useState<TrainingParticipant[]>([]);
   const [liquidations, setLiquidations] = useState<TrainingLiquidationExpense[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  // The seminar whose attendance roster is open (only attendees get a liquidation form).
+  const [attendanceProgram, setAttendanceProgram] = useState<TrainingProgram | null>(null);
   
   // Opens on Plan A: the plan is written before the seminars that answer it.
   const [activeTab, setActiveTab] = useState<"programs" | "plan-a" | "plan-d" | "evaluations">("plan-a");
@@ -496,8 +499,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
                  <div className="flex flex-wrap gap-1 mt-1">
                    {participants.filter(part => part.trainingProgramId === p.id).map(part => {
                      const emp = employees.find(e => e.id === part.employeeId);
+                     // Colour shows attendance: emerald attended, rose did not, blue not yet recorded.
+                     const chip = part.attendance === "Attended" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                       : part.attendance === "Did not attend" ? "bg-rose-50 text-rose-700 border-rose-200"
+                       : "bg-blue-50 text-blue-700 border-blue-100";
                      return emp ? (
-                       <span key={part.id} className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 text-[10px] rounded border border-blue-100 truncate max-w-[120px]" title={emp.fullName}>
+                       <span key={part.id} className={`inline-block px-1.5 py-0.5 text-[10px] rounded border truncate max-w-[120px] ${chip}`} title={`${emp.fullName} · ${part.attendance || "attendance not recorded"}`}>
                          {emp.fullName.split(' ')[0]}
                        </span>
                      ) : null;
@@ -610,6 +617,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
             <div className="flex gap-1.5">
               <button onClick={() => startEditing(p)} className="p-1.5 text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100" title="Edit">
                 <Edit2 size={14} />
+              </button>
+              <button onClick={() => setAttendanceProgram(p)} className="p-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100" title="Attendance" aria-label={`Attendance for ${String(p.title || "").trim()}, ${p.startDate}`}>
+                <CalendarCheck size={14} />
               </button>
               <button onClick={() => openLiqModal(p)} className="p-1.5 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100" title="File Liquidation Expense">
                 <FileText size={14} />
@@ -792,6 +802,17 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
         </button>
       </div>
       </>)}
+
+      {attendanceProgram && (
+        <AttendanceModal
+          program={attendanceProgram}
+          participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id)}
+          employees={employees}
+          canRecord={user.role === UserRole.HR_OFFICER}
+          onClose={() => setAttendanceProgram(null)}
+          onChanged={fetchData}
+        />
+      )}
 
       {coverageModalData && (
         <NeedCoverageModal

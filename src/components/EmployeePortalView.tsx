@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission } from "../types";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument } from "../types";
 import { apiCall, getLocalTodayString, formatCurrency } from "../utils";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
 import {
@@ -8,9 +8,19 @@ import {
   filledParticulars
 } from "./liquidation/ParticularsEditor";
 import { CoaHeaderFields, emptyCoaHeaderFields } from "./liquidation/LiquidationCoaFields";
-import LiquidationSheetForm from "./liquidation/sheet/LiquidationSheetForm";
+import LiquidationSheetForm, { BOX_B_AS_FILED } from "./liquidation/sheet/LiquidationSheetForm";
 import { amountText } from "./liquidation/sheet/sheetFormat";
 import LiquidationReportModal from "./liquidation/LiquidationReportModal";
+import CorrectionRequestPanel from "./liquidation/resubmit/CorrectionRequestPanel";
+import CorrectionNote from "./liquidation/resubmit/CorrectionNote";
+import { canResubmit, correctionAccess } from "./liquidation/resubmit/correctionModel";
+import {
+  ClaimTypeBadge,
+  ClaimTypeFilter,
+  ClaimTypeFilterEmpty,
+  ClaimTypeFilterValue,
+  matchesClaimType
+} from "./liquidation/ClaimType";
 import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal";
 import {
   User as UserIcon,
@@ -35,9 +45,15 @@ interface EmployeePortalViewProps {
   user: User;
   fetchSummary: () => void;
   onRefresh: () => void;
+  /** A seminar enrolment whose liquidation form should open (from a title or a notice). */
+  liquidationTarget?: string | null;
+  onLiquidationTargetHandled?: () => void;
+  /** A returned report to open for correction (from its "returned" notification). */
+  correctionTarget?: string | null;
+  onCorrectionTargetHandled?: () => void;
 }
 
-export default function EmployeePortalView({ user, fetchSummary, onRefresh }: EmployeePortalViewProps) {
+export default function EmployeePortalView({ user, fetchSummary, onRefresh, liquidationTarget, onLiquidationTargetHandled, correctionTarget, onCorrectionTargetHandled }: EmployeePortalViewProps) {
   const [activeSubMenu, setActiveSubMenu] = useState<"profile" | "requests" | "activities" | "liquidations" | "notifications">("profile");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -80,19 +96,65 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   const [releasedDraft, setReleasedDraft] = useState<string | null>(null);
   const [totalSpent, setTotalSpent] = useState<number>(0);
   const [liqRemarks, setLiqRemarks] = useState("");
-  // Uploaded receipts carry size + base64 content; older records only a filename.
-  const [attachedFiles, setAttachedFiles] = useState<{ id: string; name: string; type: string; uploadedAt: string; filename?: string; size?: string; content?: string }[]>([]);
+  // Uploaded receipts carry size + base64 content; older records only a filename. A file
+  // replaced in a correction is still listed, marked superseded.
+  const [attachedFiles, setAttachedFiles] = useState<LiquidationDocument[]>([]);
   const [newFileName, setNewFileName] = useState("");
   const [newFileType, setNewFileType] = useState("Receipt/Invoice");
   const [resubmittingItem, setResubmittingItem] = useState<any | null>(null);
+  // Correcting a returned report (requirement 5): only the parts the reviewer reopened can
+  // change. Without an open request (a new report, or one returned before checklists
+  // existed) everything stays editable, as before.
+  const access = useMemo(() => correctionAccess(resubmittingItem), [resubmittingItem]);
+  const inCorrection = !!access.open;
+  // New copies of the files the reviewer asked to replace, by the id of the file replaced.
+  const [replacementFiles, setReplacementFiles] = useState<Record<string, Omit<LiquidationDocument, "id">>>({});
+  // The report on the form now, read when a picked file finishes loading: a file picked for
+  // a report the form has since left is dropped.
+  const correctingId = useRef<string | null>(null);
+  useEffect(() => { correctingId.current = resubmittingItem?.id ?? null; }, [resubmittingItem]);
   const [resubmitRequest, setResubmitRequest] = useState<any | null>(null);
   const [resubmitDates, setResubmitDates] = useState({ dateRequested: "", startDate: "", endDate: "", dateNeeded: "", meetingDate: "" });
+
+  // Liquidation (settling a cash advance) or Reimbursement (paid out of pocket). No
+  // default: the claimant has to say which (instructor's note 10).
+  const [claimType, setClaimType] = useState<ClaimType | "">("");
+  const [claimTypeError, setClaimTypeError] = useState("");
+  const claimTypeRef = useRef<HTMLSelectElement>(null);
+  const isReimbursement = claimType === "Reimbursement";
+  // My Settlement Log Entries, narrowed by claim type.
+  const [logFilter, setLogFilter] = useState<ClaimTypeFilterValue>("All");
 
   // --- COA Liquidation Report (PARTICULARS block + header fields) ---
   const [particulars, setParticulars] = useState<LiquidationParticular[]>([newParticular()]);
   const [particularErrors, setParticularErrors] = useState<Record<string, string>>({});
   const [coaFields, setCoaFields] = useState<CoaHeaderFields>(emptyCoaHeaderFields);
   const [submittingLiq, setSubmittingLiq] = useState(false);
+  // Data loads: each is numbered when it starts (loadSeq), and portalLoads is the number of
+  // the newest one finished. A seminar or report opened from a title or a notice waits for a
+  // load started after the click (afterLoad), not one already under way with older data.
+  const loadSeq = useRef(0);
+  const [portalLoads, setPortalLoads] = useState(0);
+  const [pendingSeminar, setPendingSeminar] = useState<{ id: string; afterLoad: number } | null>(null);
+
+  // --- Signatories for Boxes B and C (Utilities → Manage Signatories) ---
+  // null until loaded. The server copies the chosen representative's name and position,
+  // so only the id is sent.
+  const [signatories, setSignatories] = useState<ActiveSignatory[] | null>(null);
+  const [signatoryError, setSignatoryError] = useState("");
+  const [representativeId, setRepresentativeId] = useState("");
+  const [representativeError, setRepresentativeError] = useState("");
+  const representatives = useMemo(
+    () => (signatories ?? []).filter(s => s.role === "Authorized Representative"),
+    [signatories]
+  );
+  // The claimant can't certify their own travel, so they are left out of Box B's choices
+  // (the server enforces the same rule by staff record).
+  const boxBChoices = useMemo(() => {
+    const self = String(profile?.fullName || user.fullName || "").trim().toLowerCase();
+    return representatives.filter(r => r.fullName.trim().toLowerCase() !== self);
+  }, [representatives, profile, user.fullName]);
+  const accountant = useMemo(() => (signatories ?? []).find(s => s.role === "Accountant") ?? null, [signatories]);
   const [reportSubmission, setReportSubmission] = useState<LiquidationSubmission | null>(null);
 
   // TOTAL AMOUNT SPENT is derived from the lines, never typed. The server re-derives it
@@ -101,15 +163,27 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
   const hasParticularLines = filledParticulars(particulars).length > 0;
   // Legacy reports carry only a typed total; keep honouring it until it is itemised.
   const effectiveSpent = hasParticularLines ? computedSpent : totalSpent;
-  const refundDue = Math.round((totalReleased - effectiveSpent) * 100) / 100 > 0;
 
-  // The advance Finance released against the assignment currently selected, if any.
+  // Finance's advance for an assignment: the one a report being corrected is linked to
+  // (even once settled), or one released for it. The server reads the same record.
+  function advanceOnRecord(activityId: string, report?: any): CashAdvance | null {
+    const list = (myAdvances ?? []).filter((a: any) => a && a.status !== "Cancelled");
+    const linked = report && report.activityId === activityId
+      ? list.find((a: any) => (report.cashAdvanceId && a.id === report.cashAdvanceId) || a.liquidationId === report.id)
+      : null;
+    return linked || list.find((a: any) => a.activityId === activityId && a.status === "Released") || null;
+  }
+  // The advance on record for the assignment currently selected, if any.
   const activeAdvance = useMemo(
-    () => (myAdvances ?? []).find(
-      (a: any) => a.activityId === selectedActivityId && a.status === "Released"
-    ) || null,
-    [myAdvances, selectedActivityId]
+    () => advanceOnRecord(selectedActivityId, resubmittingItem),
+    [myAdvances, selectedActivityId, resubmittingItem]
   );
+  // What the sheet shows and measures against: Finance's figure, nothing for a
+  // Reimbursement, or what was typed. Derived, so a record that arrives later still counts.
+  const releasedOnSheet = activeAdvance
+    ? Math.round(Number(activeAdvance.amount) * 100) / 100
+    : isReimbursement ? 0 : totalReleased;
+  const refundDue = Math.round((releasedOnSheet - effectiveSpent) * 100) / 100 > 0;
 
   // Human label for a liquidation's activity, used on the printed report header.
   function activityLabelFor(activityId: string): string | undefined {
@@ -129,6 +203,39 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
     setParticulars([newParticular()]);
     setParticularErrors({});
     setCoaFields(emptyCoaHeaderFields);
+    setRepresentativeId("");
+    setRepresentativeError("");
+    setClaimType("");
+    setClaimTypeError("");
+    setReplacementFiles({});
+  }
+
+  // Finance and the Administrator get every advance from /api/cash-advances; the form only
+  // ever measures the user's own.
+  function ownAdvances(list: any): any[] {
+    return (Array.isArray(list) ? list : []).filter((a: any) => a && a.employeeId === user.employeeId);
+  }
+
+  // Re-reads the user's advances, e.g. after the server refused a claim type because
+  // Finance released one since the page loaded. Leaves the page's messages alone.
+  async function loadMyAdvances() {
+    try {
+      const res = await apiCall("/api/cash-advances");
+      if (res?.status === "success") setMyAdvances(ownAdvances(res.data));
+    } catch {
+      // Keep what is loaded; the server still checks every claim.
+    }
+  }
+
+  async function loadSignatories() {
+    setSignatoryError("");
+    try {
+      const res = await apiCall("/api/signatories");
+      if (res?.status !== "success") throw new Error(res?.message || "Please try again.");
+      setSignatories(Array.isArray(res.data) ? res.data : []);
+    } catch (err: any) {
+      setSignatoryError(err?.message || "Please try again.");
+    }
   }
 
   // Loads a returned report back into the form, including its PARTICULARS. A report
@@ -142,6 +249,16 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
     setLiqRemarks(sub.remarks || "");
     setAttachedFiles(sub.supportingDocs || []);
     setParticularErrors({});
+    // Box B stays as filed (the copy that prints) unless the claimant picks someone else.
+    setRepresentativeId(sub.representativeId ? BOX_B_AS_FILED : "");
+    setRepresentativeError("");
+    // With an advance on record the report can only be a Liquidation, so a Reimbursement
+    // (for instance one returned because an advance turned up) must be chosen again.
+    const onRecord = advanceOnRecord(sub.activityId, sub);
+    setClaimType(onRecord && sub.claimType === "Reimbursement" ? "" : (sub.claimType ?? ""));
+    setClaimTypeError("");
+    setReplacementFiles({});
+    if (onRecord) setTotalReleased(Number(onRecord.amount));
 
     const existing = (sub.particulars ?? []) as LiquidationParticular[];
     if (existing.length > 0) {
@@ -162,8 +279,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       periodCoveredFrom: sub.periodCoveredFrom || "",
       periodCoveredTo: sub.periodCoveredTo || "",
       responsibilityCenterCode: sub.responsibilityCenterCode || "",
-      cashAdvanceDvNo: sub.cashAdvanceDvNo || "",
-      cashAdvanceDvDate: sub.cashAdvanceDvDate || "",
+      // Finance's voucher, when there is one, is the reference the corrected report carries.
+      cashAdvanceDvNo: onRecord ? onRecord.dvNo || "" : sub.cashAdvanceDvNo || "",
+      cashAdvanceDvDate: onRecord ? onRecord.dvDate || "" : sub.cashAdvanceDvDate || "",
       refundOrNo: sub.refundOrNo || "",
       refundOrDate: sub.refundOrDate || ""
     });
@@ -173,9 +291,90 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
     fetchPortalData();
   }, [activeSubMenu, onRefresh]);
 
+  // A seminar title (Trainings and Seminar) or a "form is ready" notice asked App to open
+  // this seminar's liquidation form.
+  useEffect(() => {
+    if (!liquidationTarget) return;
+    openSeminarForm(liquidationTarget);
+    onLiquidationTargetHandled?.();
+  }, [liquidationTarget]);
+
+  // Once fresh data is in, choose the seminar - or say why its form isn't open.
+  useEffect(() => {
+    if (!pendingSeminar || portalLoads <= pendingSeminar.afterLoad) return;
+    const id = pendingSeminar.id;
+    setPendingSeminar(null);
+    const open = (liquidatable ?? []).some(a => a.id === id)
+      && !(submissions ?? []).some(s => s.activityId === id);
+    if (open) {
+      chooseActivity(id);
+    } else if (!error) {
+      // (A failed load keeps its own message instead.)
+      const seminar = (activities ?? []).find((a: any) => a.id === id);
+      setError(seminar?.liquidationBlockedReason
+        ? `This seminar's liquidation form isn't open: ${seminar.liquidationBlockedReason}`
+        : "This seminar's liquidation form isn't open.");
+    }
+  }, [pendingSeminar, portalLoads]);
+
+  // A "returned" notification asked App to open that report for correction.
+  const [pendingReport, setPendingReport] = useState<{ id: string; afterLoad: number } | null>(null);
+  useEffect(() => {
+    if (!correctionTarget) return;
+    openReturnedReport(correctionTarget);
+    onCorrectionTargetHandled?.();
+  }, [correctionTarget]);
+
+  // Once fresh data is in, open it - or say why it can't be corrected any more.
+  useEffect(() => {
+    if (!pendingReport || portalLoads <= pendingReport.afterLoad) return;
+    const report = (submissions ?? []).find((s: any) => s.id === pendingReport.id);
+    setPendingReport(null);
+    if (report && canResubmit(report)) {
+      loadForResubmission(report);
+    } else if (!error) {
+      setError(!report
+        ? "That liquidation report could not be found."
+        : report.status === "Returned"
+          ? `${report.submissionNo} can't be corrected any more: ${report.reimbursementStatus === "Reimbursed" ? "its claim was already paid" : "its spending was already counted"}. Ask Finance to review it.`
+          : `${report.submissionNo} is no longer waiting for correction (it is ${report.status}).`);
+    }
+  }, [pendingReport, portalLoads]);
+
+  // The Liquidations tab opens straight into the latest returned report (requirement 5),
+  // once per visit, so the claimant can still cancel it and file something else. Each visit
+  // decides when the tab is entered: one entered to open something in particular (a notice's
+  // report, a seminar's form) or with a report already on the form opens nothing else.
+  // (Deciding then matters: an earlier tab's effect can run late, just after the click that
+  // came back here, so a flag cleared on leaving could be cleared after it was set.)
+  const lastSubMenu = useRef<string | null>(null);
+  const autoOpenThisVisit = useRef(false);
+  useEffect(() => {
+    const entered = activeSubMenu === "liquidations" && lastSubMenu.current !== "liquidations";
+    lastSubMenu.current = activeSubMenu;
+    const busy = !!(resubmittingItem || selectedActivityId || pendingSeminar || pendingReport || correctionTarget);
+    if (entered) autoOpenThisVisit.current = !busy;
+    if (activeSubMenu !== "liquidations" || !autoOpenThisVisit.current) return;
+    if (busy) {
+      autoOpenThisVisit.current = false;
+      return;
+    }
+    if (portalLoads === 0) return; // the reports aren't loaded yet
+    autoOpenThisVisit.current = false;
+    const lastReturned = (s: any) => String(s.corrections?.[s.corrections.length - 1]?.requestedAt || s.dateSubmitted || s.createdAt || "");
+    const latest = (submissions ?? [])
+      .filter((s: any) => canResubmit(s))
+      .sort((a: any, b: any) => lastReturned(b).localeCompare(lastReturned(a)))[0];
+    if (latest) loadForResubmission(latest);
+  }, [activeSubMenu, portalLoads]);
+
   async function fetchPortalData() {
+    const seq = ++loadSeq.current;
+    // Once a newer load has started, this one stops, so older data never lands on top.
+    const superseded = () => seq !== loadSeq.current;
     setLoading(true);
     setError("");
+    loadSignatories();
     try {
       // 1. Load active Employee Profile
       let found = null;
@@ -187,6 +386,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       } catch (err) {
         console.warn("Could not load secure profile, falling back", err);
       }
+      if (superseded()) return;
       setProfile(found || {
         employeeId: user.employeeId || "EMP006",
         fullName: user.fullName,
@@ -203,6 +403,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
 
       // 2. Load requests
       const reqRes = await apiCall("/api/requests");
+      if (superseded()) return;
       if (reqRes.status === "success") {
         setRequests(reqRes.data);
       }
@@ -217,10 +418,13 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
           .catch(() => ({ status: "error", data: [] })),
         apiCall("/api/cash-advances").catch(() => ({ status: "error", data: [] }))
       ]);
-      setMyAdvances(advRes.status === "success" ? (advRes.data ?? []) : []);
+      if (superseded()) return;
+      setMyAdvances(advRes.status === "success" ? ownAdvances(advRes.data) : []);
 
+      // /api/activities also lists the employee's seminars (type "training"); those come
+      // from the seminar list below instead, so each seminar appears once.
       const generalActivities = actRes.status === "success"
-        ? (actRes.data ?? []).map((a: any) => ({
+        ? (actRes.data ?? []).filter((a: any) => a.type !== "training").map((a: any) => ({
             id: a.id,
             label: `${a.activityNo} - ${a.title}`,
             // What HR set aside. Whether it actually reached the employee is a separate
@@ -233,6 +437,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       const seminarActivities = seminarRes.status === "success"
         ? (seminarRes.data ?? [])
             .filter((s: any) => s.status !== "Liquidated" && s.status !== "Archived" && s.status !== "Cancelled")
+            // Only attendees get the form. A seminar that already has a report stays in the
+            // list so a returned report can be corrected; the dropdown hides it otherwise.
+            .filter((s: any) => s.canLiquidate || s.reportNo)
             .map((s: any) => ({
               id: s.id,
               label: `Seminar - ${s.title}`,
@@ -255,21 +462,121 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
 
       // 4. Load submissions
       const subRes = await apiCall("/api/liquidation-submissions");
+      if (superseded()) return;
       if (subRes.status === "success") {
         setSubmissions(subRes.data);
       }
 
       // 5. Load notifications
       const notifRes = await apiCall("/api/notifications");
+      if (superseded()) return;
       if (notifRes.status === "success") {
         setNotifications(notifRes.data);
       }
     } catch (err: any) {
       console.error(err);
-      setError("Failed to load employee portal dataset.");
+      if (!superseded()) setError("Failed to load employee portal dataset.");
     } finally {
-      setLoading(false);
+      // The newest load finishes the loading state and is the one waited for.
+      if (!superseded()) {
+        setLoading(false);
+        setPortalLoads(n => Math.max(n, seq));
+      }
     }
+  }
+
+  // The dropdown's choice of assignment, also used when a seminar title or a notice opens
+  // the form: fills what Finance released, if it is on record.
+  function chooseActivity(id: string) {
+    setSelectedActivityId(id);
+    // What Finance released, if it is on record. Otherwise zero rather than HR's
+    // allocation - an allocation is not money in hand, and seeding with it was what made
+    // an unfunded assignment look funded.
+    const advance = advanceOnRecord(id);
+    // Finance released an advance for this one, so it can only be a Liquidation.
+    if (advance && claimType === "Reimbursement") {
+      setClaimType("");
+      if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
+      setClaimTypeError("");
+    }
+    setReleasedDraft(null);
+    setTotalReleased(advance ? Number(advance.amount) : 0);
+    if (advance) {
+      setCoaFields(prev => ({ ...prev, cashAdvanceDvNo: advance.dvNo || "", cashAdvanceDvDate: advance.dvDate || "" }));
+    } else {
+      // A DV filled in from another assignment's advance is that assignment's voucher,
+      // not this one's. One the employee typed for an unrecorded advance is left alone.
+      setCoaFields(prev => {
+        const fromAnotherAdvance = !!prev.cashAdvanceDvNo && (myAdvances ?? []).some(
+          (a: any) => a.status === "Released" && a.dvNo === prev.cashAdvanceDvNo
+        );
+        return fromAnotherAdvance ? { ...prev, cashAdvanceDvNo: "", cashAdvanceDvDate: "" } : prev;
+      });
+    }
+  }
+
+  // A Reimbursement has no advance, so its amount stays at 0 and nothing typed for an
+  // advance (DV, refund OR) is kept. The server applies the same rule.
+  function chooseClaimType(next: ClaimType | "") {
+    setClaimType(next);
+    // The reason a submit was stopped no longer applies, under the dropdown or in the banner.
+    if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
+    setClaimTypeError("");
+    if (next === "Reimbursement") {
+      setReleasedDraft(null);
+      setTotalReleased(0);
+      setCoaFields(prev => ({ ...prev, cashAdvanceDvNo: "", cashAdvanceDvDate: "", refundOrNo: "", refundOrDate: "" }));
+    }
+  }
+
+  // Opens a returned report for correction (its notification's link). Applied after the
+  // next data load, so the report's latest state is the one corrected.
+  function openReturnedReport(id: string) {
+    // Already correcting it: just show it, keeping what was typed.
+    if (resubmittingItem?.id === id) {
+      setActiveSubMenu("liquidations");
+      return;
+    }
+    const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
+      (attachedFiles ?? []).length > 0 ||
+      (particulars ?? []).some(p => String(p.description || "").trim() !== "" || Number(p.amount) > 0)
+    ));
+    if (hasDraft && !window.confirm("Discard the report you are filling in and open the returned report instead?")) {
+      setActiveSubMenu("liquidations");
+      return;
+    }
+    resetLiquidationForm();
+    setError("");
+    setSuccess("");
+    autoOpenThisVisit.current = false; // this one, not the latest
+    setActiveSubMenu("liquidations");
+    setPendingReport({ id, afterLoad: loadSeq.current });
+    fetchPortalData();
+  }
+
+  // Opens the Liquidation Report for one seminar. The choice is applied after the next
+  // data load, so a form HR has just opened (attendance recorded) is found.
+  function openSeminarForm(id: string) {
+    // Already filling in this seminar's report: just show it, keeping what was typed.
+    if (id === selectedActivityId && !resubmittingItem) {
+      setActiveSubMenu("liquidations");
+      return;
+    }
+    // Don't silently throw away a report being filled in or corrected.
+    const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
+      (attachedFiles ?? []).length > 0 ||
+      (particulars ?? []).some(p => String(p.description || "").trim() !== "" || Number(p.amount) > 0)
+    ));
+    if (hasDraft && !window.confirm("Discard the report you are filling in and open this seminar's form instead?")) {
+      setActiveSubMenu("liquidations");
+      return;
+    }
+    resetLiquidationForm();
+    setError("");
+    setSuccess("");
+    setActiveSubMenu("liquidations");
+    setPendingSeminar({ id, afterLoad: loadSeq.current });
+    fetchPortalData();
   }
 
   // Handle personnel request submission
@@ -370,6 +677,40 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       return;
     }
 
+    // Claim type, mirroring the server: a Liquidation needs a cash advance (Finance's
+    // record, or its DV number and amount typed in), and a Reimbursement can't have one.
+    const typedDvNo = coaFields.cashAdvanceDvNo.trim();
+    const claimProblem = !claimType
+      ? "Choose whether this is a Liquidation (settling a cash advance) or a Reimbursement (money you paid yourself)."
+      : claimType === "Reimbursement" && activeAdvance
+        ? "Finance released a cash advance for this assignment, so this report is a Liquidation."
+        : claimType === "Liquidation" && !activeAdvance && !(totalReleased > 0 && typedDvNo)
+          ? totalReleased > 0
+            ? "Enter the DV number of the cash advance you received."
+            : "A Liquidation settles a cash advance. Enter its DV number and amount on the sheet, or choose Reimbursement if you paid out of your own pocket."
+          : "";
+    if (claimProblem) {
+      setClaimTypeError(claimProblem);
+      setError(claimProblem);
+      // The dropdown is at the top of a long form; take the user to it.
+      claimTypeRef.current?.focus();
+      return;
+    }
+    setClaimTypeError("");
+
+    // Box B. A returned report keeps the copy made at filing unless the claimant picks
+    // someone else; any new choice must be on the active list (and not the claimant).
+    const keptRepresentative = !!resubmittingItem && representativeId === BOX_B_AS_FILED;
+    if (!keptRepresentative && !boxBChoices.some(r => r.id === representativeId)) {
+      const message = signatories !== null && boxBChoices.length === 0
+        ? "No Authorized Representative is available for Box B, so the report can't be filed. Ask the Administrator to add one in Utilities → Manage Signatories."
+        : "Choose the Authorized Representative for Box B.";
+      setRepresentativeError(message);
+      setError(message);
+      return;
+    }
+    setRepresentativeError("");
+
     // Mirror the server's rules on the particulars so the claimant sees the problem on
     // the offending row instead of a single banner at the top of the form.
     const lines = filledParticulars(particulars);
@@ -381,14 +722,41 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
         rowErrors[p.id] = "Amount must be zero or more.";
       }
     });
+    // A line reopened on its own is corrected, not removed (the form offers no Remove then,
+    // and the server refuses a cleared one).
+    if (inCorrection && access.lineIds?.length) {
+      (particulars ?? []).forEach(p => {
+        if (access.lineIds!.includes(p.id) && !lines.some(l => l.id === p.id)) {
+          rowErrors[p.id] = "This line was reopened for correction: correct it rather than clearing it.";
+        }
+      });
+    }
     if (Object.keys(rowErrors).length > 0) {
       setParticularErrors(rowErrors);
       setError("Please correct the highlighted particulars before submitting.");
       return;
     }
-    if (lines.length === 0 && !(totalSpent > 0)) {
+    // (Only where the particulars can change: a correction that left them as filed can't add one.)
+    if (lines.length === 0 && !(totalSpent > 0) && access.editable("particulars")) {
       setError("Add at least one particular describing what the cash advance was spent on.");
       return;
+    }
+    if (isReimbursement && !(effectiveSpent > 0)) {
+      setError("A Reimbursement claims back what you spent, so enter at least one amount above zero.");
+      return;
+    }
+    // A correction has to answer what the reviewer asked about the files (the server checks too).
+    if (inCorrection) {
+      const current = (resubmittingItem?.supportingDocs ?? []).filter((d: any) => !d.supersededAt);
+      const unreplaced = current.find((d: any) => access.replaceIds.includes(d.id) && !replacementFiles[d.id]);
+      if (unreplaced) {
+        setError(`Replace "${unreplaced.name}" before resubmitting: the reviewer asked for a new copy.`);
+        return;
+      }
+      if (access.open?.items.some(i => i.field === "addDocument") && !attachedFiles.some(f => !storedDocIds.has(f.id))) {
+        setError("Attach the missing document the reviewer asked for before resubmitting.");
+        return;
+      }
     }
     setParticularErrors({});
 
@@ -403,7 +771,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
         method,
         body: JSON.stringify({
           activityId: selectedActivityId,
-          totalReleased,
+          claimType,
+          totalReleased: releasedOnSheet,
           // Only a fallback: the server derives totalSpent from the particulars whenever
           // there is at least one usable line.
           totalSpent: lines.length > 0 ? computedSpent : totalSpent,
@@ -413,17 +782,23 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
           periodCoveredFrom: coaFields.periodCoveredFrom,
           periodCoveredTo: coaFields.periodCoveredTo,
           responsibilityCenterCode: coaFields.responsibilityCenterCode,
-          cashAdvanceDvNo: coaFields.cashAdvanceDvNo,
-          cashAdvanceDvDate: coaFields.cashAdvanceDvDate,
+          cashAdvanceDvNo: isReimbursement ? "" : coaFields.cashAdvanceDvNo,
+          cashAdvanceDvDate: isReimbursement ? "" : coaFields.cashAdvanceDvDate,
           // An OR only exists when money was actually returned.
           refundOrNo: refundDue ? coaFields.refundOrNo : "",
-          refundOrDate: refundDue ? coaFields.refundOrDate : ""
+          refundOrDate: refundDue ? coaFields.refundOrDate : "",
+          // Sent only when chosen or changed: the server copies the person's name and
+          // position, and a returned report otherwise keeps the one it was filed with.
+          ...(keptRepresentative ? {} : { representativeId }),
+          // New copies of the files the reviewer asked to replace; the old ones are kept.
+          replacements: Object.entries(replacementFiles).map(([replaces, doc]) => ({ replaces, doc }))
         })
       });
 
       if (res.status === "success") {
         setSuccess(resubmittingItem
-          ? `Settlement revision report ${resubmittingItem.submissionNo} corrected and resubmitted successfully to HR desk.`
+          // Back to whoever returned it: HR, or Finance when Finance returned it.
+          ? `Settlement revision report ${resubmittingItem.submissionNo} corrected and resubmitted successfully to the ${access.open?.returnTo === "Verified & Forwarded" ? "Finance" : "HR"} desk.`
           : "Liquidation report filed. Forwarded to HR relationship and activity verification desk.");
         resetLiquidationForm();
         fetchPortalData();
@@ -431,6 +806,11 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
       }
     } catch (err: any) {
       setError(err.message || "Failed to submit liquidation.");
+      // A refusal may mean the signatory list changed (e.g. a representative left) or
+      // Finance released an advance since the page loaded, so reload both; otherwise every
+      // retry would offer the same stale choice.
+      loadSignatories();
+      loadMyAdvances();
     } finally {
       setSubmittingLiq(false);
     }
@@ -499,6 +879,32 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
 
   function handleRemoveAttached(id: string) {
     setAttachedFiles(prev => prev.filter(f => f.id !== id));
+  }
+
+  // The files this report was filed with (so a correction can't drop them).
+  const storedDocIds = useMemo(
+    () => new Set<string>((resubmittingItem?.supportingDocs ?? []).map((d: any) => d.id)),
+    [resubmittingItem]
+  );
+
+  // A new copy of a file the reviewer asked to replace. The server keeps the old one.
+  function chooseReplacement(docId: string, file: File) {
+    const pickedFor = resubmittingItem?.id ?? null;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (correctingId.current !== pickedFor) return; // the form has moved on to another report
+      setReplacementFiles(prev => ({
+        ...prev,
+        [docId]: {
+          name: file.name,
+          size: (file.size / 1024).toFixed(1) + " KB",
+          type: file.type || "application/octet-stream",
+          content: reader.result as string,
+          uploadedAt: new Date().toISOString()
+        }
+      }));
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -1054,8 +1460,24 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                     </div>
 
                     <div>
-                      <h3 className="text-xs font-bold text-slate-800">{act.title}</h3>
+                      {/* A seminar's title opens its liquidation form, once HR has recorded
+                          the employee as attending; otherwise it says why there is none. */}
+                      {act.type === "training" && act.canLiquidate ? (
+                        <button
+                          type="button"
+                          onClick={() => openSeminarForm(act.id)}
+                          className="cursor-pointer text-left text-xs font-bold text-blue-800 underline decoration-dotted underline-offset-2 hover:text-blue-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                          title="Open this seminar's liquidation form"
+                        >
+                          {act.title}
+                        </button>
+                      ) : (
+                        <h3 className="text-xs font-bold text-slate-800">{act.title}</h3>
+                      )}
                       <p className="text-[11px] text-slate-500 mt-1">"{act.description}"</p>
+                      {act.type === "training" && !act.canLiquidate && act.liquidationBlockedReason && act.participantStatus !== "Liquidated" && (
+                        <p className="text-[10px] text-slate-500 italic mt-1">{act.liquidationBlockedReason}</p>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between border-t border-slate-100 pt-2.5">
@@ -1106,7 +1528,12 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                 )}
               </h2>
 
-              {resubmittingItem && (
+              {/* What the reviewer asked to correct. Reports returned before checklists
+                  existed keep the old summary, with everything editable. */}
+              {resubmittingItem && access.open && (
+                <CorrectionRequestPanel request={access.open} report={resubmittingItem} />
+              )}
+              {resubmittingItem && !access.open && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-2">
                   <p className="font-bold uppercase tracking-wider text-[10px] text-amber-900 font-mono">⚠️ CORRECTIONS REQUIRED & FEEDBACK FROM AUDITING</p>
                   
@@ -1138,37 +1565,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                   </label>
                   <select
                     value={selectedActivityId}
-                    onChange={e => {
-                      setSelectedActivityId(e.target.value);
-                      // What Finance released, if it is on record. Otherwise zero rather
-                      // than HR's allocation - an allocation is not money in hand, and
-                      // seeding with it was what made an unfunded assignment look funded.
-                      const advance = (myAdvances ?? []).find(
-                        (a: any) => a.activityId === e.target.value && a.status === "Released"
-                      );
-                      setReleasedDraft(null);
-                      setTotalReleased(advance ? Number(advance.amount) : 0);
-                      if (advance) {
-                        setCoaFields(prev => ({
-                          ...prev,
-                          cashAdvanceDvNo: advance.dvNo || "",
-                          cashAdvanceDvDate: advance.dvDate || ""
-                        }));
-                      } else {
-                        // A DV filled in from another assignment's advance is that
-                        // assignment's voucher, not this one's. One the employee typed
-                        // for an unrecorded advance is left alone.
-                        setCoaFields(prev => {
-                          const fromAnotherAdvance = !!prev.cashAdvanceDvNo && (myAdvances ?? []).some(
-                            (a: any) => a.status === "Released" && a.dvNo === prev.cashAdvanceDvNo
-                          );
-                          return fromAnotherAdvance
-                            ? { ...prev, cashAdvanceDvNo: "", cashAdvanceDvDate: "" }
-                            : prev;
-                        });
-                      }
-                    }}
-                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold"
+                    onChange={e => chooseActivity(e.target.value)}
+                    // A report's activity is never correctable; the server ignores any change.
+                    disabled={!!resubmittingItem}
+                    className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold disabled:cursor-not-allowed disabled:bg-slate-100"
                   >
                     <option value="">-- Choose Assigned Activity or Seminar --</option>
                     {(liquidatable ?? [])
@@ -1183,58 +1583,173 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                   </select>
                 </div>
 
-                {/* The cash advance itself is entered on the sheet below, on its AMOUNT OF
-                    CASH ADVANCE line; this says where its figure comes from. */}
-                <div className="space-y-1 md:pt-5">
-                  {activeAdvance ? (
-                    <p className="text-[10px] text-blue-700 font-mono leading-snug">
-                      Cash advance <strong>{formatCurrency(Number(activeAdvance.amount))}</strong> from{" "}
-                      <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {activeAdvance.dvDate}.
-                      Taken from Finance&rsquo;s record, so it cannot be edited here.
-                    </p>
-                  ) : selectedActivityId ? (
-                    <p className="text-[10px] text-amber-700 font-mono leading-snug">
-                      <strong>No cash advance on record</strong> for this assignment. If you paid out of
-                      pocket, leave the cash advance at 0 &mdash; what you spent becomes a reimbursement claim.
-                    </p>
-                  ) : (
-                    <p className="text-[10px] text-slate-400 font-mono leading-snug">
-                      Choose an assignment first.
-                    </p>
+                {/* One form, but the claimant says which kind of claim it is (instructor's
+                    note 10). The server checks the choice against Finance's records. */}
+                <div className="space-y-1">
+                  <label htmlFor="liq-claim-type" className="text-[10px] font-bold text-slate-400 uppercase font-mono">
+                    Claim Type <span className="text-rose-600" aria-hidden="true">*</span>
+                  </label>
+                  <select
+                    id="liq-claim-type"
+                    ref={claimTypeRef}
+                    value={claimType}
+                    onChange={e => chooseClaimType(e.target.value as ClaimType | "")}
+                    disabled={submittingLiq || !access.editable("claimType")}
+                    aria-required="true"
+                    aria-invalid={claimTypeError ? true : undefined}
+                    aria-describedby={[claimTypeError && "liq-claim-type-error", "liq-claim-type-hint", access.noteFor("claimType") && "note-claimType"].filter(Boolean).join(" ")}
+                    className={`w-full px-2 py-1.5 border rounded-lg text-xs text-slate-700 font-semibold disabled:cursor-not-allowed disabled:bg-slate-100 ${
+                      claimTypeError ? "border-rose-400 bg-rose-50" : "border-slate-200"
+                    }`}
+                  >
+                    <option value="">-- Choose Liquidation or Reimbursement --</option>
+                    <option value="Liquidation">Liquidation: settling a cash advance</option>
+                    {/* With an advance on record the server would refuse it, so say so here. */}
+                    <option value="Reimbursement" disabled={!!activeAdvance}>
+                      {activeAdvance ? "Reimbursement: not available, an advance was released" : "Reimbursement: paid out of my own pocket"}
+                    </option>
+                  </select>
+                  {claimTypeError && (
+                    <p id="liq-claim-type-error" role="alert" className="text-[11px] font-semibold text-rose-700">{claimTypeError}</p>
                   )}
+                  <CorrectionNote id="note-claimType" note={access.noteFor("claimType")} />
                 </div>
               </div>
+
+              {/* The cash advance itself is entered on the sheet below, on its AMOUNT OF CASH
+                  ADVANCE line; this says where its figure comes from for the type chosen. */}
+              <p
+                id="liq-claim-type-hint"
+                className={`text-[10px] font-mono leading-snug ${
+                  activeAdvance ? "text-blue-700" : !selectedActivityId ? "text-slate-400" : isReimbursement || !access.editable("cashAdvance") ? "text-slate-600" : "text-amber-700"
+                }`}
+              >
+                {activeAdvance ? (
+                  <>
+                    Cash advance <strong>{formatCurrency(Number(activeAdvance.amount))}</strong> from{" "}
+                    <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {activeAdvance.dvDate}.
+                    Taken from Finance&rsquo;s record, so it cannot be edited here, and this report is a <strong>Liquidation</strong>.
+                  </>
+                ) : !selectedActivityId ? (
+                  "Choose an assignment first."
+                ) : isReimbursement ? (
+                  <>
+                    <strong>Paid out of your own pocket:</strong> the cash advance stays at 0, and everything you spent is
+                    to be reimbursed.
+                  </>
+                ) : claimType === "Liquidation" && !access.editable("cashAdvance") ? (
+                  // A correction that didn't reopen the advance: it can't be typed over here.
+                  <>
+                    <strong>Cash advance as filed:</strong> the reviewer didn&rsquo;t ask for it to be corrected, so it
+                    stays as it is on the sheet below.
+                  </>
+                ) : claimType === "Liquidation" ? (
+                  <>
+                    <strong>No cash advance on record</strong> for this assignment. Enter the advance&rsquo;s DV number,
+                    date and amount on the sheet below.
+                  </>
+                ) : (
+                  <>
+                    <strong>No cash advance on record</strong> for this assignment. Choose Reimbursement if you paid out of
+                    your own pocket, or Liquidation if you received an advance Finance didn&rsquo;t record.
+                  </>
+                )}
+              </p>
+
+              {/* Who signs Boxes B and C comes from Utilities → Manage Signatories. */}
+              {signatoryError ? (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                  <span>The list of signatories could not be loaded, so Box B can&rsquo;t be filled yet. {signatoryError}</span>
+                  <button
+                    type="button"
+                    onClick={loadSignatories}
+                    className="cursor-pointer rounded-lg border border-rose-300 bg-white px-2.5 py-1 font-semibold text-rose-700 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : signatories === null ? (
+                <p className="text-[11px] text-slate-500" aria-live="polite">Loading the signatories for Boxes B and C…</p>
+              ) : (
+                <>
+                  {/* Only when it blocks: a returned report can keep the Box B it was filed with. */}
+                  {boxBChoices.length === 0 && !resubmittingItem?.representativeId && (
+                    <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                      <strong>No Authorized Representative is available for Box B</strong>, so the report
+                      can&rsquo;t be filed. Ask the Administrator to add one in Utilities &rarr; Manage Signatories.
+                    </p>
+                  )}
+                  {!accountant && (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <strong>No Accountant is appointed yet</strong>, so Box C is blank. You can still file, but Finance
+                      can&rsquo;t validate the report until the Administrator appoints one in Utilities &rarr; Manage Signatories.
+                    </p>
+                  )}
+                </>
+              )}
 
               {/* The COA Liquidation Report itself, filled in on the sheet it prints as */}
               <div className="custom-scrollbar overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-3">
                 <LiquidationSheetForm
+                  representatives={boxBChoices}
+                  representativeId={representativeId}
+                  onRepresentativeChange={id => {
+                    setRepresentativeId(id);
+                    if (id && representativeError) {
+                      // Clear the page banner too when it repeats the Box B problem.
+                      setError(prev => (prev === representativeError ? "" : prev));
+                      setRepresentativeError("");
+                    }
+                  }}
+                  savedRepresentative={resubmittingItem?.representativeId ? {
+                    id: resubmittingItem.representativeId,
+                    name: resubmittingItem.representativeName,
+                    position: resubmittingItem.representativePosition
+                  } : undefined}
+                  representativeError={representativeError}
+                  accountant={accountant}
                   serialNo={resubmittingItem?.serialNo}
                   date={resubmittingItem ? (resubmittingItem.dateSubmitted || resubmittingItem.createdAt) : getLocalTodayString()}
-                  employeeName={resubmittingItem?.employeeName || user.fullName}
-                  coa={coaFields}
+                  // Box A: the official name from the staff record (the server stamps the same).
+                  employeeName={resubmittingItem?.employeeName || profile?.fullName || user.fullName}
+                  // Finance's voucher shows in the DV boxes, even for an advance that arrived
+                  // after the form was filled (the server stores Finance's reference anyway).
+                  coa={activeAdvance
+                    ? { ...coaFields, cashAdvanceDvNo: activeAdvance.dvNo || "", cashAdvanceDvDate: activeAdvance.dvDate || "" }
+                    : coaFields}
                   onCoaChange={setCoaFields}
                   advanceOnRecord={!!activeAdvance}
+                  noAdvance={isReimbursement}
+                  correction={inCorrection ? access : undefined}
                   refundDue={refundDue}
                   particulars={particulars}
                   onParticularsChange={setParticulars}
                   particularErrors={particularErrors}
                   totalSpent={effectiveSpent}
-                  totalReleased={totalReleased}
+                  totalReleased={releasedOnSheet}
                   disabled={submittingLiq}
                   cashAdvance={{
-                    value: activeAdvance ? amountText(Number(activeAdvance.amount)) : (releasedDraft ?? String(totalReleased)),
-                    locked: !!activeAdvance,
+                    // Locked to Finance's figure, or at 0 for a Reimbursement (no advance at all).
+                    // (Also locked, as filed, when a correction didn't reopen the advance.)
+                    value: activeAdvance
+                      ? amountText(Number(activeAdvance.amount))
+                      : isReimbursement ? amountText(0)
+                      : !access.editable("cashAdvance") ? amountText(totalReleased)
+                      : (releasedDraft ?? String(totalReleased)),
+                    locked: !!activeAdvance || isReimbursement || !access.editable("cashAdvance"),
                     ariaLabel: activeAdvance
                       ? "Cash advance received, taken from the voucher Finance released"
-                      : "Cash advance actually received. Enter 0 if you received none.",
+                      : isReimbursement
+                        ? "Cash advance: none, because this is a Reimbursement"
+                        : "Amount of the cash advance received, as on its DV",
                     onChange: raw => {
-                      if (activeAdvance) return;
+                      if (activeAdvance || isReimbursement || !access.editable("cashAdvance")) return;
                       setReleasedDraft(raw);
                       const n = Number(raw);
                       if (isFinite(n) && n >= 0) setTotalReleased(n);
                     },
                     onBlur: () => {
-                      if (activeAdvance) return;
+                      if (activeAdvance || isReimbursement || !access.editable("cashAdvance")) return;
                       setReleasedDraft(null);
                       setTotalReleased(v => Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
                     }
@@ -1249,56 +1764,124 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                   <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-white">Supporting Documents &amp; Receipts</h3>
                 </div>
                 <div className="space-y-3 p-3">
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 ${
-                    isDragging 
-                      ? "border-blue-500 bg-blue-50/50" 
-                      : "border-slate-200 hover:border-slate-300 bg-slate-50/30"
-                  }`}
-                  onClick={() => document.getElementById("receipt-input")?.click()}
-                >
-                  <input
-                    id="receipt-input"
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
-                  <Package className="text-slate-400" size={24} />
-                  <div>
-                    <p className="text-xs font-semibold text-slate-700 font-sans">Drag and drop receipts here, or <span className="text-blue-600 underline">browse</span></p>
-                    <p className="text-[10px] text-slate-400 mt-1 font-sans">Supports PDF, Images or documents up to 5MB (Real base64 persisted file load)</p>
+                {/* In a correction, new files only when the reviewer asked for a missing one. */}
+                {access.editable("addDocument") ? (
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 ${
+                      isDragging
+                        ? "border-blue-500 bg-blue-50/50"
+                        : "border-slate-200 hover:border-slate-300 bg-slate-50/30"
+                    }`}
+                    onClick={() => document.getElementById("receipt-input")?.click()}
+                  >
+                    <input
+                      id="receipt-input"
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={handleFileChange}
+                      aria-describedby={access.noteFor("addDocument") ? "note-addDocument" : undefined}
+                    />
+                    <Package className="text-slate-400" size={24} />
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 font-sans">Drag and drop receipts here, or <span className="text-blue-600 underline">browse</span></p>
+                      <p className="text-[10px] text-slate-400 mt-1 font-sans">Supports PDF, Images or documents up to 5MB (Real base64 persisted file load)</p>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                    The reviewer didn&rsquo;t ask for new files, so the files below stay as filed
+                    {access.replaceIds.length > 0 ? ", apart from the ones marked for replacing" : ""}.
+                  </p>
+                )}
+                <CorrectionNote id="note-addDocument" note={access.noteFor("addDocument")} />
+                <CorrectionNote id="note-replaceDocuments" note={access.noteFor("replaceDocuments")} />
 
                 {attachedFiles.length > 0 && (
                   <div className="space-y-1.5 border-t border-slate-100 pt-3">
                     <p className="text-[9px] font-bold uppercase text-slate-400 font-mono tracking-wider">Loaded Documents Queue</p>
-                    {attachedFiles.map((file) => (
-                      <div key={file.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-mono">📎 {file.name}</span>
-                          {file.size && <span className="text-[9px] bg-slate-200 text-slate-600 font-bold font-mono px-1.5 rounded">{file.size}</span>}
+                    {attachedFiles.map((file) => {
+                      // In a correction the filed copies stay on the report (only new files
+                      // can be removed); a file marked for replacing gets a new copy instead.
+                      const stored = inCorrection && storedDocIds.has(file.id);
+                      const toReplace = inCorrection && access.replaceIds.includes(file.id) && !file.supersededAt;
+                      const replacement = replacementFiles[file.id];
+                      return (
+                        <div
+                          key={file.id}
+                          className={`flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg border text-[11px] ${
+                            file.supersededAt ? "bg-white border-slate-100 text-slate-400"
+                              : toReplace ? "bg-amber-50 border-amber-200 text-slate-700"
+                              : "bg-slate-50 border-slate-200 text-slate-600"
+                          }`}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`truncate font-mono ${file.supersededAt ? "line-through" : ""}`}>📎 {file.name}</span>
+                            {file.size && <span className="text-[9px] bg-slate-200 text-slate-600 font-bold font-mono px-1.5 rounded">{file.size}</span>}
+                            {file.supersededAt && (
+                              <span className="rounded border border-slate-200 bg-slate-50 px-1.5 text-[9px] font-bold uppercase text-slate-500">Replaced, kept in history</span>
+                            )}
+                            {toReplace && !replacement && (
+                              <span className="rounded border border-amber-200 bg-white px-1.5 text-[9px] font-bold uppercase text-amber-700">Replace this file</span>
+                            )}
+                            {replacement && (
+                              <span className="text-[10px] font-semibold text-emerald-700">&rarr; new copy: {replacement.name}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-1.5">
+                            {file.content && (
+                              <button
+                                type="button"
+                                onClick={() => downloadBase64File(file.name, file.content ?? "")}
+                                className="text-blue-600 hover:text-blue-800 text-[10px] font-bold font-mono uppercase cursor-pointer"
+                              >
+                                Download
+                              </button>
+                            )}
+                            {toReplace && (
+                              <>
+                                <input
+                                  id={`replace-${file.id}`}
+                                  type="file"
+                                  className="hidden"
+                                  onChange={e => {
+                                    const chosen = e.target.files?.[0];
+                                    if (chosen) chooseReplacement(file.id, chosen);
+                                    e.target.value = "";
+                                  }}
+                                />
+                                {replacement ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReplacementFiles(prev => { const next = { ...prev }; delete next[file.id]; return next; })}
+                                    className="text-slate-500 hover:text-slate-700 text-[10px] font-bold font-mono uppercase cursor-pointer"
+                                  >
+                                    Undo<span className="sr-only"> the new copy of {file.name}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => document.getElementById(`replace-${file.id}`)?.click()}
+                                    aria-describedby={access.noteFor("replaceDocuments") ? "note-replaceDocuments" : undefined}
+                                    className="rounded border border-amber-300 bg-white px-2 py-0.5 text-amber-800 hover:bg-amber-100 text-[10px] font-bold font-mono uppercase cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                                  >
+                                    Replace file<span className="sr-only">: {file.name}</span>
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            {!stored && !file.supersededAt && (
+                              <button type="button" onClick={() => handleRemoveAttached(file.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold font-mono uppercase cursor-pointer">
+                                Remove
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-1.5">
-                          {file.content && (
-                            <button
-                              type="button"
-                              onClick={() => downloadBase64File(file.name, file.content ?? "")}
-                              className="text-blue-600 hover:text-blue-800 text-[10px] font-bold font-mono uppercase cursor-pointer"
-                            >
-                              Download
-                            </button>
-                          )}
-                          <button type="button" onClick={() => handleRemoveAttached(file.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold font-mono uppercase cursor-pointer">
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 </div>
@@ -1314,15 +1897,21 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                     placeholder="Review or ledger statements for HR & Finance check..."
                     value={liqRemarks}
                     onChange={e => setLiqRemarks(e.target.value)}
-                    className="h-16 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                    readOnly={!access.editable("remarks")}
+                    maxLength={2000}
+                    aria-label="Your notes on the report"
+                    aria-describedby={access.noteFor("remarks") ? "note-remarks" : undefined}
+                    className="h-16 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 read-only:bg-slate-100 read-only:text-slate-600"
                   />
+                  <CorrectionNote id="note-remarks" note={access.noteFor("remarks")} />
                 </div>
               </div>
 
               <div className="border-t border-slate-200 pt-4">
               <button
                 type="submit"
-                disabled={submittingLiq}
+                // A new report needs a Box B representative; with none set up it can't be filed.
+                disabled={submittingLiq || (signatories !== null && boxBChoices.length === 0 && !resubmittingItem?.representativeId)}
                 className={`px-6 py-2 rounded-lg shadow-sm font-semibold text-xs cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-60 ${
                   resubmittingItem
                     ? "bg-amber-600 hover:bg-amber-700 text-white"
@@ -1340,7 +1929,12 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
 
             {/* PAST REPORT ENTRIES LIQUIADTION LEDGER */}
             <div className="space-y-2">
-              <h2 className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider">My Settlement Log Entries</h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider">My Settlement Log Entries</h2>
+                {!loading && (submissions ?? []).length > 0 && (
+                  <ClaimTypeFilter value={logFilter} onChange={setLogFilter} items={submissions ?? []} />
+                )}
+              </div>
               {loading ? (
                 <div className="space-y-3" aria-hidden="true">
                   {[0, 1].map(i => (
@@ -1359,13 +1953,16 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                     File your first Liquidation Report using the form above. It will appear here once HR receives it.
                   </p>
                 </div>
+              ) : !(submissions ?? []).some(s => matchesClaimType(s, logFilter)) ? (
+                <ClaimTypeFilterEmpty filter={logFilter} onShowAll={() => setLogFilter("All")} />
               ) : (
                 <div className="space-y-3">
-                  {(submissions ?? []).map((sub: any) => (
+                  {(submissions ?? []).filter(s => matchesClaimType(s, logFilter)).map((sub: any) => (
                     <div key={sub.id} className="p-4 border border-slate-100 rounded-xl bg-slate-50/10 space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="font-mono font-bold text-slate-800">{sub.serialNo || sub.submissionNo}</span>
+                          <ClaimTypeBadge claimType={sub.claimType} />
                           <span className="text-[10px] text-slate-400 font-mono">
                             Cash Advance: {formatCurrency(Number(sub.totalReleased) || 0)} · Spent: {formatCurrency(Number(sub.totalSpent) || 0)}
                           </span>
@@ -1388,7 +1985,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                             <Printer size={10} aria-hidden="true" />
                             Print / View Report
                           </button>
-                          {sub.status === "Returned" && (
+                          {canResubmit(sub) && (
                             <button
                               type="button"
                               onClick={() => loadForResubmission(sub)}
@@ -1456,10 +2053,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                               key={idx}
                               type="button"
                               onClick={() => downloadBase64File(doc.name, doc.content)}
-                              className="px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[10px] text-blue-600 font-mono font-medium inline-flex items-center space-x-1 cursor-pointer"
+                              className={`px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[10px] font-mono font-medium inline-flex items-center space-x-1 cursor-pointer ${
+                                doc.supersededAt ? "text-slate-400" : "text-blue-600"
+                              }`}
                             >
-                              <span>📎 {doc.name}</span>
+                              <span className={doc.supersededAt ? "line-through" : undefined}>📎 {doc.name}</span>
                               {doc.size && <span className="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">{doc.size}</span>}
+                              {/* A correction replaced it; the old copy stays for the record. */}
+                              {doc.supersededAt && <>{" "}<span className="text-[8px] font-bold uppercase">(replaced)</span></>}
                             </button>
                           ))}
                         </div>
@@ -1490,6 +2091,19 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh }: Em
                     <div>
                       <p className="font-semibold text-slate-800">{n.title}</p>
                       <p className="text-slate-500 mt-0.5">{n.message}</p>
+                      {/* Like the bell's: a returned report opens for correction, a seminar's
+                          notice opens its Liquidation Report. */}
+                      {(n.link?.liquidationReportId || n.link?.liquidationActivityId) && (
+                        <button
+                          type="button"
+                          onClick={() => n.link.liquidationReportId
+                            ? openReturnedReport(n.link.liquidationReportId)
+                            : openSeminarForm(n.link.liquidationActivityId)}
+                          className="mt-1 cursor-pointer text-[10px] font-semibold text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                        >
+                          {n.link.liquidationReportId ? "Open the report" : "Open the Liquidation Report"} &rarr;
+                        </button>
+                      )}
                       <p className="text-[9px] text-slate-400 font-mono mt-1">{n.timestamp.split("T").join(" ")}</p>
                     </div>
                   </div>

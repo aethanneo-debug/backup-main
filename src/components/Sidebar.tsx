@@ -20,7 +20,8 @@ import {
   Key,
   Database,
   Download,
-  Upload
+  Upload,
+  Signature
 } from "lucide-react";
 import { User, UserRole } from "../types";
 import HsacLogo from "./HsacLogo";
@@ -136,7 +137,8 @@ export default function Sidebar({
       visible: role === UserRole.SUPER_ADMIN,
       subItems: [
         { id: "backup-restore", label: "Backup & Restore", icon: Download, visible: true },
-        { id: "audit", label: "Security Audit Logs", icon: ShieldAlert, visible: true }
+        { id: "audit", label: "Security Audit Logs", icon: ShieldAlert, visible: true },
+        { id: "signatories", label: "Manage Signatories", icon: Signature, visible: true }
       ]
     }
   ];

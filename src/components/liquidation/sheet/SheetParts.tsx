@@ -32,6 +32,7 @@ export function CertificationCell({
   letter,
   statement,
   name,
+  nameSlot,
   caption,
   signedAt,
   jevNo,
@@ -40,6 +41,8 @@ export function CertificationCell({
   letter: string;
   statement: string;
   name?: string;
+  /** Replaces the printed name with a control, e.g. the filing form's Box B dropdown. */
+  nameSlot?: React.ReactNode;
   caption: string;
   signedAt?: string;
   /** Only box C carries the JEV No. line; undefined leaves the row empty. */
@@ -54,9 +57,13 @@ export function CertificationCell({
         Certified: {statement}
       </p>
       {/* The signature goes above the rule; the system prints the name it knows. */}
-      <div className="flex h-[38px] items-end justify-center px-2 pb-0.5 text-[12px] font-bold uppercase">
-        {(name || "").trim()}
-      </div>
+      {nameSlot ? (
+        <div className="flex h-[38px] items-end justify-center px-1 pb-0.5">{nameSlot}</div>
+      ) : (
+        <div className="flex h-[38px] items-end justify-center px-2 pb-0.5 text-[12px] font-bold uppercase">
+          {(name || "").trim()}
+        </div>
+      )}
       <div className="border-t border-black" />
       <p className="pt-1 text-center">{caption}</p>
       <div className="h-[34px] px-1.5 pt-3">

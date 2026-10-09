@@ -22,6 +22,8 @@ interface FundableRow {
   advanceAmount: number | null;
   advanceStatus: string | null;
   liquidationFiled: boolean;
+  /** HR recorded that the participant did not attend: the advance must come back in full. */
+  didNotAttend?: boolean;
 }
 
 const todayIso = () => new Date().toISOString().split("T")[0];
@@ -62,7 +64,10 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  const unfunded = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus !== "Liquidated"), [rows]);
+  // Only assignments that can still receive an advance: once a report is filed the server
+  // refuses one (it could never be settled). Those are counted separately below.
+  const unfunded = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled), [rows]);
+  const filedWithoutAdvance = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus !== "Liquidated" && r.liquidationFiled), [rows]);
   const open = useMemo(() => rows.filter(r => r.funded), [rows]);
   const settled = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus === "Liquidated"), [rows]);
   const outstanding = useMemo(
@@ -180,6 +185,14 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
+          {filedWithoutAdvance.length > 0 && (
+            <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              {filedWithoutAdvance.length} assignment{filedWithoutAdvance.length === 1 ? " was" : "s were"} liquidated without
+              an advance on record (reimbursements), so {filedWithoutAdvance.length === 1 ? "it needs" : "they need"} nothing
+              here: no advance can be released once a report is filed. If an employee did receive one, return the report so
+              they can correct it to a Liquidation.
+            </p>
+          )}
           {unfunded.length === 0 ? (
             <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-center gap-2">
               <BadgeCheck size={13} className="shrink-0" />
@@ -204,11 +217,6 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                           <strong className="text-xs text-amber-700 font-mono">Nothing yet</strong>
                         </div>
                       </div>
-                      {row.liquidationFiled && (
-                        <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">
-                          A liquidation was already filed against this assignment without an advance on record.
-                        </p>
-                      )}
                     </div>
 
                     {!isOpen && (
@@ -309,8 +317,15 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                     </span>
                     <span className="font-mono text-slate-600 shrink-0">
                       {formatCurrency(Number(row.advanceAmount || 0))}
-                      {row.liquidationFiled ? " · liquidation filed" : " · not yet liquidated"}
+                      {row.didNotAttend ? "" : row.liquidationFiled ? " · liquidation filed" : " · not yet liquidated"}
                     </span>
+                    {/* No liquidation form opens for a non-attendee, so the advance is
+                        collected back in full rather than liquidated. */}
+                    {row.didNotAttend && (
+                      <span className="w-full rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                        Did not attend: collect the full refund
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

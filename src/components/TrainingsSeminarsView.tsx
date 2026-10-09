@@ -3,8 +3,16 @@ import { X, CheckCircle, XCircle } from 'lucide-react';
 import { apiCall } from '../utils';
 import LiquidationDueBadge from './training/LiquidationDueBadge';
 
-export default function TrainingsSeminarsView({ user, employees }) {
+export default function TrainingsSeminarsView({ user, employees, onOpenLiquidation }: {
+  user: any;
+  employees: any;
+  /** Opens the Employee Portal's Liquidation Report with this seminar chosen. */
+  onOpenLiquidation?: (activityId: string) => void;
+}) {
   const isHrOrAdmin = ["Administrator / Division Chief", "HR Officer"].includes(user.role);
+  // Everyone else who reaches this page is the employee viewing their own seminars. Only
+  // they get a link to the liquidation form: HR/Admin never open one for someone else.
+  const isOwnView = !isHrOrAdmin;
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(isHrOrAdmin ? "" : user.employeeId);
   const [trainings, setTrainings] = useState([]);
   const [history, setHistory] = useState([]);
@@ -43,21 +51,6 @@ export default function TrainingsSeminarsView({ user, employees }) {
     }
   };
 
-  const handleLiquidate = async (participantId) => {
-    try {
-      const res = await apiCall(`/api/employees/${selectedEmployeeId}/liquidate_activity/${participantId}`, {
-        method: "POST"
-      });
-      if (res.status === "success") {
-        alert("Liquidation documents submitted successfully.");
-        fetchAssignedActivities();
-      } else {
-        alert(res.message);
-      }
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
-  };
 
   const fetchTrainings = async () => {
     try {
@@ -211,7 +204,11 @@ export default function TrainingsSeminarsView({ user, employees }) {
               <div className="space-y-4 pt-4 border-t border-slate-100">
                 <div className="border-b pb-2 mb-4">
                   <h2 className="text-sm font-bold text-slate-700 uppercase">Assigned Activities & Liquidation</h2>
-                  <p className="text-[10px] text-slate-500">Seminars assigned by HR. Upload liquidation documents here.</p>
+                  <p className="text-[10px] text-slate-500">
+                    {isOwnView
+                      ? "Seminars assigned by HR. Once HR records your attendance, click the seminar's title to open its liquidation form."
+                      : "Seminars assigned by HR. HR records attendance in Training Plan & Budget; only attendees get a liquidation form."}
+                  </p>
                 </div>
                 
                 {assignedActivities.length === 0 ? (
@@ -231,9 +228,22 @@ export default function TrainingsSeminarsView({ user, employees }) {
                       >
                         <div>
                           <div className="flex justify-between items-start mb-2">
-                            <h3 className={`font-bold text-sm ${activity.status === "Liquidated" ? "text-emerald-900" : "text-blue-900"}`}>
-                              {activity.title}
-                            </h3>
+                            {/* The title opens the liquidation form, for the employee's own
+                                seminar and only once HR has recorded them as attending. */}
+                            {isOwnView && activity.canLiquidate && onOpenLiquidation ? (
+                              <button
+                                type="button"
+                                onClick={() => onOpenLiquidation(activity.id)}
+                                className="cursor-pointer text-left font-bold text-sm text-blue-800 underline decoration-dotted underline-offset-2 hover:text-blue-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                                title="Open this seminar's liquidation form"
+                              >
+                                {activity.title}
+                              </button>
+                            ) : (
+                              <h3 className={`font-bold text-sm ${activity.status === "Liquidated" ? "text-emerald-900" : "text-blue-900"}`}>
+                                {activity.title}
+                              </h3>
+                            )}
                             {/* Settled seminars stay listed so the employee can see their own
                                 completed record; amber would wrongly read as still pending. */}
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -260,27 +270,27 @@ export default function TrainingsSeminarsView({ user, employees }) {
                           )}
                         </div>
                         
-                        {(activity.status === "Assigned" || activity.status === "Scheduled" || activity.status === "Completed") && (
-                          <div className="pt-3 border-t border-blue-200 mt-2">
-                            <button 
-                              onClick={() => {
-                                // Simulate document upload and liquidation submission
-                                const confirmUpload = confirm("Confirm uploading liquidation documents (Certificate of Appearance, Receipts, etc.) for this seminar?");
-                                if (confirmUpload) {
-                                  handleLiquidate(activity.id);
-                                }
-                              }}
-                              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold transition shadow-sm"
-                            >
-                              Upload Liquidation Documents
-                            </button>
-                          </div>
-                        )}
-                        {activity.status === "Liquidation Pending" && (
-                          <div className="pt-3 border-t border-blue-200 mt-2">
-                            <p className="text-[10px] text-amber-700 font-semibold italic text-center">Liquidation documents submitted. Pending HR verification.</p>
-                          </div>
-                        )}
+                        {/* Attendance, recorded by HR. Only attendees get a liquidation form:
+                            the employee opens it from the title above. */}
+                        <div className="pt-3 border-t border-blue-200 mt-2 space-y-1">
+                          <p className="text-[10px] text-slate-600">
+                            <span className="font-semibold text-slate-700">Attendance:</span>{" "}
+                            <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${
+                              activity.attendance === "Attended" ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : activity.attendance === "Did not attend" ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : "border-slate-200 bg-slate-50 text-slate-600"
+                            }`}>
+                              {activity.attendance || "Not recorded"}
+                            </span>
+                          </p>
+                          {activity.status === "Liquidation Pending" ? (
+                            <p className="text-[10px] text-amber-700 font-semibold italic">Liquidation report filed. Awaiting review.</p>
+                          ) : isOwnView && activity.canLiquidate ? (
+                            <p className="text-[10px] text-blue-700 font-semibold">Click the title to open your liquidation form.</p>
+                          ) : isOwnView && activity.liquidationBlockedReason && activity.status !== "Liquidated" ? (
+                            <p className="text-[10px] text-slate-500 italic">{activity.liquidationBlockedReason}</p>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { User, RequestStatus } from "../types";
 import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
+import ReturnForCorrectionDialog from "./liquidation/ReturnForCorrectionDialog";
+import { answeredCorrectionSummary } from "./liquidation/resubmit/correctionModel";
 import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
 
 interface HrUnifiedRequestsProps {
@@ -24,6 +26,8 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
   const [viewItem, setViewItem] = useState<any | null>(null);
   const [modalActionType, setModalActionType] = useState<"verify" | "return" | null>(null);
   const [modalRemarks, setModalRemarks] = useState("");
+  // A liquidation report being returned for correction, with its checklist (requirement 5).
+  const [returning, setReturning] = useState<any | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -144,10 +148,17 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
 
     let successCount = 0;
     let failCount = 0;
+    let skippedReports = 0;
 
     for (const uid of selectedIds) {
       const item = allItems.find(i => i._unifiedId === uid);
       if (!item) continue;
+      // A liquidation report is returned one at a time, with a checklist of what to
+      // correct, so a bulk Return leaves it as it is (bulk Verify still applies).
+      if (action === "return" && item._category === "Liquidation") {
+        skippedReports++;
+        continue;
+      }
 
       try {
         if (item._category === "Personnel Request") {
@@ -157,10 +168,10 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
             body: JSON.stringify({ endorse, remarks: remarks || `Bulk HR ${endorse ? 'Endorsement' : 'Return'}` })
           });
         } else if (item._category === "Liquidation") {
-          const decision = action === "verify" ? "Verify" : "Return";
+          // Only Verify reaches here: liquidation reports were skipped for a bulk Return.
           await apiCall(`/api/liquidation-submissions/${item.id}/hr-action`, {
             method: "PUT",
-            body: JSON.stringify({ action: decision, remarks: remarks || `Bulk HR ${decision}` })
+            body: JSON.stringify({ action: "Verify", remarks: remarks || "Bulk HR Verify" })
           });
         }
         successCount++;
@@ -169,7 +180,9 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
       }
     }
 
-    setSuccess(`Processed successfully: ${successCount}. Failed: ${failCount}.`);
+    setSuccess(`Processed successfully: ${successCount}. Failed: ${failCount}.${skippedReports
+      ? ` ${skippedReports} liquidation report${skippedReports === 1 ? " was" : "s were"} left as ${skippedReports === 1 ? "it was" : "they were"}: open each one to return it with a checklist.`
+      : ""}`);
     setBulkActionType(null);
     setRemarks("");
     fetchData();
@@ -280,6 +293,11 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
               {viewItem._category === "Liquidation" && overspendOf(viewItem) && (
                 <OverspendNotice over={overspendOf(viewItem)!} />
               )}
+              {viewItem._category === "Liquidation" && answeredCorrectionSummary(viewItem) && (
+                <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-800">
+                  {answeredCorrectionSummary(viewItem)}
+                </p>
+              )}
 
               {viewItem.destination && (
                 <div>
@@ -321,11 +339,19 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
               {isActionable(viewItem.status) && (
                 <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
                   <div className="flex space-x-2">
-                    <button 
-                      onClick={() => setModalActionType("return")} 
+                    <button
+                      onClick={() => {
+                        // A liquidation report is returned with a checklist of what to correct.
+                        if (viewItem._category === "Liquidation") {
+                          setReturning(viewItem);
+                          setViewItem(null);
+                        } else {
+                          setModalActionType("return");
+                        }
+                      }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-colors ${modalActionType === "return" ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-600/20 shadow-inner" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`}
                     >
-                      Reject / Return
+                      {viewItem._category === "Liquidation" ? "Return for correction" : "Reject / Return"}
                     </button>
                     <button 
                       onClick={() => setModalActionType("verify")} 
@@ -355,10 +381,10 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
                                 body: JSON.stringify({ endorse, remarks: modalRemarks || `HR ${endorse ? 'Endorsement' : 'Return'}` })
                               });
                             } else if (viewItem._category === "Liquidation") {
-                              const decision = modalActionType === "verify" ? "Verify" : "Return";
+                              // Only Verify reaches here: a Return opens its checklist dialog.
                               await apiCall(`/api/liquidation-submissions/${viewItem.id}/hr-action`, {
                                 method: "PUT",
-                                body: JSON.stringify({ action: decision, remarks: modalRemarks || `HR ${decision}` })
+                                body: JSON.stringify({ action: "Verify", remarks: modalRemarks || "HR Verify" })
                               });
                             }
                             setSuccess("Action applied successfully.");
@@ -474,12 +500,20 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
             </div>
             <div className="p-5 space-y-4">
               {bulkActionType !== 'verify' && (
-                <textarea
-                  placeholder={`Optional remarks for bulk ${bulkActionType === 'verify' ? 'endorsement/verification' : 'rejection'}...`}
-                  value={remarks}
-                  onChange={e => setRemarks(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 h-24 font-sans"
-                />
+                <>
+                  <textarea
+                    placeholder="Optional remarks for the bulk rejection..."
+                    value={remarks}
+                    onChange={e => setRemarks(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 h-24 font-sans"
+                  />
+                  {selectedIds.some(id => allItems.find(i => i._unifiedId === id)?._category === "Liquidation") && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Liquidation reports aren&rsquo;t returned in bulk: each needs its own checklist of what to correct.
+                      They will be left as they are; open each one to return it.
+                    </p>
+                  )}
+                </>
               )}
               <div className="flex justify-end space-x-2">
                 <button onClick={() => setBulkActionType(null)} className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 cursor-pointer">Cancel</button>
@@ -493,6 +527,36 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
             </div>
           </div>
         </div>
+      )}
+
+      {/* Returning a liquidation report: a checklist of what to correct; only those parts
+          reopen on the employee's form, and the corrected report comes back to HR. */}
+      {returning && (
+        <ReturnForCorrectionDialog
+          key={returning.id}
+          report={returning}
+          reviewer="HR"
+          // Cancel goes back to the report's details, where the Return began.
+          onCancel={() => { setViewItem(returning); setModalActionType(null); setReturning(null); }}
+          onSubmit={async payload => {
+            // apiCall throws with the server's reason; the dialog shows it and stays open. A
+            // refusal also reloads the list, in case the report was acted on elsewhere.
+            try {
+              const res = await apiCall(`/api/liquidation-submissions/${encodeURIComponent(returning.id)}/hr-action`, {
+                method: "PUT",
+                body: JSON.stringify({ action: "Return", ...payload })
+              });
+              if (res?.status !== "success") throw new Error(res?.message || "The report could not be returned.");
+            } catch (err) {
+              fetchData();
+              throw err;
+            }
+            setSuccess(`${returning.submissionNo} was returned for correction.`);
+            setReturning(null);
+            fetchData();
+            onRefresh();
+          }}
+        />
       )}
     </div>
   );

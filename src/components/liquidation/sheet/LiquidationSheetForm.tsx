@@ -1,10 +1,15 @@
 import React, { useState } from "react";
 import { Plus } from "lucide-react";
-import { LiquidationParticular, TRAINING_EXPENSE_CATEGORIES } from "../../../types";
+import { ActiveSignatory, CorrectionField, LiquidationParticular, TRAINING_EXPENSE_CATEGORIES } from "../../../types";
 import { newParticular, round2 } from "../ParticularsEditor";
 import { CoaHeaderFields } from "../LiquidationCoaFields";
 import { SHEET_FONT, amountText, longDate } from "./sheetFormat";
 import { CertificationCell, SheetTotalRow } from "./SheetParts";
+import CorrectionNote from "../resubmit/CorrectionNote";
+import { CorrectionAccess } from "../resubmit/correctionModel";
+
+/** Box B's value for "keep the representative copied when the report was filed". */
+export const BOX_B_AS_FILED = "__as_filed__";
 
 /** The cash advance box. Its rules live with the rest of the form's state in the portal. */
 export interface SheetCashAdvanceField {
@@ -26,6 +31,8 @@ interface LiquidationSheetFormProps {
   onCoaChange: (next: CoaHeaderFields) => void;
   /** The DV reference comes from Finance's record, so its fields are read-only. */
   advanceOnRecord: boolean;
+  /** A Reimbursement: paid out of pocket, so there is no advance and its DV boxes are off. */
+  noAdvance?: boolean;
   /** The OR fields open only when part of the advance is being returned. */
   refundDue: boolean;
   particulars: LiquidationParticular[];
@@ -36,6 +43,17 @@ interface LiquidationSheetFormProps {
   totalReleased: number;
   cashAdvance: SheetCashAdvanceField;
   disabled?: boolean;
+  /** Box B: the active Authorized Representatives the claimant chooses from. */
+  representatives: ActiveSignatory[];
+  representativeId: string;
+  onRepresentativeChange: (id: string) => void;
+  /** A returned report's Box B as copied at filing; offered as BOX_B_AS_FILED. */
+  savedRepresentative?: { id?: string; name?: string; position?: string };
+  representativeError?: string;
+  /** Box C: the Accountant on duty, for information; Finance's validation records it. */
+  accountant: ActiveSignatory | null;
+  /** Correcting a returned report: which parts reopened, with the reviewer's notes. */
+  correction?: Pick<CorrectionAccess, "editable" | "noteFor" | "lineIds">;
 }
 
 // Fillable boxes are tinted, like a fillable PDF, so the employee sees where to type while
@@ -45,6 +63,9 @@ const BASE =
   "rounded-none border-0 border-b px-1 py-0.5 placeholder:text-slate-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:text-slate-400";
 const OPEN = `${BASE} border-slate-500 bg-blue-50 text-black focus:bg-white disabled:bg-transparent`;
 const LOCKED = `${BASE} border-slate-500 bg-slate-100 text-slate-700`;
+// A box a reviewer reopened for correction: amber like their notes, so it stands out from the
+// locked ones (the blue fill-in tint is too close to the locked grey to tell apart).
+const FIX = `${BASE} border-amber-600 bg-amber-50 text-black focus:bg-white disabled:bg-transparent`;
 const INVALID = `${BASE} border-rose-500 bg-rose-50 text-black`;
 
 /**
@@ -59,6 +80,7 @@ export default function LiquidationSheetForm({
   coa,
   onCoaChange,
   advanceOnRecord,
+  noAdvance = false,
   refundDue,
   particulars,
   onParticularsChange,
@@ -67,9 +89,35 @@ export default function LiquidationSheetForm({
   totalReleased,
   cashAdvance,
   disabled = false,
+  representatives,
+  representativeId,
+  onRepresentativeChange,
+  savedRepresentative,
+  representativeError,
+  accountant,
+  correction,
 }: LiquidationSheetFormProps) {
   const set = (patch: Partial<CoaHeaderFields>) => onCoaChange({ ...coa, ...patch });
   const rows = particulars ?? [];
+
+  // Correcting a returned report: only the parts the reviewer reopened can change; the rest
+  // shows as filed, in the locked style (the server ignores them anyway). With no
+  // correction, everything is open.
+  const can = (f: CorrectionField) => !correction || correction.editable(f);
+  const note = (f: CorrectionField) => correction?.noteFor(f);
+  const linesFree = can("particulars") && !correction?.lineIds;
+  const lineOpen = (id: string) => can("particulars") && (!correction?.lineIds || correction.lineIds.includes(id));
+  const open = correction ? FIX : OPEN;
+  // Points a reopened part's inputs at the reviewer's note on it, for screen readers.
+  const noteId = (f: CorrectionField) => (note(f) ? `note-${f}` : undefined);
+
+  // Box B. A returned report keeps the copy made at filing ("as filed") unless another
+  // representative is picked, so the sheet always shows what will print, even if that
+  // person has since left or had their name or position edited.
+  const asFiled = !!savedRepresentative?.name && representativeId === BOX_B_AS_FILED;
+  const chosenRepresentative = asFiled
+    ? { position: savedRepresentative!.position || "" }
+    : (representatives ?? []).find((r) => r.id === representativeId);
 
   // What is mid-way through being typed in an amount box, keyed by row. Without it the
   // parsed number is rendered back and "0.50" cannot be typed: the "0" would be normalised
@@ -131,21 +179,26 @@ export default function LiquidationSheetForm({
                   type="date"
                   value={coa.periodCoveredFrom}
                   disabled={disabled}
+                  readOnly={!can("periodCovered")}
                   onChange={(e) => set({ periodCoveredFrom: e.target.value })}
                   aria-label="Period covered from"
-                  className={`${OPEN} font-bold`}
+                  aria-describedby={noteId("periodCovered")}
+                  className={`${can("periodCovered") ? open : LOCKED} font-bold`}
                 />
                 <span aria-hidden="true">-</span>
                 <input
                   type="date"
                   value={coa.periodCoveredTo}
                   disabled={disabled}
+                  readOnly={!can("periodCovered")}
                   min={coa.periodCoveredFrom || undefined}
                   onChange={(e) => set({ periodCoveredTo: e.target.value })}
                   aria-label="Period covered to"
-                  className={`${OPEN} font-bold`}
+                  aria-describedby={noteId("periodCovered")}
+                  className={`${can("periodCovered") ? open : LOCKED} font-bold`}
                 />
               </p>
+              <div className="flex justify-center"><CorrectionNote id={noteId("periodCovered")} note={note("periodCovered")} /></div>
               <div className="mt-5 font-bold">
                 <p>Entity Name : HSAC-RAB I</p>
                 <p>Fund Cluster : 01 - Regular Fund</p>
@@ -167,11 +220,14 @@ export default function LiquidationSheetForm({
                   type="text"
                   value={coa.responsibilityCenterCode}
                   disabled={disabled}
+                  readOnly={!can("responsibilityCenterCode")}
                   onChange={(e) => set({ responsibilityCenterCode: e.target.value })}
                   placeholder="09-001-01"
                   aria-label="Responsibility center code"
-                  className={`${OPEN} mx-auto mt-2 block w-[85%] text-center font-bold`}
+                  aria-describedby={noteId("responsibilityCenterCode")}
+                  className={`${can("responsibilityCenterCode") ? open : LOCKED} mx-auto mt-2 block w-[85%] text-center font-bold`}
                 />
+                <CorrectionNote id={noteId("responsibilityCenterCode")} note={note("responsibilityCenterCode")} />
               </div>
             </td>
           </tr>
@@ -185,6 +241,12 @@ export default function LiquidationSheetForm({
               AMOUNT
             </th>
           </tr>
+          {note("particulars") && (
+            <tr>
+              <td colSpan={2} className="border-r-2 border-black px-2"><CorrectionNote id={noteId("particulars")} note={note("particulars")} /></td>
+              <td />
+            </tr>
+          )}
 
           {/* --- Particulars --- */}
           {rows.map((p, idx) => {
@@ -196,11 +258,13 @@ export default function LiquidationSheetForm({
                     rows={2}
                     value={p.description}
                     disabled={disabled}
+                    readOnly={!lineOpen(p.id)}
                     onChange={(e) => update(p.id, { description: e.target.value })}
                     placeholder="e.g. Meals and incidentals, 12-13 Sept 2026"
                     aria-label={`Particular ${idx + 1} description`}
                     aria-invalid={rowError ? true : undefined}
-                    className={`w-full resize-none font-bold ${rowError ? INVALID : OPEN}`}
+                    aria-describedby={lineOpen(p.id) ? noteId("particulars") : undefined}
+                    className={`w-full resize-none font-bold ${rowError ? INVALID : lineOpen(p.id) ? open : LOCKED}`}
                   />
                   {rowError && <p className="text-[11px] font-bold text-rose-700">{rowError}</p>}
                   {/* Screen-only bookkeeping: which budget line the expense is charged to. */}
@@ -209,25 +273,27 @@ export default function LiquidationSheetForm({
                       Charged to
                       <select
                         value={p.category || "Miscellaneous"}
-                        disabled={disabled}
+                        disabled={disabled || !lineOpen(p.id)}
                         onChange={(e) => update(p.id, { category: e.target.value as LiquidationParticular["category"] })}
                         aria-label={`Particular ${idx + 1} expense category`}
-                        className={`${OPEN} text-[11px]`}
+                        className={`${lineOpen(p.id) ? open : LOCKED} text-[11px]`}
                       >
                         {TRAINING_EXPENSE_CATEGORIES.map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => removeRow(p.id)}
-                      disabled={disabled}
-                      aria-label={`Remove particular ${idx + 1}`}
-                      className="ml-auto cursor-pointer text-[11px] text-slate-500 underline hover:text-rose-700 disabled:cursor-not-allowed"
-                    >
-                      Remove
-                    </button>
+                    {linesFree && (
+                      <button
+                        type="button"
+                        onClick={() => removeRow(p.id)}
+                        disabled={disabled}
+                        aria-label={`Remove particular ${idx + 1}`}
+                        className="ml-auto cursor-pointer text-[11px] text-slate-500 underline hover:text-rose-700 disabled:cursor-not-allowed"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </td>
                 <td className="px-2 pt-2">
@@ -237,11 +303,13 @@ export default function LiquidationSheetForm({
                     step="0.01"
                     value={amountValue(p)}
                     disabled={disabled}
+                    readOnly={!lineOpen(p.id)}
                     onChange={(e) => onAmountInput(p.id, e.target.value)}
                     onBlur={() => onAmountBlur(p.id)}
                     placeholder="0.00"
                     aria-label={`Particular ${idx + 1} amount in pesos`}
-                    className={`${OPEN} w-full text-right font-bold tabular-nums`}
+                    aria-describedby={lineOpen(p.id) ? noteId("particulars") : undefined}
+                    className={`${lineOpen(p.id) ? open : LOCKED} w-full text-right font-bold tabular-nums`}
                   />
                 </td>
               </tr>
@@ -250,14 +318,16 @@ export default function LiquidationSheetForm({
 
           <tr>
             <td colSpan={2} className="border-r-2 border-black px-2 pt-2">
-              <button
-                type="button"
-                onClick={() => onParticularsChange([...rows, newParticular()])}
-                disabled={disabled}
-                className="inline-flex cursor-pointer items-center gap-1 border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus size={11} aria-hidden="true" /> Add particular
-              </button>
+              {linesFree && (
+                <button
+                  type="button"
+                  onClick={() => onParticularsChange([...rows, newParticular()])}
+                  disabled={disabled}
+                  className="inline-flex cursor-pointer items-center gap-1 border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus size={11} aria-hidden="true" /> Add particular
+                </button>
+              )}
             </td>
             <td />
           </tr>
@@ -283,12 +353,13 @@ export default function LiquidationSheetForm({
                 <input
                   type="text"
                   value={coa.cashAdvanceDvNo}
-                  disabled={disabled}
-                  readOnly={advanceOnRecord}
+                  disabled={disabled || noAdvance}
+                  readOnly={advanceOnRecord || !can("cashAdvance")}
                   onChange={(e) => set({ cashAdvanceDvNo: e.target.value })}
-                  placeholder="2026-08-336"
+                  placeholder={noAdvance ? "None" : "2026-08-336"}
                   aria-label="Cash advance DV number"
-                  className={`${advanceOnRecord ? LOCKED : OPEN} w-24 font-bold`}
+                  aria-describedby={noteId("cashAdvance")}
+                  className={`${advanceOnRecord || !can("cashAdvance") ? LOCKED : open} w-24 font-bold`}
                 />
                 {/* "DTD." stays with its date if the line has to wrap. */}
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -296,13 +367,15 @@ export default function LiquidationSheetForm({
                   <input
                     type="date"
                     value={coa.cashAdvanceDvDate}
-                    disabled={disabled}
-                    readOnly={advanceOnRecord}
+                    disabled={disabled || noAdvance}
+                    readOnly={advanceOnRecord || !can("cashAdvance")}
                     onChange={(e) => set({ cashAdvanceDvDate: e.target.value })}
                     aria-label="Cash advance DV date"
-                    className={`${advanceOnRecord ? LOCKED : OPEN} text-[12px] font-bold`}
+                    aria-describedby={noteId("cashAdvance")}
+                    className={`${advanceOnRecord || !can("cashAdvance") ? LOCKED : open} text-[12px] font-bold`}
                   />
                 </span>
+                {note("cashAdvance") && <span className="basis-full"><CorrectionNote id={noteId("cashAdvance")} note={note("cashAdvance")} /></span>}
               </span>
             }
             amount={
@@ -313,10 +386,11 @@ export default function LiquidationSheetForm({
                 disabled={disabled}
                 readOnly={cashAdvance.locked}
                 aria-label={cashAdvance.ariaLabel}
+                aria-describedby={noteId("cashAdvance")}
                 value={cashAdvance.value}
                 onChange={(e) => cashAdvance.onChange(e.target.value)}
                 onBlur={cashAdvance.onBlur}
-                className={`${cashAdvance.locked ? LOCKED : OPEN} w-36 text-right font-bold tabular-nums`}
+                className={`${cashAdvance.locked ? LOCKED : open} w-36 text-right font-bold tabular-nums`}
               />
             }
           />
@@ -328,10 +402,12 @@ export default function LiquidationSheetForm({
                   type="text"
                   value={coa.refundOrNo}
                   disabled={disabled || !refundDue}
+                  readOnly={!can("refundOr")}
                   onChange={(e) => set({ refundOrNo: e.target.value })}
                   placeholder={refundDue ? "0247983" : "No refund due"}
                   aria-label="Refund OR number"
-                  className={`${OPEN} w-24`}
+                  aria-describedby={noteId("refundOr")}
+                  className={`${can("refundOr") ? open : LOCKED} w-24`}
                 />
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   DTD.
@@ -339,18 +415,23 @@ export default function LiquidationSheetForm({
                     type="date"
                     value={coa.refundOrDate}
                     disabled={disabled || !refundDue}
+                    readOnly={!can("refundOr")}
                     onChange={(e) => set({ refundOrDate: e.target.value })}
                     aria-label="Refund OR date"
-                    className={`${OPEN} text-[12px]`}
+                    aria-describedby={noteId("refundOr")}
+                    className={`${can("refundOr") ? open : LOCKED} text-[12px]`}
                   />
                 </span>
+                {note("refundOr") && <span className="basis-full"><CorrectionNote id={noteId("refundOr")} note={note("refundOr")} /></span>}
               </span>
             }
             amount={<span className="font-bold tabular-nums">{amountText(refunded)}</span>}
           />
           <SheetTotalRow label="AMOUNT TO BE REIMBURSED" amount={<span className="font-bold tabular-nums">{amountText(reimbursed)}</span>} />
 
-          {/* --- Certifications: A is the employee filing; B and C are signed after validation. --- */}
+          {/* --- Certifications: A is the employee filing. B is the Authorized Representative
+                the employee chooses here; C is the Accountant on duty, recorded when Finance
+                validates. Both come from Utilities → Manage Signatories. --- */}
           <tr>
             <CertificationCell
               letter="A"
@@ -363,26 +444,56 @@ export default function LiquidationSheetForm({
             <CertificationCell
               letter="B"
               statement="Purpose of travel / cash advance duly accomplished"
-              caption="Representative"
+              nameSlot={
+                <select
+                  value={representativeId}
+                  onChange={(e) => onRepresentativeChange(e.target.value)}
+                  disabled={disabled || !can("representative")}
+                  aria-label="Box B: Authorized Representative"
+                  aria-required="true"
+                  aria-invalid={!!representativeError}
+                  aria-describedby={[representativeError && "sheet-box-b-error", noteId("representative")].filter(Boolean).join(" ") || undefined}
+                  className={`${representativeError ? INVALID : can("representative") ? open : LOCKED} w-full text-center text-[12px] font-bold uppercase`}
+                >
+                  <option value="">— Choose representative —</option>
+                  {savedRepresentative?.name && (
+                    <option value={BOX_B_AS_FILED}>{savedRepresentative.name} (as filed)</option>
+                  )}
+                  {(representatives ?? []).map((r) => (
+                    <option key={r.id} value={r.id}>{r.fullName}</option>
+                  ))}
+                </select>
+              }
+              caption={chosenRepresentative?.position || "Representative"}
               className="border-r-2 border-black"
             />
             <CertificationCell
               letter="C"
               statement="Supporting documents complete and proper"
-              caption="Accountant III"
+              name={accountant?.fullName}
+              caption={accountant?.position || "Accountant"}
               jevNo=""
             />
           </tr>
         </tbody>
       </table>
+      {representativeError && (
+        <p id="sheet-box-b-error" role="alert" className="mt-1 text-[12px] font-semibold text-rose-700">
+          {representativeError}
+        </p>
+      )}
+      {note("representative") && <CorrectionNote id={noteId("representative")} note={`Box B: ${note("representative")}`} />}
 
-      {/* What the figures mean, in words — the same three cases the old summary showed. */}
+      {/* What the figures mean, in words — the same three cases the old summary showed,
+          plus a Reimbursement, which has no advance to measure against. */}
       <p className={`mt-2 text-[12px] ${reimbursed > 0 ? "text-amber-700" : refunded > 0 ? "text-emerald-700" : "text-slate-600"}`}>
-        {reimbursed > 0
-          ? "You spent more than the cash advance."
-          : refunded > 0
-            ? "Return this balance and record the OR."
-            : "Fully liquidated - nothing to refund."}
+        {noAdvance
+          ? "A reimbursement: there is no cash advance, so everything you spent is to be reimbursed."
+          : reimbursed > 0
+            ? "You spent more than the cash advance."
+            : refunded > 0
+              ? "Return this balance and record the OR."
+              : "Fully liquidated - nothing to refund."}
       </p>
     </div>
   );

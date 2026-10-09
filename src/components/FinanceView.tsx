@@ -410,19 +410,16 @@ export default function FinanceView({
     }
   }
 
-  // Handle action on liquidation submission under multi-stage flow (Finance officer)
-  async function handleFinanceLiquidationAction(subId: string, action: "Validate" | "Return", remarks: string) {
-    if (action === "Return" && !remarks) {
-      alert("Please enter remarks explaining the grounds for return.");
-      return;
-    }
+  // Validate a liquidation report (Finance officer). A Return goes through its checklist
+  // dialog on the Liquidation Desk instead.
+  async function handleFinanceValidate(subId: string, remarks: string) {
     try {
       const res = await apiCall(`/api/liquidation-submissions/${subId}/finance-action`, {
         method: "PUT",
-        body: JSON.stringify({ action, remarks: remarks || "Financial documentations validated & finalized." })
+        body: JSON.stringify({ action: "Validate", remarks: remarks || "Financial documentations validated & finalized." })
       });
       if (res.status === "success") {
-        alert(action === "Validate" ? "Dossier validated and finalized successfully!" : "Dossier returned to employee with remarks.");
+        alert("Dossier validated and finalized successfully!");
         setSelectedSub(null);
         setSubRemarks("");
         fetchFinanceAddons();
@@ -528,10 +525,12 @@ export default function FinanceView({
       ]);
       generateFinancialReport("Financial Transactions Master Register", headers, rows, "HSAC_Financial_Transactions_Acreage");
     },
-    liquidations: () => {
-      const headers = ["Liquidation Number", "Reference Request", "Employee", "Department", "Allocated Released", "Liquidated Amount", "Remaining Balance Return", "Status", "Close Date"];
-      const rows = yearFilteredSubmissions.map(l => [
+    // The Liquidation Desk passes the index rows on screen (its claim-type filter applied).
+    liquidations: (list: any[] = yearFilteredSubmissions) => {
+      const headers = ["Liquidation Number", "Claim Type", "Reference Request", "Employee", "Department", "Allocated Released", "Liquidated Amount", "Remaining Balance Return", "Status", "Close Date"];
+      const rows = list.map(l => [
         l.submissionNo,
+        l.claimType || "",
         l.activityId,
         l.employeeName,
         "N/A",
@@ -1356,7 +1355,7 @@ export default function FinanceView({
             subRemarks={subRemarks}
             setSelectedSub={setSelectedSub}
             setSubRemarks={setSubRemarks}
-            onFinanceAction={handleFinanceLiquidationAction}
+            onValidate={handleFinanceValidate}
             onExport={exportMethods.liquidations}
             onQueueRefresh={() => { fetchFinanceAddons(); onRefresh(); }}
           />

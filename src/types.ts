@@ -358,6 +358,14 @@ export interface Notification {
   // Stable key for system-generated notices (e.g. "liq-due:<participantId>:overdue")
   // so a reminder is never sent twice, even across server restarts.
   dedupeKey?: string;
+  // Where clicking the notice takes the user, e.g. the liquidation form for a seminar.
+  link?: NotificationLink;
+}
+
+export interface NotificationLink {
+  tab: string;                       // the app tab to open, e.g. "employee_portal"
+  liquidationActivityId?: string;    // open the Liquidation Report with this seminar chosen
+  liquidationReportId?: string;      // open this returned report for correction
 }
 
 export interface Activity {
@@ -563,6 +571,77 @@ export interface CashAdvance {
   liquidatedAt?: string;
 }
 
+// The instructor's note 11: a reviewer returns a liquidation report with a checklist of what
+// is wrong, and only those parts reopen for the claimant. The activity and the employee's
+// name are never correctable.
+export type CorrectionField =
+  | "periodCovered"
+  | "responsibilityCenterCode"
+  | "particulars"
+  | "cashAdvance"          // DV number, date and amount; only when Finance has no record of it
+  | "refundOr"
+  | "claimType"
+  | "representative"
+  | "replaceDocuments"
+  | "addDocument"
+  | "remarks";             // the employee's own notes on the report
+
+export const CORRECTION_FIELDS: { field: CorrectionField; label: string }[] = [
+  { field: "periodCovered", label: "Period covered" },
+  { field: "responsibilityCenterCode", label: "Responsibility center code" },
+  { field: "particulars", label: "Particulars" },
+  { field: "cashAdvance", label: "Cash advance (DV number, date and amount)" },
+  { field: "refundOr", label: "Refund OR number and date" },
+  { field: "claimType", label: "Claim type" },
+  { field: "representative", label: "Box B representative" },
+  { field: "replaceDocuments", label: "Supporting documents to replace" },
+  { field: "addDocument", label: "A missing document to add" },
+  { field: "remarks", label: "The employee's notes" }
+];
+
+export interface CorrectionItem {
+  field: CorrectionField;
+  remark?: string;          // the reviewer's note, shown beside that part of the form
+  lineIds?: string[];       // particulars: only these lines (none listed means every line)
+  documentIds?: string[];   // replaceDocuments: the files to replace
+}
+
+// One Return, kept for good: every round stays on the report.
+export interface CorrectionRequest {
+  id: string;
+  round: number;            // 1 for the first Return, 2 for the next, and so on
+  items: CorrectionItem[];
+  remarks: string;          // the reviewer's overall remarks
+  requestedBy: string;      // the reviewer's full name
+  requestedByRole: string;  // UserRole value of the reviewer
+  requestedAt: string;
+  // Where the corrected report goes: back to whoever returned it (open question 5).
+  returnTo: "Pending HR Review" | "Verified & Forwarded";
+  resolvedAt?: string;      // when the claimant resubmitted
+  changedFields?: CorrectionField[]; // what that resubmission actually changed
+}
+
+// A file attached to a liquidation report. A file replaced during a correction is kept,
+// marked superseded, so the history of what was submitted stays on the report.
+export interface LiquidationDocument {
+  id: string;
+  name: string;
+  type: string;
+  filename?: string;
+  uploadedAt: string;
+  size?: string;
+  content?: string;         // base64 data URL
+  replaces?: string;        // the id of the file this one replaced
+  supersededAt?: string;    // set when a correction replaced this file
+  replacedBy?: string;      // the id of the file that replaced it
+}
+
+// The instructor's note 10: one form, but the claimant says which kind of claim it is.
+// A Liquidation settles a cash advance Finance released. A Reimbursement claims back
+// money the employee paid out of their own pocket, so it has no advance at all.
+export type ClaimType = "Liquidation" | "Reimbursement";
+export const CLAIM_TYPES: ClaimType[] = ["Liquidation", "Reimbursement"];
+
 // One line of the PARTICULARS block on the COA Liquidation Report.
 export interface LiquidationParticular {
   id: string;
@@ -579,11 +658,27 @@ export interface LiquidationSubmission {
   activityId: string;
   employeeId: string; // EMP006, etc.
   employeeName: string;
+  // Chosen by the claimant at filing; the server checks it against the cash advance.
+  // Reports filed before it existed get one from the load migration (an advance above
+  // zero means Liquidation, none Reimbursement), so it is only missing on a stale copy.
+  claimType?: ClaimType;
+  // The claim type and cash advance as first stated, kept the first time a correction
+  // changes them (with who and when it last changed), for Finance to check at validation.
+  claimBeforeCorrection?: {
+    claimType?: ClaimType;
+    totalReleased: number;
+    cashAdvanceDvNo: string;
+    changedAt: string;
+    changedBy: string;
+  };
   totalReleased: number;
   totalSpent: number;
   remainingBalance: number;
   remarks: string;
-  supportingDocs: { id: string; name: string; type: string; filename: string; uploadedAt: string }[];
+  supportingDocs: LiquidationDocument[];
+  // Every Return with its checklist, oldest first (requirement 5). The last one without
+  // resolvedAt is the correction the claimant is working on.
+  corrections?: CorrectionRequest[];
   // Which budget bucket this spending belongs to. Inferred at deduction time
   // when not set explicitly by the submitter.
   spendingCategory?: SpendingCategory;
@@ -607,6 +702,17 @@ export interface LiquidationSubmission {
   refundOrNo?: string;               // e.g. "0247983" — only when there is a refund
   refundOrDate?: string;             // YYYY-MM-DD
   jevNo?: string;                    // filled by the Accountant
+
+  // --- Signatories printed in Boxes B and C (Utilities → Manage Signatories) ---
+  // Copies taken by the server, never typed by the claimant, so a later edit, resignation
+  // or replacement never changes a report already made. Reports filed before these
+  // existed have none and print as they always did (the validating officer's name).
+  representativeId?: string;         // Box B: the Authorized Representative chosen at filing
+  representativeName?: string;
+  representativePosition?: string;
+  accountantSignatoryId?: string;    // Box C: the Accountant on duty at Finance validation
+  accountantName?: string;
+  accountantPosition?: string;
 
   // --- Reimbursement ---
   // When an employee is assigned a seminar but never receives the cash advance, they pay
@@ -638,12 +744,14 @@ export interface LiquidationSubmission {
   financeValidatedBy?: string;
   financeValidatedAt?: string;
 
-  // "Certified by Authorized Representative" is the normal terminal state at RAB 1: the
-  // Financial Officer signs box B of the COA Liquidation Report ("Head of Agency /
-  // Authorized Representative") under delegated authority. This is a documented business
-  // rule, not a skipped approval. "Bypassed (Auto-Approved by Finance)" is the legacy
-  // wording for the same thing — migrated on load, but kept here because a restored
-  // backup can still carry it.
+  // "Certified by Authorized Representative" is the normal terminal state at RAB 1, set
+  // when Finance validates. Box B of the COA Liquidation Report ("Head of Agency /
+  // Authorized Representative") prints the representative the claimant chose
+  // (representativeName above). Reports filed before that existed print the Financial
+  // Officer, who certified them under delegated authority. Either way it is a documented
+  // business rule, not a skipped approval. divisionChiefApprovedBy records who clicked
+  // Validate. "Bypassed (Auto-Approved by Finance)" is the legacy wording for the same
+  // thing — migrated on load, but kept here because a restored backup can still carry it.
   divisionChiefStatus: "Pending Chief Approval" | "Approved" | "Certified by Authorized Representative"
     | "Bypassed (Auto-Approved by Finance)" | "Returned by Chief" | "Rejected";
   divisionChiefRemarks?: string;
@@ -802,12 +910,20 @@ export interface TrainingBudgetSplit {
   Materials: number;
 }
 
+export type AttendanceStatus = "Attended" | "Did not attend";
+
 export interface TrainingParticipant {
   id: string;
   trainingProgramId: string;
   employeeId: string;
   status: "Assigned" | "Completed" | "Cancelled" | "Liquidated" | "Liquidation Pending" | "Archived";
   allowanceAllocated: number;
+  // Recorded by HR once the seminar has started, separately from `status` (which tracks
+  // the liquidation). Only an "Attended" enrolment gets a liquidation form. Unset means
+  // not recorded yet.
+  attendance?: AttendanceStatus;
+  attendanceBy?: string;   // full name of the HR officer who recorded it
+  attendanceAt?: string;   // ISO timestamp
 }
 
 // --- OFFICIAL TRAINING & DEVELOPMENT PLAN (Plan A / Plan D) ---
@@ -894,6 +1010,34 @@ export interface TrainingLiquidationExpense {
   // submittedBy, HR's carry a user id.
   source?: "hr" | "report";
 }
+
+// --- SIGNATORIES (Utilities → Manage Signatories) ---
+// The people whose names print on official forms. They are entered through the UI, never
+// in code, so replacing someone (e.g. an accountant who resigned) is data entry.
+// To add a role (e.g. "Immediate Supervisor"), extend both lists below; stored records are
+// unaffected, so no migration is needed.
+export type SignatoryRole = "Accountant" | "Authorized Representative";
+export const SIGNATORY_ROLES: SignatoryRole[] = ["Accountant", "Authorized Representative"];
+// Roles held by one person at a time: appointing a new one ends the previous term.
+export const SINGLE_HOLDER_SIGNATORY_ROLES: SignatoryRole[] = ["Accountant"];
+
+export interface Signatory {
+  id: string;
+  employeeId?: string;       // Employee.id, when picked from the staff list
+  fullName: string;
+  position: string;          // the title printed under the name
+  role: SignatoryRole;
+  status: "Active" | "Inactive";
+  effectiveFrom: string;     // YYYY-MM-DD
+  effectiveTo?: string;      // YYYY-MM-DD; set when deactivated or replaced
+  createdBy: string;         // full name of the Admin who added the entry
+  createdAt: string;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+// What non-admins receive from GET /api/signatories: who can sign right now, nothing more.
+export type ActiveSignatory = Pick<Signatory, "id" | "fullName" | "position" | "role">;
 
 
 

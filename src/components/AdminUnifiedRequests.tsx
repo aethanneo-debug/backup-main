@@ -189,7 +189,10 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
     return status.includes("Pending") || status.includes("Endorsed to Division Chief") || status === "Endorsed";
   };
 
-  const actionableItems = filteredItems.filter(item => isActionable(item.status));
+  // Liquidation reports are verified by HR and validated by Finance, which certifies them
+  // for the Division Chief; here they are only followed (the server refuses chief-action).
+  const canActOn = (item: any) => item._category !== "Liquidation" && isActionable(item.status);
+  const actionableItems = filteredItems.filter(canActOn);
 
   const toggleSelect = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -226,12 +229,6 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
           await apiCall(`/api/requests/${item.id}/chief-decide`, {
             method: "PUT",
             body: JSON.stringify({ decision, remarks: remarks || `Bulk ${decision}` })
-          });
-        } else if (item._category === "Liquidation") {
-          const decision = action === "approve" ? "Approve" : "Reject";
-          await apiCall(`/api/liquidation-submissions/${item.id}/chief-action`, {
-            method: "PUT",
-            body: JSON.stringify({ action: decision, remarks: remarks || `Bulk ${decision}` })
           });
         } else if (item._category === "Budget Request") {
           const status = action === "approve" ? "Approved" : "Rejected";
@@ -489,7 +486,13 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
                 </div>
               )}
 
-              {isActionable(viewItem.status) && (
+              {viewItem._category === "Liquidation" && (
+                <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                  Liquidation reports are verified by HR and validated by Finance, which certifies them for the
+                  Division Chief under delegated authority. They are listed here to follow, not to approve.
+                </p>
+              )}
+              {canActOn(viewItem) && (
                 <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
                   <div className="flex space-x-2">
                     <button 
@@ -524,12 +527,6 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
                               await apiCall(`/api/requests/${viewItem.id}/chief-decide`, {
                                 method: "PUT",
                                 body: JSON.stringify({ decision, remarks: modalRemarks || `${decision}` })
-                              });
-                            } else if (viewItem._category === "Liquidation") {
-                              const decision = modalActionType === "approve" ? "Approve" : "Reject";
-                              await apiCall(`/api/liquidation-submissions/${viewItem.id}/chief-action`, {
-                                method: "PUT",
-                                body: JSON.stringify({ action: decision, remarks: modalRemarks || `${decision}` })
                               });
                             } else if (viewItem._category === "Budget Request") {
                               const status = modalActionType === "approve" ? "Approved" : "Rejected";
@@ -593,7 +590,7 @@ export default function AdminUnifiedRequests({ user, onRefresh }: AdminUnifiedRe
               filteredItems.map(item => (
                 <tr key={item._unifiedId} onClick={() => { setViewItem(item); setModalActionType(null); setModalRemarks(""); }} className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedIds.includes(item._unifiedId) ? "bg-blue-50/30" : ""}`}>
                   <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
-                    {isActionable(item.status) && (
+                    {canActOn(item) && (
                       <input 
                         type="checkbox" 
                         checked={selectedIds.includes(item._unifiedId)} 

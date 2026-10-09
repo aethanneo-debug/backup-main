@@ -66,7 +66,20 @@ import {
   TRAINING_EXPENSE_CATEGORIES,
   TrainingEvaluationRating,
   TrainingQualitativeRating,
-  TRAINING_EVALUATION_BANDS
+  TRAINING_EVALUATION_BANDS,
+  Signatory,
+  SignatoryRole,
+  ActiveSignatory,
+  SIGNATORY_ROLES,
+  SINGLE_HOLDER_SIGNATORY_ROLES,
+  ClaimType,
+  CLAIM_TYPES,
+  CashAdvance,
+  CORRECTION_FIELDS,
+  CorrectionField,
+  CorrectionItem,
+  CorrectionRequest,
+  LiquidationDocument
 } from "./src/types";
 
 const app = express();
@@ -107,6 +120,7 @@ interface DBStructure {
   trainingParticipants: TrainingParticipant[];
   trainingLiquidations: TrainingLiquidationExpense[];
   trainingNeeds: TrainingNeed[];
+  signatories: Signatory[];
 }
 
 // Check and seed DB on server launch
@@ -369,7 +383,7 @@ function getInitialData(): DBStructure {
             financeRemarks: "",
             divisionChiefStatus: "Pending Chief Approval",
             divisionChiefRemarks: "",
-            status: "Pending Finance Validation",
+            status: "Verified & Forwarded",
             createdAt: "2026-06-15T09:30:00Z"
           },
           {
@@ -444,6 +458,43 @@ function getInitialData(): DBStructure {
         loaded.cashAdvances = [];
         changed = true;
       }
+      // Utilities → Manage Signatories. Starts empty: real names are entered in the UI.
+      if (!Array.isArray(loaded.signatories)) {
+        loaded.signatories = [];
+        changed = true;
+      }
+
+      // Seminar attendance (only attendees get a liquidation form). An enrolment that already
+      // has a report or is Liquidated was evidently attended; open ones stay unmarked for HR.
+      // (A malformed entry is skipped: an exception here would fall back to the seed data.)
+      const reportedIds = new Set((loaded.liquidationSubmissions || []).map((s: any) => s?.activityId));
+      for (const p of (loaded.trainingParticipants || [])) {
+        if (!p || typeof p !== "object" || p.attendance) continue;
+        if (reportedIds.has(p.id) || p.status === "Liquidated") {
+          p.attendance = "Attended";
+          p.attendanceBy = "System (from the existing liquidation record)";
+          p.attendanceAt = new Date().toISOString();
+          changed = true;
+        }
+      }
+      // "Liquidation Pending" with no report was left by the retired "Upload Liquidation
+      // Documents" button, which filed nothing. Back to Assigned, so the enrolment goes
+      // through attendance and a real report like any other.
+      for (const p of (loaded.trainingParticipants || [])) {
+        if (!p || typeof p !== "object" || p.status !== "Liquidation Pending" || reportedIds.has(p.id)) continue;
+        p.status = "Assigned";
+        if (!Array.isArray(loaded.auditLogs)) loaded.auditLogs = [];
+        loaded.auditLogs.unshift({
+          id: `log-${Date.now()}-reset-${p.id}`,
+          timestamp: new Date().toISOString(),
+          userId: "system",
+          username: "system",
+          role: "System",
+          action: "Reset Enrolment Status",
+          details: `Enrolment ${p.id} reset from "Liquidation Pending" to "Assigned": it was marked by the retired upload button and no liquidation report exists.`
+        });
+        changed = true;
+      }
       if (!loaded.trainingEvaluations) {
         loaded.trainingEvaluations = [];
         changed = true;
@@ -454,6 +505,7 @@ function getInitialData(): DBStructure {
       // by "System" — which reads as a skipped approval rather than the documented RAB 1
       // business rule it is. Re-attribute them to the officer who actually validated.
       for (const sub of (loaded.liquidationSubmissions || [])) {
+        if (!sub || typeof sub !== "object") continue;
         if (sub.divisionChiefStatus === "Bypassed (Auto-Approved by Finance)") {
           sub.divisionChiefStatus = "Certified by Authorized Representative";
           if (!sub.divisionChiefApprovedBy || sub.divisionChiefApprovedBy === "System") {
@@ -466,10 +518,24 @@ function getInitialData(): DBStructure {
         }
       }
 
+      // Claim type (instructor's note 10). Reports filed before the claimant chose one
+      // get it from their figures: a linked advance or one above zero was being
+      // liquidated, none means the employee paid out of pocket.
+      for (const sub of (loaded.liquidationSubmissions || [])) {
+        if (!sub || typeof sub !== "object") continue;
+        if (sub.claimType === "Liquidation" || sub.claimType === "Reimbursement") continue;
+        const released = typeof sub.totalReleased === "number"
+          ? sub.totalReleased
+          : Number(String(sub.totalReleased ?? "").replace(/[^0-9.]/g, ""));
+        sub.claimType = sub.cashAdvanceId || released > 0 ? "Liquidation" : "Reimbursement";
+        changed = true;
+      }
+
       // Backfill HR's allocated figure and a readable activity label onto reports filed
       // before they were stamped, so Finance's queue can flag a stated advance that
       // disagrees with HR's record on existing data too, not only on new submissions.
       for (const sub of (loaded.liquidationSubmissions || [])) {
+        if (!sub || typeof sub !== "object") continue;
         if (sub.allocatedAtFiling !== undefined && sub.activityTitle) continue;
         const participant = (loaded.trainingParticipants || []).find((p: any) => p.id === sub.activityId);
         const activity = (loaded.activities || []).find((a: any) => a.id === sub.activityId);
@@ -968,7 +1034,9 @@ function getInitialData(): DBStructure {
     trainingPrograms: [],
     trainingParticipants: [],
     trainingLiquidations: [],
-    trainingNeeds: []
+    trainingNeeds: [],
+    // Entered through Utilities → Manage Signatories; no names in code.
+    signatories: []
   };
 
   // Write initial setup
@@ -1774,6 +1842,19 @@ app.get("/api/employees/:employeeId/trainings", authenticateToken, (req: any, re
   res.json({ status: "success", data: [...manualRecords, ...assignedRecords] });
 });
 
+// Whether a seminar enrolment's liquidation form is open to its employee, and why not.
+// Only attendees get the form (HR records attendance once the seminar has started), and
+// each enrolment takes one report. POST /api/liquidation-submissions enforces the same.
+function seminarFormEligibility(p: any): { canLiquidate: boolean; reason?: string; reportNo?: string } {
+  const report = (db.liquidationSubmissions || []).find((s: any) => s.activityId === p.id);
+  if (report) return { canLiquidate: false, reason: `Report ${report.submissionNo} has been filed (${report.status}).`, reportNo: report.submissionNo };
+  if (p.status === "Liquidated") return { canLiquidate: false, reason: "This seminar is already liquidated." };
+  if (p.status === "Cancelled" || p.status === "Archived") return { canLiquidate: false, reason: "This enrolment was cancelled." };
+  if (p.attendance === "Did not attend") return { canLiquidate: false, reason: "HR recorded that you did not attend, so there is no liquidation form for this seminar." };
+  if (p.attendance !== "Attended") return { canLiquidate: false, reason: "The form opens once HR records your attendance." };
+  return { canLiquidate: true };
+}
+
 app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (req: any, res: any) => {
   const { employeeId } = req.params;
   // TDP enrolments store Employee.id ("emp-...") while this route is called with the
@@ -1803,7 +1884,13 @@ app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (re
           endTime: prog.endTime,
           allocatedBudget: p.allowanceAllocated,
           status: p.status || "Scheduled",
-          assignedBy: "HR"
+          assignedBy: "HR",
+          // Attendance and whether the liquidation form is open (see seminarFormEligibility).
+          attendance: p.attendance || null,
+          ...(() => {
+            const e = seminarFormEligibility(p);
+            return { canLiquidate: e.canLiquidate, liquidationBlockedReason: e.reason || null, reportNo: e.reportNo || null };
+          })()
         };
       }
       return null;
@@ -1813,24 +1900,9 @@ app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (re
   res.json({ status: "success", data: assignedRecords });
 });
 
-app.post("/api/employees/:employeeId/liquidate_activity/:participantId", authenticateToken, (req: any, res: any) => {
-  const { employeeId, participantId } = req.params;
-  const forms = employeeIdForms(employeeId);
-  if (!canAccessEmployeeTrainingRecords(req.user, forms)) {
-    return res.status(403).json({ status: "error", message: "You can only liquidate your own seminars." });
-  }
-
-  const pIndex = db.trainingParticipants.findIndex(p => p.id === participantId && forms.includes(p.employeeId));
-  if (pIndex !== -1) {
-    db.trainingParticipants[pIndex].status = "Liquidation Pending";
-    // Optional: save liquidation details like receipts in a separate table
-    saveDB();
-    res.json({ status: "success", message: "Liquidation submitted" });
-  } else {
-    res.status(404).json({ status: "error", message: "Record not found" });
-  }
-});
-
+// POST /api/employees/:employeeId/liquidate_activity/:participantId was retired: it marked an
+// enrolment "Liquidation Pending" with no report (and HR/Admin could do it for anyone). An
+// enrolment's status now changes only through a real liquidation report.
 
 app.post("/api/employees/:employeeId/trainings", authenticateToken, (req: any, res) => {
   const { employeeId } = req.params;
@@ -2846,9 +2918,12 @@ app.get("/api/dashboard/summary", authenticateToken, (req: any, res) => {
         totalRequests,
         pendingRequests,
       },
-      auditLogs: db.auditLogs.slice(0, 8), // recent activities
-      recentRequests: db.requests.slice(0, 5),
-      recentTransactions: db.financialTransactions.slice(0, 5),
+      // Only the Administrator's dashboard shows these lists (App.tsx renders DashboardView
+      // for SUPER_ADMIN only). Other roles get empty lists: the audit trail carries details
+      // such as why a signatory was deactivated, and the others are colleagues' records.
+      auditLogs: role === UserRole.SUPER_ADMIN ? db.auditLogs.slice(0, 8) : [],
+      recentRequests: role === UserRole.SUPER_ADMIN ? db.requests.slice(0, 5) : [],
+      recentTransactions: role === UserRole.SUPER_ADMIN ? db.financialTransactions.slice(0, 5) : [],
     }
   });
 });
@@ -2935,6 +3010,388 @@ app.get("/api/audit-logs", authenticateToken, (req: any, res) => {
     return res.status(403).json({ status: "error", message: "Only administrators can review operational security audits" });
   }
   res.json({ status: "success", data: db.auditLogs });
+});
+
+// --- SIGNATORIES (Utilities → Manage Signatories) ---
+// Who prints on official forms. Every signed-in user may read the active list, because
+// the liquidation form needs today's representatives and accountant; only the
+// Administrator changes it. Nothing is ever deleted: a printed report may carry a
+// signatory's name, so someone who leaves is deactivated instead.
+
+const SIGNATORY_TEXT_MAX = 150;
+
+// Names print on official forms, so invisible characters (zero-width, direction
+// overrides) are removed: they would let a lookalike pass the duplicate check, or print
+// a name that reads differently from the stored one.
+function signatoryText(value: any): string {
+  if (typeof value !== "string") return "";
+  // Whitespace (tabs, newlines) becomes one space first, so "Juan\tDela Cruz" keeps its gap.
+  return value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+}
+
+// A real calendar date in YYYY-MM-DD (isIsoDate only checks the shape).
+function isCalendarDate(value: any): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+// Same person: by staff record when both have one, otherwise by name.
+function sameSignatoryPerson(a: { employeeId?: string; fullName: string }, b: { employeeId?: string; fullName: string }): boolean {
+  if (a.employeeId && b.employeeId) return a.employeeId === b.employeeId;
+  return a.fullName.toLowerCase() === b.fullName.toLowerCase();
+}
+
+function requireSignatoryAdmin(req: any, res: any): boolean {
+  if (req.user.role === UserRole.SUPER_ADMIN) return true;
+  res.status(403).json({ status: "error", message: "Only the Administrator can manage signatories." });
+  return false;
+}
+
+// Active entries first, then by role and name, so the table and dropdowns read the same.
+function signatoryOrder(a: Signatory, b: Signatory): number {
+  if (a.status !== b.status) return a.status === "Active" ? -1 : 1;
+  // String(): one malformed entry must not make the list fail for everyone.
+  return String(a.role).localeCompare(String(b.role)) || String(a.fullName).localeCompare(String(b.fullName));
+}
+
+// For a one-person role, another entry whose term overlaps [from, to] (an active term runs
+// to today). Strict comparison, so a handover day shared by the old end and the new start
+// is allowed. Keeps every day with exactly one Accountant.
+function overlappingSingleHolderTerm(role: SignatoryRole, from: string, to: string, exceptId: string | null): Signatory | null {
+  if (!SINGLE_HOLDER_SIGNATORY_ROLES.includes(role)) return null;
+  const today = manilaToday();
+  return (db.signatories || []).find(s => {
+    if (s.id === exceptId || s.role !== role) return false;
+    const sTo = s.status === "Active" || !s.effectiveTo ? today : s.effectiveTo;
+    return from < sTo && s.effectiveFrom < to;
+  }) || null;
+}
+
+// Ends the term of whoever holds a one-person role (the Accountant), so appointing or
+// reactivating someone never leaves two holders. Returns who was replaced.
+function endSingleHolderTerms(role: SignatoryRole, exceptId: string | null, actorName: string): Signatory[] {
+  if (!SINGLE_HOLDER_SIGNATORY_ROLES.includes(role)) return [];
+  const today = manilaToday();
+  const now = new Date().toISOString();
+  const replaced = (db.signatories || []).filter(s => s.status === "Active" && s.role === role && s.id !== exceptId);
+  for (const s of replaced) {
+    s.status = "Inactive";
+    s.effectiveTo = today;
+    s.updatedBy = actorName;
+    s.updatedAt = now;
+  }
+  return replaced;
+}
+
+// The active signatory with this id in this role, or null. Reports copy the name and
+// position from here at the moment of filing/validation; nothing typed by a client is used.
+function activeSignatoryById(id: any, role: SignatoryRole): Signatory | null {
+  if (typeof id !== "string" || !id) return null;
+  return (db.signatories || []).find(s => s.id === id && s.role === role && s.status === "Active") || null;
+}
+
+function hasActiveSignatory(role: SignatoryRole): boolean {
+  return (db.signatories || []).some(s => s.role === role && s.status === "Active");
+}
+
+const NO_REPRESENTATIVE_MESSAGE =
+  "No Authorized Representative is set up yet, so Box B can't be filled. Ask the Administrator to add one in Utilities → Manage Signatories.";
+
+// Box B certifies the claimant's own travel, so the claimant can't be the one who signs it.
+// Matched by staff record when the signatory has one, otherwise by name.
+function isClaimantSignatory(rep: Signatory, claimant: { employeeId?: string; fullName?: string }): boolean {
+  const forms = claimant.employeeId ? employeeIdForms(claimant.employeeId) : [];
+  if (rep.employeeId) return forms.includes(rep.employeeId);
+  const emp = (db.employees || []).find((e: any) => forms.includes(e.id));
+  const names = [claimant.fullName, emp?.fullName].filter(Boolean).map((n: any) => String(n).trim().toLowerCase());
+  return names.includes(rep.fullName.trim().toLowerCase());
+}
+
+// Supporting documents must be a list of file objects. Anything else used to crash a
+// handler part-way through its changes, leaving a half-updated report behind.
+function invalidSupportingDocs(docs: any): boolean {
+  return docs !== undefined && docs !== null
+    && (!Array.isArray(docs) || docs.some((d: any) => !d || typeof d !== "object" || Array.isArray(d)));
+}
+const INVALID_DOCS_MESSAGE = "Supporting documents must be a list of files.";
+
+// Files as the claimant sends them. A file's history (replaces, supersededAt, replacedBy) and
+// when it reached the report are recorded by the server alone, and each file gets an id no
+// other file on the report has, so a reviewer's "replace this file" points at exactly one.
+function claimantDocuments(docs: any[], existing: any[] = []): LiquidationDocument[] {
+  const ids = new Set((existing || []).map((d: any) => d?.id).filter(Boolean));
+  const now = new Date().toISOString();
+  return docs.map((d: any) => {
+    const { replaces, supersededAt, replacedBy, ...file } = d;
+    if (typeof file.id !== "string" || !file.id || ids.has(file.id)) file.id = `doc-${crypto.randomUUID()}`;
+    ids.add(file.id);
+    file.uploadedAt = now;
+    return file;
+  });
+}
+
+// A new file's details are shown on every reviewer's screen, so they must be plain text (an
+// object there would crash the page), and the file needs a name.
+function documentProblem(d: any): string | null {
+  if (typeof d?.name !== "string" || !d.name.trim() || d.name.length > 255) {
+    return "Each file needs a name of up to 255 characters.";
+  }
+  for (const k of ["type", "filename", "size", "content"]) {
+    if (d[k] !== undefined && d[k] !== null && typeof d[k] !== "string") return "A file's details must be text.";
+  }
+  return null;
+}
+
+// The report's own text, as the claimant enters it at filing or in a correction. Only what
+// the request carries is checked; `stored` fills in the other end of the period.
+function reportHeaderProblem(body: any, stored: any = {}): string | null {
+  for (const k of ["periodCoveredFrom", "periodCoveredTo"]) {
+    if (body?.[k] !== undefined && body[k] !== null && body[k] !== "" && !isCalendarDate(body[k])) {
+      return "Enter the period covered as dates (YYYY-MM-DD).";
+    }
+  }
+  if (body?.periodCoveredFrom !== undefined || body?.periodCoveredTo !== undefined) {
+    const from = body.periodCoveredFrom ?? stored.periodCoveredFrom;
+    const to = body.periodCoveredTo ?? stored.periodCoveredTo;
+    if (from && to && from > to) return "The period covered ends before it starts.";
+  }
+  const rc = body?.responsibilityCenterCode;
+  if (rc !== undefined && rc !== null && (typeof rc !== "string" || rc.length > 100)) {
+    return "Enter the responsibility center code as text of up to 100 characters.";
+  }
+  const notes = body?.remarks;
+  if (notes !== undefined && notes !== null && (typeof notes !== "string" || notes.length > 2000)) {
+    return "Keep your notes to text of up to 2,000 characters.";
+  }
+  return null;
+}
+
+app.get("/api/signatories", authenticateToken, (req: any, res: any) => {
+  const all = [...(db.signatories || [])].sort(signatoryOrder);
+  if (req.user.role === UserRole.SUPER_ADMIN) {
+    return res.json({ status: "success", data: all });
+  }
+  const active: ActiveSignatory[] = all
+    .filter(s => s.status === "Active")
+    .map(({ id, fullName, position, role }) => ({ id, fullName, position, role }));
+  res.json({ status: "success", data: active });
+});
+
+app.post("/api/signatories", authenticateToken, (req: any, res: any) => {
+  if (!requireSignatoryAdmin(req, res)) return;
+  const body = req.body || {};
+  const fullName = signatoryText(body.fullName);
+  const position = signatoryText(body.position);
+  const role = body.role as SignatoryRole;
+  const today = manilaToday();
+  const effectiveFrom = body.effectiveFrom === undefined || body.effectiveFrom === "" ? today : body.effectiveFrom;
+
+  if (!fullName || !position) {
+    return res.status(400).json({ status: "error", message: "Enter the signatory's full name and position." });
+  }
+  if (fullName.length > SIGNATORY_TEXT_MAX || position.length > SIGNATORY_TEXT_MAX) {
+    return res.status(400).json({ status: "error", message: `Name and position must be ${SIGNATORY_TEXT_MAX} characters or fewer.` });
+  }
+  if (!SIGNATORY_ROLES.includes(role)) {
+    return res.status(400).json({ status: "error", message: `Role must be one of: ${SIGNATORY_ROLES.join(", ")}.` });
+  }
+  if (!isCalendarDate(effectiveFrom) || effectiveFrom > today) {
+    return res.status(400).json({ status: "error", message: "Effective from must be a valid date, today or earlier." });
+  }
+  let employeeId: string | undefined;
+  if (body.employeeId !== undefined && body.employeeId !== null && body.employeeId !== "") {
+    const emp = (db.employees || []).find(e => e.id === body.employeeId || e.employeeId === body.employeeId);
+    if (!emp) {
+      return res.status(400).json({ status: "error", message: "That staff record was not found. Pick the person from the list again." });
+    }
+    employeeId = emp.id;
+  }
+
+  if (!db.signatories) db.signatories = [];
+  const duplicate = db.signatories.find(s => s.status === "Active" && s.role === role && sameSignatoryPerson(s, { employeeId, fullName }));
+  if (duplicate) {
+    return res.status(409).json({ status: "error", message: `${duplicate.fullName} is already an active ${role}.` });
+  }
+  // The person being replaced serves until today, so their successor starts today; a
+  // backdated start would give two holders for the same days. Backdating is fine for a
+  // first entry, which records someone already serving.
+  const replacesSomeone = SINGLE_HOLDER_SIGNATORY_ROLES.includes(role)
+    && db.signatories.some(s => s.status === "Active" && s.role === role);
+  if (replacesSomeone && effectiveFrom !== today) {
+    return res.status(400).json({ status: "error", message: `A new ${role} who replaces the current one starts today, the day the current term ends.` });
+  }
+  // A backdated first entry must not overlap a former holder's term.
+  const overlap = replacesSomeone ? null : overlappingSingleHolderTerm(role, effectiveFrom, today, null);
+  if (overlap) {
+    return res.status(409).json({ status: "error", message: `That start date overlaps ${overlap.fullName}'s term as ${role} (${overlap.effectiveFrom} to ${overlap.effectiveTo || "today"}).` });
+  }
+
+  const actor = (req as any).user;
+  const replaced = endSingleHolderTerms(role, null, actor.fullName);
+  const signatory: Signatory = {
+    id: `sig-${crypto.randomUUID()}`,
+    ...(employeeId ? { employeeId } : {}),
+    fullName,
+    position,
+    role,
+    status: "Active",
+    effectiveFrom,
+    createdBy: actor.fullName,
+    createdAt: new Date().toISOString()
+  };
+  db.signatories.push(signatory);
+
+  const replacedNote = replaced.length > 0 ? `, replacing ${replaced.map(s => s.fullName).join(", ")}` : "";
+  logEvent(actor.id, actor.username, actor.role, replaced.length > 0 ? "Appoint Signatory" : "Add Signatory",
+    `${fullName} (${position}) added as ${role}${replacedNote}`);
+  saveDB();
+  res.json({
+    status: "success",
+    message: replaced.length > 0
+      ? `${fullName} is now the ${role}. ${replaced.map(s => s.fullName).join(", ")}'s term ended today.`
+      : `${fullName} added as ${role}.`,
+    data: signatory
+  });
+});
+
+// Edits the name, position, staff link or dates. The role is fixed: moving someone to
+// another role is a new entry, so each role's history stays readable.
+app.put("/api/signatories/:id", authenticateToken, (req: any, res: any) => {
+  if (!requireSignatoryAdmin(req, res)) return;
+  const signatory = (db.signatories || []).find(s => s.id === req.params.id);
+  if (!signatory) return res.status(404).json({ status: "error", message: "Signatory not found." });
+  const body = req.body || {};
+
+  if (body.role !== undefined && body.role !== signatory.role) {
+    return res.status(400).json({ status: "error", message: "A signatory's role can't be changed. Deactivate this entry and add the person under the new role." });
+  }
+  const fullName = body.fullName !== undefined ? signatoryText(body.fullName) : signatory.fullName;
+  const position = body.position !== undefined ? signatoryText(body.position) : signatory.position;
+  if (!fullName || !position) {
+    return res.status(400).json({ status: "error", message: "Enter the signatory's full name and position." });
+  }
+  if (fullName.length > SIGNATORY_TEXT_MAX || position.length > SIGNATORY_TEXT_MAX) {
+    return res.status(400).json({ status: "error", message: `Name and position must be ${SIGNATORY_TEXT_MAX} characters or fewer.` });
+  }
+  const today = manilaToday();
+  const effectiveFrom = body.effectiveFrom !== undefined ? body.effectiveFrom : signatory.effectiveFrom;
+  if (!isCalendarDate(effectiveFrom) || effectiveFrom > today) {
+    return res.status(400).json({ status: "error", message: "Effective from must be a valid date, today or earlier." });
+  }
+  // An active term has no end date yet; an ended one keeps a valid end date.
+  let effectiveTo = signatory.effectiveTo;
+  if (body.effectiveTo !== undefined) {
+    if (signatory.status === "Active" && body.effectiveTo !== "" && body.effectiveTo !== null) {
+      return res.status(400).json({ status: "error", message: "An active signatory has no end date. Deactivate them to end the term." });
+    }
+    if (signatory.status === "Inactive") {
+      if (!isCalendarDate(body.effectiveTo) || body.effectiveTo > today) {
+        return res.status(400).json({ status: "error", message: "Effective to must be a valid date, today or earlier." });
+      }
+      effectiveTo = body.effectiveTo;
+    }
+  }
+  if (effectiveTo && effectiveTo < effectiveFrom) {
+    return res.status(400).json({ status: "error", message: "The end date can't be earlier than the start date." });
+  }
+  let employeeId = signatory.employeeId;
+  if (body.employeeId !== undefined) {
+    if (body.employeeId === null || body.employeeId === "") {
+      employeeId = undefined;
+    } else {
+      const emp = (db.employees || []).find(e => e.id === body.employeeId || e.employeeId === body.employeeId);
+      if (!emp) {
+        return res.status(400).json({ status: "error", message: "That staff record was not found. Pick the person from the list again." });
+      }
+      employeeId = emp.id;
+    }
+  }
+  if (signatory.status === "Active") {
+    const duplicate = (db.signatories || []).find(s =>
+      s.id !== signatory.id && s.status === "Active" && s.role === signatory.role && sameSignatoryPerson(s, { employeeId, fullName }));
+    if (duplicate) {
+      return res.status(409).json({ status: "error", message: `${duplicate.fullName} is already an active ${signatory.role}.` });
+    }
+  }
+  // Moving a term's dates must not give two Accountants the same days.
+  const overlap = overlappingSingleHolderTerm(signatory.role, effectiveFrom,
+    signatory.status === "Active" ? today : (effectiveTo || today), signatory.id);
+  if (overlap) {
+    return res.status(409).json({ status: "error", message: `Those dates overlap ${overlap.fullName}'s term as ${signatory.role} (${overlap.effectiveFrom} to ${overlap.effectiveTo || "today"}).` });
+  }
+
+  const before = `${signatory.fullName} (${signatory.position})`;
+  signatory.fullName = fullName;
+  signatory.position = position;
+  signatory.effectiveFrom = effectiveFrom;
+  if (effectiveTo) signatory.effectiveTo = effectiveTo; else delete signatory.effectiveTo;
+  if (employeeId) signatory.employeeId = employeeId; else delete signatory.employeeId;
+  signatory.updatedBy = (req as any).user.fullName;
+  signatory.updatedAt = new Date().toISOString();
+
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Edit Signatory",
+    `${signatory.role} ${before} updated to ${fullName} (${position})`);
+  saveDB();
+  res.json({ status: "success", data: signatory });
+});
+
+// "Resigned / Replaced": ends the term today. The entry stays, so reports that print
+// this name keep it.
+app.put("/api/signatories/:id/deactivate", authenticateToken, (req: any, res: any) => {
+  if (!requireSignatoryAdmin(req, res)) return;
+  const signatory = (db.signatories || []).find(s => s.id === req.params.id);
+  if (!signatory) return res.status(404).json({ status: "error", message: "Signatory not found." });
+  if (signatory.status === "Inactive") {
+    return res.status(409).json({ status: "error", message: `${signatory.fullName} is already inactive.` });
+  }
+  const reason = signatoryText(req.body?.reason).slice(0, SIGNATORY_TEXT_MAX);
+  signatory.status = "Inactive";
+  signatory.effectiveTo = manilaToday();
+  signatory.updatedBy = (req as any).user.fullName;
+  signatory.updatedAt = new Date().toISOString();
+
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Deactivate Signatory",
+    `${signatory.fullName} (${signatory.role}) deactivated${reason ? `: ${reason}` : ""}`);
+  saveDB();
+  res.json({ status: "success", data: signatory });
+});
+
+// Starts a new term today. Reactivating an Accountant ends the current one's term, as
+// appointing a new one does.
+app.put("/api/signatories/:id/reactivate", authenticateToken, (req: any, res: any) => {
+  if (!requireSignatoryAdmin(req, res)) return;
+  const signatory = (db.signatories || []).find(s => s.id === req.params.id);
+  if (!signatory) return res.status(404).json({ status: "error", message: "Signatory not found." });
+  if (signatory.status === "Active") {
+    return res.status(409).json({ status: "error", message: `${signatory.fullName} is already active.` });
+  }
+  const duplicate = (db.signatories || []).find(s =>
+    s.id !== signatory.id && s.status === "Active" && s.role === signatory.role && sameSignatoryPerson(s, signatory));
+  if (duplicate) {
+    return res.status(409).json({ status: "error", message: `${duplicate.fullName} is already an active ${signatory.role}.` });
+  }
+
+  const actor = (req as any).user;
+  const replaced = endSingleHolderTerms(signatory.role, signatory.id, actor.fullName);
+  const previousTerm = `${signatory.effectiveFrom} to ${signatory.effectiveTo || "?"}`;
+  signatory.status = "Active";
+  signatory.effectiveFrom = manilaToday();
+  delete signatory.effectiveTo;
+  signatory.updatedBy = actor.fullName;
+  signatory.updatedAt = new Date().toISOString();
+
+  const replacedNote = replaced.length > 0 ? `, replacing ${replaced.map(s => s.fullName).join(", ")}` : "";
+  logEvent(actor.id, actor.username, actor.role, "Reactivate Signatory",
+    `${signatory.fullName} (${signatory.role}) reactivated (previous term ${previousTerm})${replacedNote}`);
+  saveDB();
+  res.json({
+    status: "success",
+    message: replaced.length > 0
+      ? `${signatory.fullName} is the ${signatory.role} again. ${replaced.map(s => s.fullName).join(", ")}'s term ended today.`
+      : `${signatory.fullName} is active again.`,
+    data: signatory
+  });
 });
 
 // 8. Dynamic Notifications APIs
@@ -3332,6 +3789,12 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
           endDate: prog.endDate,
           liquidationDueDate: liquidationDueDateFor(prog),
           participantStatus: t.status,
+          // Attendance and whether the liquidation form is open (see seminarFormEligibility).
+          attendance: t.attendance || null,
+          ...(() => {
+            const e = seminarFormEligibility(t);
+            return { canLiquidate: e.canLiquidate, liquidationBlockedReason: e.reason || null };
+          })(),
           allottedBudget: t.allowanceAllocated || 0,
           budgetId: "training-budget",
           assignedEmployeeId: employeeId,
@@ -3425,6 +3888,9 @@ function round2(n: number): number {
 function normalizeParticulars(raw: any): { particulars: any[]; total: number; error?: string } | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const particulars: any[] = [];
+  // Each line keeps its id, so a reviewer can reopen it alone, unless that id is missing or
+  // already taken; then it gets a new one, and a tick never reaches two lines.
+  const usedIds = new Set<string>();
   for (let i = 0; i < raw.length; i++) {
     const p = raw[i] || {};
     const description = String(p.description || "").trim();
@@ -3433,14 +3899,18 @@ function normalizeParticulars(raw: any): { particulars: any[]; total: number; er
     if (!description) {
       return { particulars: [], total: 0, error: `Particular ${i + 1} needs a description.` };
     }
-    if (!isFinite(amount) || amount < 0) {
+    // Up to a billion pesos a line, so no total can overflow into Infinity.
+    if (!isFinite(amount) || amount < 0 || amount > 1e9) {
       return { particulars: [], total: 0, error: `"${description}" needs an amount of zero or more.` };
     }
     // An unrecognised or missing bucket falls back rather than failing the whole
     // report — the claimant's money is not held up by a bad dropdown value.
     const category: TrainingExpenseCategory =
       TRAINING_EXPENSE_CATEGORIES.includes(p.category) ? p.category : "Miscellaneous";
-    particulars.push({ id: String(p.id || `lp-${Date.now()}-${i}`), description, amount, category });
+    const sentId = typeof p.id === "string" || typeof p.id === "number" ? String(p.id) : "";
+    const id = sentId && !usedIds.has(sentId) ? sentId : `lp-${crypto.randomUUID()}`;
+    usedIds.add(id);
+    particulars.push({ id, description, amount, category });
   }
   if (particulars.length === 0) return null;
   return { particulars, total: round2(particulars.reduce((s, p) => s + p.amount, 0)) };
@@ -3496,15 +3966,226 @@ function nextLiquidationSubmissionNo(): string {
   return `${prefix}0${(used.length ? Math.max(...used) : 0) + 1}`;
 }
 
+// Claim type (instructor's note 10): one form, but the claimant says which kind of claim
+// it is, and filing and correcting both hold them to it.
+// - A Liquidation settles a cash advance, so it needs one: Finance's record or, for an
+//   advance released before Finance recorded them, a typed DV number and an amount.
+// - A Reimbursement claims back money paid out of pocket, so there is no advance at all.
+const CHOOSE_CLAIM_TYPE_MESSAGE =
+  'Choose the claim type: "Liquidation" if you are settling a cash advance, or "Reimbursement" if you paid out of your own pocket.';
+const ADVANCE_AMOUNT_MESSAGE = "Enter the amount of the cash advance you received, in pesos.";
+const NOTHING_TO_REIMBURSE_MESSAGE = "A Reimbursement claims back what you spent, so enter at least one amount above zero.";
+
+function isClaimType(value: unknown): value is ClaimType {
+  return CLAIM_TYPES.includes(value as ClaimType);
+}
+
+// A peso amount from a request: a finite number, or a plain numeric string, from 0 up to
+// a billion, rounded to centavos. Anything else (true, [5], "0x10", "") is not an amount.
+function parsePeso(value: unknown): number | null {
+  if (typeof value === "number") return isFinite(value) && value >= 0 && value <= 1e9 ? round2(value) : null;
+  if (typeof value === "string" && /^\d{1,10}(\.\d{1,2})?$/.test(value.trim())) {
+    const n = Number(value.trim());
+    return n <= 1e9 ? round2(n) : null;
+  }
+  return null;
+}
+
+// The DV and OR references typed on the form: text, and dates as YYYY-MM-DD or blank.
+function coaReferenceProblem(body: any): string | null {
+  for (const k of ["cashAdvanceDvNo", "refundOrNo"]) {
+    if (body?.[k] !== undefined && body?.[k] !== null && typeof body[k] !== "string") return "Enter the DV and OR numbers as text.";
+  }
+  for (const k of ["cashAdvanceDvDate", "refundOrDate"]) {
+    if (body?.[k] !== undefined && body?.[k] !== null && body[k] !== "" && !isCalendarDate(body[k])) return "Enter the DV and OR dates as YYYY-MM-DD.";
+  }
+  return null;
+}
+
+// The 400 message, naming the type to choose, or null when the choice fits the advance.
+function claimTypeProblem(
+  claimType: ClaimType,
+  advance: CashAdvance | null,
+  typed: { released: number; dvNo: string }
+): string | null {
+  if (claimType === "Reimbursement") {
+    if (advance) {
+      return `Finance released a cash advance of PHP ${round2(Number(advance.amount)).toFixed(2)} for this assignment (${advance.advanceNo}, DV ${advance.dvNo}), so this report settles it. Choose "Liquidation".`;
+    }
+    if (typed.released > 0) {
+      return `A Reimbursement has no cash advance, but PHP ${typed.released.toFixed(2)} was entered as received. If you received an advance, choose "Liquidation" and enter its DV number.`;
+    }
+    return null;
+  }
+  if (advance || (typed.released > 0 && typed.dvNo)) return null;
+  // An amount without its voucher is a Liquidation missing a detail, not a Reimbursement.
+  if (typed.released > 0) return "Enter the DV number of the cash advance you received.";
+  return 'No cash advance is on record for this assignment. If you paid out of your own pocket, choose "Reimbursement". If you did receive an advance, enter its DV number and amount.';
+}
+
+// A Released advance for an assignment. An assignment belongs to one person (one report
+// each), so it is matched by assignment alone; that also finds the assignee's advance when
+// the Administrator files on their behalf.
+function releasedAdvanceForAssignment(activityId: string): CashAdvance | null {
+  return (db.cashAdvances || []).find((a: any) => a && a.activityId === activityId && a.status === "Released") || null;
+}
+
+// The cash advance Finance has on file for a report: the one it is linked to, whatever its
+// status (a settled advance is still the record), the one it settled, or one released for
+// the same assignment since. A cancelled advance was never money in hand.
+function advanceOnFileFor(sub: any): CashAdvance | null {
+  const advances = (db.cashAdvances || []).filter((a: any) => a && a.status !== "Cancelled");
+  return advances.find((a: any) => sub.cashAdvanceId && a.id === sub.cashAdvanceId)
+    || advances.find((a: any) => a.liquidationId === sub.id)
+    || releasedAdvanceForAssignment(sub.activityId)
+    || null;
+}
+
+// Returning a report (requirement 5, the instructor's note 11): the reviewer sends remarks
+// and a checklist of what is wrong, and only those parts reopen for the claimant. This
+// checks the checklist against the report and builds the request to keep, or says why not.
+const CORRECTABLE_FIELDS: CorrectionField[] = CORRECTION_FIELDS.map(c => c.field);
+
+function correctionRequestFrom(
+  body: any,
+  sub: any,
+  reviewer: any,
+  returnTo: CorrectionRequest["returnTo"]
+): { request: CorrectionRequest } | { error: string } {
+  const remarks = typeof body?.remarks === "string" ? body.remarks.trim() : "";
+  if (!remarks) return { error: "Explain why the report is returned: remarks are required." };
+  if (remarks.length > 1000) return { error: "Keep the remarks under 1,000 characters." };
+  if (!Array.isArray(body?.items) || body.items.length === 0) {
+    return { error: "Tick at least one part of the report for the employee to correct." };
+  }
+  const lineIds = new Set((sub.particulars || []).map((p: any) => p.id));
+  const fileIds = new Set((Array.isArray(sub.supportingDocs) ? sub.supportingDocs : [])
+    .filter((d: any) => d && !d.supersededAt).map((d: any) => d.id));
+  const storedType: ClaimType = isClaimType(sub.claimType) ? sub.claimType
+    : (Number(sub.totalReleased) > 0 ? "Liquidation" : "Reimbursement");
+  const advance = advanceOnFileFor(sub);
+  const seen = new Set<CorrectionField>();
+  const items: CorrectionItem[] = [];
+  for (const raw of body.items) {
+    const field = raw?.field;
+    if (!CORRECTABLE_FIELDS.includes(field)) {
+      return { error: "Only the parts on the checklist can be returned; the activity and the employee's name can't be changed." };
+    }
+    if (seen.has(field)) return { error: "Tick each part of the report only once." };
+    seen.add(field);
+    const remark = typeof raw.remark === "string" ? raw.remark.trim() : "";
+    if (remark.length > 500) return { error: "Keep each note under 500 characters." };
+    const item: CorrectionItem = { field };
+    if (remark) item.remark = remark;
+    if (field === "particulars" && raw.lineIds !== undefined) {
+      if (!Array.isArray(raw.lineIds) || raw.lineIds.some((id: any) => !lineIds.has(id))) {
+        return { error: "Choose particulars that are on the report." };
+      }
+      if (raw.lineIds.length > 0) item.lineIds = [...new Set<string>(raw.lineIds)];
+    }
+    if (field === "replaceDocuments") {
+      if (!Array.isArray(raw.documentIds) || raw.documentIds.length === 0 || raw.documentIds.some((id: any) => !fileIds.has(id))) {
+        return { error: "Choose which attached files the employee must replace." };
+      }
+      item.documentIds = [...new Set<string>(raw.documentIds)];
+    }
+    if (field === "cashAdvance" && advance) {
+      return { error: "The cash advance is taken from Finance's record, so it can't be returned for correction." };
+    }
+    if (field === "cashAdvance" && storedType === "Reimbursement") {
+      return { error: 'A Reimbursement has no cash advance to correct. If the employee did receive one, tick "Claim type" instead.' };
+    }
+    if (field === "refundOr" && storedType === "Reimbursement") {
+      return { error: "A Reimbursement has no refund to correct." };
+    }
+    items.push(item);
+  }
+  // A Return the employee couldn't answer would leave the report stuck as "Returned" (no one
+  // can act on it then), so what resubmitting checks on the parts left as filed must hold.
+  const claimCanChange = seen.has("claimType") || (seen.has("cashAdvance") && !advance);
+  if (!claimCanChange && claimTypeProblem(storedType, advance, {
+    released: storedType === "Reimbursement" ? 0 : round2(Number(sub.totalReleased || 0)),
+    dvNo: String(sub.cashAdvanceDvNo || "").trim()
+  })) {
+    return { error: 'The claim type and the cash advance on this report don\'t agree, and the employee can only fix that if they reopen. Tick "Claim type" as well.' };
+  }
+  // (The claim type alone doesn't reopen what was spent, so the particulars must reopen.)
+  if (storedType === "Reimbursement" && !(Number(sub.totalSpent) > 0) && !seen.has("particulars")) {
+    return { error: 'This Reimbursement claims nothing spent, and the employee can only fix that if the particulars reopen. Tick "Particulars" as well.' };
+  }
+  items.sort((a, b) => CORRECTABLE_FIELDS.indexOf(a.field) - CORRECTABLE_FIELDS.indexOf(b.field));
+  return {
+    request: {
+      id: `corr-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      round: (sub.corrections?.length ?? 0) + 1,
+      items,
+      remarks,
+      requestedBy: reviewer.fullName,
+      requestedByRole: reviewer.role,
+      requestedAt: new Date().toISOString(),
+      returnTo
+    }
+  };
+}
+
+// Tells the claimant their report came back, linking straight to it in correction mode.
+// Addressed to their staff record's code, as the login carries it; never untargeted, which
+// every employee would see. The id is random: the reviewer's remarks are in the notice.
+function notifyReportReturned(sub: any, by: "HR" | "Finance", request: CorrectionRequest) {
+  const emp = (db.employees || []).find((e: any) => e.id === sub.employeeId || e.employeeId === sub.employeeId);
+  const target = emp?.employeeId || sub.employeeId;
+  if (!target) return;
+  if (!db.notifications) db.notifications = [];
+  db.notifications.push({
+    id: `notif-${crypto.randomUUID()}`,
+    title: `Liquidation report returned by ${by}`,
+    message: `${sub.submissionNo} was returned for correction: ${request.remarks} Only the parts ticked (${request.items.length}) can be changed.`,
+    isRead: false,
+    type: "warning",
+    timestamp: new Date().toISOString(),
+    targetRole: UserRole.EMPLOYEE,
+    targetEmployeeId: target,
+    link: { tab: "employee_portal", liquidationReportId: sub.id }
+  });
+}
+
+// Why a report no longer agrees with the advance on file (validating or paying it would
+// pay twice), or null when it does.
+function advanceMismatch(sub: any): string | null {
+  const advance = advanceOnFileFor(sub);
+  if (!advance) return null;
+  if (sub.claimType === "Reimbursement") {
+    return `${sub.submissionNo} is a Reimbursement, but cash advance ${advance.advanceNo} (DV ${advance.dvNo}) was released for the same assignment, so it is a Liquidation.`;
+  }
+  // Linked either way round: older reports were settled with only the advance's liquidationId.
+  const linked = advance.id === sub.cashAdvanceId || advance.liquidationId === sub.id;
+  if (!linked || round2(Number(advance.amount)) !== round2(Number(sub.totalReleased))) {
+    return `${sub.submissionNo} does not match cash advance ${advance.advanceNo} (DV ${advance.dvNo}, PHP ${round2(Number(advance.amount)).toFixed(2)}).`;
+  }
+  return null;
+}
+
 app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   const { employeeId, fullName } = req.user;
   const {
     activityId, totalReleased, totalSpent, remarks, supportingDocs, particulars,
     periodCoveredFrom, periodCoveredTo, responsibilityCenterCode,
-    cashAdvanceDvNo, cashAdvanceDvDate, refundOrNo, refundOrDate
+    cashAdvanceDvNo, cashAdvanceDvDate, refundOrNo, refundOrDate, claimType
   } = req.body;
   if (!activityId) {
     return res.status(400).json({ status: "error", message: "Please choose the activity this report settles." });
+  }
+  if (invalidSupportingDocs(supportingDocs)) {
+    return res.status(400).json({ status: "error", message: INVALID_DOCS_MESSAGE });
+  }
+  const fileOrHeaderProblem = (supportingDocs || []).map(documentProblem).find(Boolean) || reportHeaderProblem(req.body);
+  if (fileOrHeaderProblem) {
+    return res.status(400).json({ status: "error", message: fileOrHeaderProblem });
+  }
+  // What the report settles: a seminar enrolment or a general activity.
+  const seminarEnrolment = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
+  if (!seminarEnrolment && !(db.activities || []).some((a: any) => a.id === activityId)) {
+    return res.status(404).json({ status: "error", message: "That activity or seminar was not found." });
   }
   // One report per assignment per employee. A returned report is corrected through
   // /resubmit, and the employee's dropdown already hides an assignment that has a report;
@@ -3522,26 +4203,69 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
       });
     }
   }
-  // A cash advance of zero is legitimate: an employee assigned to a seminar who never
-  // received the advance pays out of pocket, and this report is how they claim it back.
-  // Only a missing or negative figure is rejected.
-  const releasedRaw = Number(totalReleased);
-  if (totalReleased === undefined || totalReleased === null || totalReleased === "" || !isFinite(releasedRaw) || releasedRaw < 0) {
-    return res.status(400).json({ status: "error", message: "Enter the cash advance you actually received — enter 0 if you received none." });
+  if (!isClaimType(claimType)) {
+    return res.status(400).json({ status: "error", message: CHOOSE_CLAIM_TYPE_MESSAGE });
+  }
+  // The cash advance as typed. It may be left out (a Reimbursement has none, and Finance's
+  // record supplies a recorded one); anything sent must still be an amount of zero or
+  // more. Whether it fits the claim type is checked below, once the record is looked up.
+  const releasedGiven = !(totalReleased === undefined || totalReleased === null || totalReleased === "");
+  const typedReleased = releasedGiven ? parsePeso(totalReleased) : 0;
+  if (typedReleased === null) {
+    return res.status(400).json({ status: "error", message: ADVANCE_AMOUNT_MESSAGE });
+  }
+  const referenceProblem = coaReferenceProblem(req.body);
+  if (referenceProblem) {
+    return res.status(400).json({ status: "error", message: referenceProblem });
   }
 
   const lines = normalizeParticulars(particulars);
   if (lines && lines.error) {
     return res.status(400).json({ status: "error", message: lines.error });
   }
-  if (!lines && !(Number(totalSpent) > 0)) {
+  // Without particulars a single typed total is accepted, read strictly.
+  const typedSpent = lines ? null : parsePeso(totalSpent);
+  if (!lines && !(typedSpent !== null && typedSpent > 0)) {
     return res.status(400).json({ status: "error", message: "Add at least one particular describing what was spent." });
   }
 
-  // Mirrors the ownership checks already in liquidate_activity and /resubmit.
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN
+  // A seminar enrolment is liquidated only by its own employee (no Administrator exception)
+  // and only once HR has recorded that they attended. General activities keep their rule.
+  if (seminarEnrolment) {
+    if (!employeeId || !employeeIdForms(seminarEnrolment.employeeId).includes(employeeId)) {
+      return res.status(403).json({ status: "error", message: "You can only liquidate a seminar you were enrolled in." });
+    }
+    // The same rule that opens the form: attended, and not cancelled or already
+    // liquidated (an enrolment settled without a report must not be charged again).
+    const eligibility = seminarFormEligibility(seminarEnrolment);
+    if (!eligibility.canLiquidate) {
+      return res.status(409).json({ status: "error", message: eligibility.reason });
+    }
+  } else if ((req as any).user.role !== UserRole.SUPER_ADMIN
       && liquidationActivityOwnedByUser(activityId, req.user) === false) {
+    // Mirrors the ownership check in /resubmit.
     return res.status(403).json({ status: "error", message: "You can only liquidate your own assigned activity." });
+  }
+  // One report per assignment, whoever filed it (the claimant's own was caught above): a
+  // cash advance is matched to its assignment, so a second report would draw on it too.
+  const filedByOther = (db.liquidationSubmissions || []).find((l: any) => l.activityId === activityId);
+  if (filedByOther) {
+    return res.status(400).json({ status: "error", message: `${filedByOther.submissionNo} has already been filed for this assignment.` });
+  }
+
+  // Box B: the claimant picks an active Authorized Representative; the server copies that
+  // person's name and position, so nothing typed by the client prints in the box.
+  const representative = activeSignatoryById(req.body.representativeId, "Authorized Representative");
+  if (!representative) {
+    return res.status(400).json({
+      status: "error",
+      message: hasActiveSignatory("Authorized Representative")
+        ? "Choose the Authorized Representative for Box B from the list."
+        : NO_REPRESENTATIVE_MESSAGE
+    });
+  }
+  if (isClaimantSignatory(representative, req.user)) {
+    return res.status(400).json({ status: "error", message: "Choose someone other than yourself for Box B." });
   }
 
   const subNo = nextLiquidationSubmissionNo();
@@ -3555,22 +4279,37 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   // before cash advances were recorded have no record to read. That gap closes as
   // Finance issues advances through this flow; until then allocatedAtFiling is what
   // flags a suspicious claim.
-  const advance = openAdvanceFor(activityId, employeeIdForms(employeeId || ""));
-  const released = advance ? round2(Number(advance.amount)) : round2(Number(totalReleased));
+  const advance = releasedAdvanceForAssignment(activityId);
+  const typedDvNo = String(cashAdvanceDvNo || "").trim();
+  const claimProblem = claimTypeProblem(claimType, advance, { released: typedReleased, dvNo: typedDvNo });
+  if (claimProblem) {
+    return res.status(400).json({ status: "error", message: claimProblem });
+  }
+  // A Reimbursement has no advance, so nothing typed into its boxes is kept.
+  const isReimbursement = claimType === "Reimbursement";
+  const released = advance ? round2(Number(advance.amount)) : (isReimbursement ? 0 : typedReleased);
   // When the report is itemised, the total is the sum of the lines — never a separately
   // typed figure that could disagree with them.
-  const spent = lines ? lines.total : round2(Number(totalSpent || 0));
+  const spent = lines ? lines.total : (typedSpent ?? 0);
+  if (isReimbursement && !(spent > 0)) {
+    return res.status(400).json({ status: "error", message: NOTHING_TO_REIMBURSE_MESSAGE });
+  }
+  // Box A prints the claimant's official name from their staff record, falling back to
+  // the account name; never a name typed in the form.
+  const staffRecord = employeeId ? (db.employees || []).find((e: any) => employeeIdForms(employeeId).includes(e.id)) : null;
+  const officialName = String(staffRecord?.fullName || "").trim() || fullName;
   const newSub = {
     id: `liqsub-${Date.now()}`,
     submissionNo: subNo,
     activityId,
     employeeId,
-    employeeName: fullName,
+    employeeName: officialName,
+    claimType,
     totalReleased: released,
     totalSpent: spent,
     remainingBalance: round2(released - spent),
     remarks: remarks || "",
-    supportingDocs: supportingDocs || [],
+    supportingDocs: claimantDocuments(supportingDocs || []),
 
     // COA Liquidation Report fields. A positive remainingBalance is the form's
     // "Amount Refunded"; a negative one is "Amount to be Reimbursed" — the split is
@@ -3584,11 +4323,17 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     responsibilityCenterCode: responsibilityCenterCode || "",
     // Finance's own DV reference wins over anything typed into the form.
     cashAdvanceId: advance ? advance.id : undefined,
-    cashAdvanceDvNo: advance ? advance.dvNo : (cashAdvanceDvNo || ""),
-    cashAdvanceDvDate: advance ? advance.dvDate : (cashAdvanceDvDate || ""),
-    refundOrNo: refundOrNo || "",
-    refundOrDate: refundOrDate || "",
+    cashAdvanceDvNo: advance ? advance.dvNo : (isReimbursement ? "" : typedDvNo),
+    cashAdvanceDvDate: advance ? advance.dvDate : (isReimbursement ? "" : (cashAdvanceDvDate || "")),
+    // Only money advanced can be refunded, so a Reimbursement has no OR.
+    refundOrNo: isReimbursement ? "" : (refundOrNo || ""),
+    refundOrDate: isReimbursement ? "" : (refundOrDate || ""),
     jevNo: "",
+
+    // Box B as chosen at filing (copied from the signatory list; see above).
+    representativeId: representative.id,
+    representativeName: representative.fullName,
+    representativePosition: representative.position,
 
     // Spending more than was received makes this a claim for the difference. Derived, so
     // it can never disagree with the figures above.
@@ -3632,7 +4377,7 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     targetRole: UserRole.HR_OFFICER
   });
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Liquidation", `Submitted liquidation report: ${subNo}`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Liquidation", `Submitted liquidation report: ${subNo} (${claimType})`);
   saveDB();
   res.json({ status: "success", data: newSub });
 });
@@ -3685,32 +4430,252 @@ app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
 
 app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const {
-    totalSpent, remarks, supportingDocs, particulars,
-    periodCoveredFrom, periodCoveredTo, responsibilityCenterCode,
-    cashAdvanceDvNo, cashAdvanceDvDate, refundOrNo, refundOrDate
-  } = req.body;
-
   const sub = db.liquidationSubmissions.find(l => l.id === id);
   if (!sub) {
     return res.status(404).json({ status: "error", message: "Submission records not found" });
   }
 
-  if (sub.employeeId !== req.user.employeeId && (req as any).user.role !== UserRole.SUPER_ADMIN) {
+  // Only the claimant corrects a report. The Administrator may still correct a general
+  // activity's report, but a seminar's belongs to the attendee alone, as filing does.
+  const isSeminarReport = (db.trainingParticipants || []).some((p: any) => p.id === sub.activityId);
+  const ownReport = !!req.user.employeeId && employeeIdForms(String(sub.employeeId || "")).includes(req.user.employeeId);
+  if (!ownReport && (isSeminarReport || (req as any).user.role !== UserRole.SUPER_ADMIN)) {
     return res.status(403).json({ status: "error", message: "Forbidden: You cannot resubmit this report details." });
   }
+  // Only a report a reviewer returned can be corrected, and never once its claim was paid.
+  if (sub.status !== "Returned" || sub.reimbursementStatus === "Reimbursed") {
+    return res.status(409).json({ status: "error", message: "Only a report returned by HR or Finance for correction can be resubmitted." });
+  }
+  // Validated under the old rules and returned afterwards: its spending is already counted,
+  // so validating a correction would count it twice. (Today a Return can't follow Validate.)
+  if (sub.financeValidatedAt || sub.divisionChiefApprovedAt) {
+    return res.status(409).json({ status: "error", message: `${sub.submissionNo} was validated before it was returned, and its spending is already counted, so it can't be corrected and validated again. Ask Finance to review it.` });
+  }
+
+  // Requirement 5: with a correction request open, only the parts the reviewer ticked can
+  // change. Everything else keeps its stored value, whatever the client sends. A report
+  // returned before checklists existed has no open request and is corrected as before.
+  const open = [...(sub.corrections || [])].reverse().find(c => !c.resolvedAt) || null;
+  const ticked = new Set<CorrectionField>((open?.items || []).map(i => i.field));
+  const may = (f: CorrectionField) => !open || ticked.has(f);
+  const body: any = { ...(req.body || {}) };
+  if (!may("periodCovered")) { delete body.periodCoveredFrom; delete body.periodCoveredTo; }
+  if (!may("responsibilityCenterCode")) delete body.responsibilityCenterCode;
+  if (!may("particulars")) { delete body.particulars; delete body.totalSpent; }
+  // The claim type decides whether there is an advance (and so a refund), so ticking it
+  // reopens the advance and its refund OR too.
+  if (!may("cashAdvance") && !may("claimType")) {
+    delete body.totalReleased; delete body.cashAdvanceDvNo; delete body.cashAdvanceDvDate;
+  }
+  if (!may("refundOr") && !may("claimType")) { delete body.refundOrNo; delete body.refundOrDate; }
+  if (!may("claimType")) delete body.claimType;
+  // A report filed before Box B existed must name one now, ticked or not.
+  if (!may("representative") && sub.representativeId) delete body.representativeId;
+  if (!may("remarks")) delete body.remarks;
+  if (!may("addDocument")) delete body.supportingDocs;
+
+  // Particulars ticked line by line: only those lines change, and the list keeps its shape.
+  const lineItem = open?.items.find(i => i.field === "particulars");
+  if (lineItem?.lineIds?.length && Array.isArray(body.particulars)) {
+    const sent = new Map<string, any>(body.particulars.filter((p: any) => p && p.id).map((p: any) => [String(p.id), p]));
+    const editOf = (p: any) => (lineItem.lineIds!.includes(p.id) ? sent.get(p.id) : undefined);
+    // A line reopened on its own is corrected, not removed (the form offers no Remove then).
+    const cleared = (sub.particulars || []).find((p: any) => {
+      const edit = editOf(p);
+      return edit && !String(edit.description ?? "").trim() && !(Number(edit.amount) > 0);
+    });
+    if (cleared) {
+      return res.status(400).json({ status: "error", message: `"${cleared.description}" was reopened for correction: correct it rather than clearing it.` });
+    }
+    body.particulars = (sub.particulars || []).map((p: any) => {
+      const edit = editOf(p);
+      return edit ? { ...p, description: edit.description, amount: edit.amount, category: edit.category } : p;
+    });
+    delete body.totalSpent;
+  }
+
+  // Files: a file is new when its id isn't on the report (or, for older files kept without
+  // an id, its name), so a form that sends back the files it was given adds nothing.
+  if (invalidSupportingDocs(body.supportingDocs)) {
+    return res.status(400).json({ status: "error", message: INVALID_DOCS_MESSAGE });
+  }
+  const storedDocs: any[] = Array.isArray(sub.supportingDocs) ? sub.supportingDocs : [];
+  const storedDocIds = new Set(storedDocs.map((d: any) => d?.id).filter(Boolean));
+  const storedDocNames = new Set(storedDocs.map((d: any) => d?.name));
+  const newDocs: any[] = (body.supportingDocs || []).filter((d: any) => d.id ? !storedDocIds.has(d.id) : !storedDocNames.has(d.name));
+
+  // Files the reviewer asked to replace: each needs a new copy; the old one is kept as history.
+  const current = storedDocs.filter((d: any) => d && !d.supersededAt);
+  const replaceItem = open?.items.find(i => i.field === "replaceDocuments");
+  const sentReplacements: any[] = Array.isArray(body.replacements) ? body.replacements : [];
+  const replacements: { old: any; doc: any }[] = [];
+  for (const docId of replaceItem?.documentIds || []) {
+    const old = current.find((d: any) => d.id === docId);
+    const r = sentReplacements.find((x: any) => x && x.replaces === docId);
+    if (!old) continue; // already replaced in an earlier round
+    if (!r || !r.doc || typeof r.doc !== "object" || Array.isArray(r.doc)) {
+      return res.status(400).json({ status: "error", message: `Replace "${old.name}" before resubmitting: the reviewer asked for a new copy.` });
+    }
+    replacements.push({ old, doc: r.doc });
+  }
+  const fileProblem = [...newDocs, ...replacements.map(r => r.doc)].map(documentProblem).find(Boolean);
+  if (fileProblem) {
+    return res.status(400).json({ status: "error", message: fileProblem });
+  }
+  if (open && ticked.has("addDocument") && newDocs.length === 0) {
+    return res.status(400).json({ status: "error", message: "Attach the missing document the reviewer asked for before resubmitting." });
+  }
+
+  const {
+    totalSpent, remarks, particulars,
+    periodCoveredFrom, periodCoveredTo, responsibilityCenterCode,
+    cashAdvanceDvNo, cashAdvanceDvDate, refundOrNo, refundOrDate,
+    representativeId, claimType: claimTypeIn, totalReleased: releasedIn
+  } = body;
+  // For the record of what this correction actually changed.
+  const changeSnapshot = (s: any): Record<CorrectionField, string> => ({
+    periodCovered: JSON.stringify([s.periodCoveredFrom || "", s.periodCoveredTo || ""]),
+    responsibilityCenterCode: JSON.stringify(s.responsibilityCenterCode || ""),
+    particulars: JSON.stringify((s.particulars || []).map((p: any) => [p.id, p.description, p.amount, p.category])),
+    cashAdvance: JSON.stringify([s.totalReleased, s.cashAdvanceDvNo || "", s.cashAdvanceDvDate || ""]),
+    refundOr: JSON.stringify([s.refundOrNo || "", s.refundOrDate || ""]),
+    claimType: JSON.stringify(s.claimType || ""),
+    representative: JSON.stringify(s.representativeId || ""),
+    replaceDocuments: JSON.stringify((s.supportingDocs || []).filter((d: any) => d?.supersededAt).length),
+    // A replacement's new copy answers "replace", not "add".
+    addDocument: JSON.stringify((s.supportingDocs || []).filter((d: any) => d && !d.replaces).length),
+    remarks: JSON.stringify(s.remarks || "")
+  });
+  const beforeCorrection = changeSnapshot(sub);
+  // What the claimant could change: the ticked parts, the advance and refund OR when the
+  // claim type reopened, and Box B on a report filed before it existed. A change the server
+  // makes itself (Finance's record replacing a typed advance) isn't credited to them.
+  const hadRepresentative = !!sub.representativeId;
+  const claimantCouldChange = (f: CorrectionField) => may(f)
+    || ((f === "cashAdvance" || f === "refundOr") && may("claimType"))
+    || (f === "representative" && !hadRepresentative);
 
   const lines = normalizeParticulars(particulars);
   if (lines && lines.error) {
     return res.status(400).json({ status: "error", message: lines.error });
   }
 
+  // Box B: a new choice is checked and copied. Without one, the report keeps the person
+  // chosen at filing; a report filed before Box B existed must name one now, because the
+  // corrected form requires it.
+  let newRepresentative: Signatory | null = null;
+  if (representativeId !== undefined && representativeId !== null && representativeId !== "") {
+    newRepresentative = activeSignatoryById(representativeId, "Authorized Representative");
+    if (!newRepresentative) {
+      return res.status(400).json({ status: "error", message: "Choose an active Authorized Representative for Box B." });
+    }
+    if (isClaimantSignatory(newRepresentative, { employeeId: sub.employeeId, fullName: sub.employeeName })) {
+      return res.status(400).json({ status: "error", message: "Choose someone other than yourself for Box B." });
+    }
+  } else if (!sub.representativeId) {
+    return res.status(400).json({
+      status: "error",
+      message: hasActiveSignatory("Authorized Representative")
+        ? "Choose the Authorized Representative for Box B from the list."
+        : NO_REPRESENTATIVE_MESSAGE
+    });
+  }
+
+  // Claim type: a correction may change it, under the same rules as filing, and the cash
+  // advance it implies changes with it. Finance's record, when there is one, is the
+  // advance; otherwise the typed figures are, and a Reimbursement's are zero.
+  if (claimTypeIn !== undefined && !isClaimType(claimTypeIn)) {
+    return res.status(400).json({ status: "error", message: CHOOSE_CLAIM_TYPE_MESSAGE });
+  }
+  const claimType: ClaimType = isClaimType(claimTypeIn) ? claimTypeIn
+    : isClaimType(sub.claimType) ? sub.claimType
+    : (Number(sub.totalReleased) > 0 ? "Liquidation" : "Reimbursement");
+  const releasedGiven = !(releasedIn === undefined || releasedIn === null || releasedIn === "");
+  const releasedParsed = releasedGiven ? parsePeso(releasedIn) : null;
+  if (releasedGiven && releasedParsed === null) {
+    return res.status(400).json({ status: "error", message: ADVANCE_AMOUNT_MESSAGE });
+  }
+  // Only the parts open for correction are checked; the rest were set aside above.
+  const referenceProblem = coaReferenceProblem(body) || reportHeaderProblem(body, sub);
+  if (referenceProblem) {
+    return res.status(400).json({ status: "error", message: referenceProblem });
+  }
+  // Finance's record stays the advance once the report is linked to it, settled or not.
+  const recordedAdvance = advanceOnFileFor(sub);
+  const typedReleased = releasedParsed !== null ? releasedParsed
+    : claimType === "Reimbursement" ? 0 : round2(Number(sub.totalReleased || 0));
+  const typedDvNo = String((cashAdvanceDvNo !== undefined ? cashAdvanceDvNo : sub.cashAdvanceDvNo) || "").trim();
+  const claimProblem = claimTypeProblem(claimType, recordedAdvance, { released: typedReleased, dvNo: typedDvNo });
+  if (claimProblem) {
+    return res.status(400).json({ status: "error", message: claimProblem });
+  }
+  // Without particulars a plain total is read strictly, and when left out the stored one
+  // stands. An itemised report is corrected through its lines, never a typed total.
+  const spentGiven = !(totalSpent === undefined || totalSpent === null || totalSpent === "");
+  const typedSpent = spentGiven ? parsePeso(totalSpent) : null;
+  if (!lines && spentGiven && (typedSpent === null || (sub.particulars || []).length > 0)) {
+    return res.status(400).json({
+      status: "error",
+      message: (sub.particulars || []).length > 0
+        ? "This report is itemised: correct its particulars rather than the total."
+        : "Enter the total spent as an amount of zero or more."
+    });
+  }
+  const newSpent = lines ? lines.total : (typedSpent ?? round2(Number(sub.totalSpent || 0)));
+  if (claimType === "Reimbursement" && !(newSpent > 0)) {
+    return res.status(400).json({ status: "error", message: NOTHING_TO_REIMBURSE_MESSAGE });
+  }
+
   // Update details. An itemised correction recomputes the total from its lines; a
   // submission that was never itemised keeps accepting a plain typed figure.
+  // Recorded in the audit entry below when Box B changes.
+  const boxBChange = newRepresentative && newRepresentative.id !== sub.representativeId
+    ? `; Box B: ${sub.representativeName || "none"} → ${newRepresentative.fullName}`
+    : "";
+  if (newRepresentative) {
+    sub.representativeId = newRepresentative.id;
+    sub.representativeName = newRepresentative.fullName;
+    sub.representativePosition = newRepresentative.position;
+  }
+  // What the correction changes about the claim, recorded in the audit entry and named in
+  // HR's notice, so a lowered or removed advance can't pass unseen.
+  const before = { type: sub.claimType, released: round2(Number(sub.totalReleased || 0)), dv: String(sub.cashAdvanceDvNo || "") };
+  sub.claimType = claimType;
+  if (recordedAdvance) {
+    sub.cashAdvanceId = recordedAdvance.id;
+    sub.totalReleased = round2(Number(recordedAdvance.amount));
+    sub.cashAdvanceDvNo = recordedAdvance.dvNo;
+    sub.cashAdvanceDvDate = recordedAdvance.dvDate;
+  } else if (claimType === "Reimbursement") {
+    delete sub.cashAdvanceId;
+    sub.totalReleased = 0;
+    sub.cashAdvanceDvNo = "";
+    sub.cashAdvanceDvDate = "";
+  } else {
+    sub.totalReleased = typedReleased;
+    sub.cashAdvanceDvNo = typedDvNo;
+    if (typeof cashAdvanceDvDate === "string") sub.cashAdvanceDvDate = cashAdvanceDvDate;
+  }
+  const claimChanges: string[] = [];
+  if (before.type !== claimType) claimChanges.push(`claim type ${before.type || "none"} → ${claimType}`);
+  if (before.released !== sub.totalReleased || before.dv !== String(sub.cashAdvanceDvNo || "")) {
+    claimChanges.push(`cash advance PHP ${before.released.toFixed(2)} (DV ${before.dv || "none"}) → PHP ${round2(sub.totalReleased).toFixed(2)} (DV ${sub.cashAdvanceDvNo || "none"})`);
+  }
+  const claimTypeChange = claimChanges.length ? `; ${claimChanges.join("; ")}` : "";
+  // The claim as first stated stays on the report, so Finance, who pays and can check a
+  // voucher against its books, sees what it said before a correction changed it.
+  if (claimChanges.length) {
+    sub.claimBeforeCorrection = {
+      ...(sub.claimBeforeCorrection ?? { claimType: before.type, totalReleased: before.released, cashAdvanceDvNo: before.dv }),
+      changedAt: new Date().toISOString(),
+      changedBy: (req as any).user.fullName
+    };
+  }
   if (lines) sub.particulars = lines.particulars;
-  sub.totalSpent = lines ? lines.total : round2(Number(totalSpent || 0));
+  sub.totalSpent = newSpent;
   sub.remainingBalance = round2(sub.totalReleased - sub.totalSpent);
-  sub.remarks = remarks || sub.remarks;
+  // Sent only when open for correction, so clearing the notes really clears them.
+  if (typeof remarks === "string") sub.remarks = remarks.trim();
 
   // A correction can turn a settled report into a claim, or the reverse. Never downgrade
   // one already paid — that would silently reopen money the office has handed over.
@@ -3720,46 +4685,82 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   }
 
   // Header fields are only overwritten when the correction actually supplies them.
-  if (periodCoveredFrom !== undefined) sub.periodCoveredFrom = periodCoveredFrom;
-  if (periodCoveredTo !== undefined) sub.periodCoveredTo = periodCoveredTo;
-  if (responsibilityCenterCode !== undefined) sub.responsibilityCenterCode = responsibilityCenterCode;
-  if (cashAdvanceDvNo !== undefined) sub.cashAdvanceDvNo = cashAdvanceDvNo;
-  if (cashAdvanceDvDate !== undefined) sub.cashAdvanceDvDate = cashAdvanceDvDate;
-  if (refundOrNo !== undefined) sub.refundOrNo = refundOrNo;
-  if (refundOrDate !== undefined) sub.refundOrDate = refundOrDate;
+  if (typeof periodCoveredFrom === "string") sub.periodCoveredFrom = periodCoveredFrom;
+  if (typeof periodCoveredTo === "string") sub.periodCoveredTo = periodCoveredTo;
+  if (typeof responsibilityCenterCode === "string") sub.responsibilityCenterCode = responsibilityCenterCode;
+  // The DV fields were set with the claim type above. Only an advance can be refunded.
+  if (claimType === "Reimbursement") {
+    sub.refundOrNo = "";
+    sub.refundOrDate = "";
+  } else {
+    if (typeof refundOrNo === "string") sub.refundOrNo = refundOrNo;
+    if (typeof refundOrDate === "string") sub.refundOrDate = refundOrDate;
+  }
   if (!sub.serialNo) sub.serialNo = nextLiquidationSerialNo(new Date());
   if (!sub.entityName) sub.entityName = LR_ENTITY_NAME;
   if (!sub.fundCluster) sub.fundCluster = LR_FUND_CLUSTER;
   
-  if (supportingDocs && supportingDocs.length > 0) {
-    // Append unique documents to keep version history
-    const uniqueDocs = [...sub.supportingDocs];
-    for (const d of supportingDocs) {
-      if (!uniqueDocs.some(existing => existing.name === d.name)) {
-        uniqueDocs.push(d);
-      }
-    }
-    sub.supportingDocs = uniqueDocs;
+  // New files join the ones already on the report, which stay as they are.
+  if (newDocs.length > 0) {
+    sub.supportingDocs = [...storedDocs, ...claimantDocuments(newDocs, storedDocs)];
   }
+  // A replaced file stays on the report, marked superseded, next to its new copy.
+  const replacedAt = new Date().toISOString();
+  replacements.forEach(({ old, doc }) => {
+    const fresh: LiquidationDocument = {
+      ...claimantDocuments([doc])[0],
+      id: `doc-${crypto.randomUUID()}`,
+      uploadedAt: replacedAt,
+      replaces: old.id
+    };
+    old.supersededAt = replacedAt;
+    old.replacedBy = fresh.id;
+    sub.supportingDocs.push(fresh);
+  });
 
-  // Revert statuses for workflow loop re-execution
-  sub.status = "Pending HR Review";
-  sub.hrStatus = "Pending Review";
+  // The corrected report goes back to whoever returned it (open question 5): to HR, or to
+  // Finance with HR's verification still standing. A report returned before checklists
+  // existed goes to HR, as it always did.
+  const backTo = open?.returnTo ?? "Pending HR Review";
+  const afterCorrection = changeSnapshot(sub);
+  const changedFields = CORRECTABLE_FIELDS.filter(f => claimantCouldChange(f) && beforeCorrection[f] !== afterCorrection[f]);
+  if (open) {
+    open.resolvedAt = new Date().toISOString();
+    open.changedFields = changedFields;
+  }
+  sub.status = backTo;
+  sub.hrStatus = backTo === "Verified & Forwarded" ? "Verified & Forwarded" : "Pending Review";
   sub.financeStatus = "Pending Validation";
   sub.divisionChiefStatus = "Pending Chief Approval";
+  // Box C is copied again when Finance validates the corrected report.
+  delete sub.accountantSignatoryId;
+  delete sub.accountantName;
+  delete sub.accountantPosition;
 
   if (!db.notifications) db.notifications = [];
   db.notifications.push({
     id: `notif-${Date.now()}`,
     title: "Liquidation Report Resubmitted",
-    message: `${(req as any).user.fullName} corrected and resubmitted liquidation report ${sub.submissionNo}.`,
+    message: `${(req as any).user.fullName} corrected and resubmitted liquidation report ${sub.submissionNo}.${claimChanges.length ? ` Changed: ${claimChanges.join("; ")}.` : ""}`,
     isRead: false,
     type: "info",
     timestamp: new Date().toISOString(),
-    targetRole: UserRole.HR_OFFICER
+    targetRole: backTo === "Verified & Forwarded" ? UserRole.FINANCE_OFFICER : UserRole.HR_OFFICER
   });
+  if (claimChanges.length) {
+    db.notifications.push({
+      id: `notif-${Date.now()}-claim`,
+      title: "Corrected claim: check the cash advance",
+      message: `${sub.submissionNo} was corrected by ${(req as any).user.fullName}. Changed: ${claimChanges.join("; ")}. Check the voucher before validating.`,
+      isRead: false,
+      type: "warning",
+      timestamp: new Date().toISOString(),
+      targetRole: UserRole.FINANCE_OFFICER
+    });
+  }
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Resubmit Liquidation", `Resubmitted liquidation report: ${sub.submissionNo}`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Resubmit Liquidation",
+    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}`);
   saveDB();
   res.json({ status: "success", data: sub });
 });
@@ -3773,6 +4774,15 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, (req: a
 
   const sub = db.liquidationSubmissions.find(l => l.id === id);
   if (!sub) return res.status(404).json({ status: "error", message: "Submission records not found" });
+  if (action !== "Verify" && action !== "Return") {
+    return res.status(400).json({ status: "error", message: 'The action must be "Verify" or "Return".' });
+  }
+  // HR acts only while the report waits for it (a second click or a stale screen can't
+  // move a report that has already gone on).
+  if (sub.status !== "Pending HR Review") {
+    return res.status(409).json({ status: "error", message: `${sub.submissionNo} isn't waiting for HR verification (it is ${sub.status}).` });
+  }
+  let returnNote = "";
 
   if (action === "Verify") {
     sub.hrStatus = "Verified & Forwarded";
@@ -3792,24 +4802,18 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, (req: a
       targetRole: UserRole.FINANCE_OFFICER
     });
   } else {
+    // A Return carries the checklist of what to correct; the corrected report comes back to HR.
+    const parsed = correctionRequestFrom(req.body, sub, req.user, "Pending HR Review");
+    if ("error" in parsed) return res.status(400).json({ status: "error", message: parsed.error });
+    sub.corrections = [...(sub.corrections || []), parsed.request];
     sub.hrStatus = "Returned by HR";
-    sub.hrRemarks = remarks || "Assigned activity/employee mismatch; returned for revision.";
+    sub.hrRemarks = parsed.request.remarks;
     sub.status = "Returned";
-    
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
-      title: "Liquidation Submission Returned",
-      message: `Your liquidation report ${sub.submissionNo} was returned by HR: ${remarks}`,
-      isRead: false,
-      type: "warning",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: sub.employeeId
-    });
+    notifyReportReturned(sub, "HR", parsed.request);
+    returnNote = ` (round ${parsed.request.round}: ${parsed.request.items.map(i => i.field).join(", ")})`;
   }
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "HR Verify Liquidation", `HR evaluated liquidation ${sub.submissionNo} with action ${action}`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "HR Verify Liquidation", `HR evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
   saveDB();
   res.json({ status: "success", data: sub });
 });
@@ -3824,20 +4828,58 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
 
   const sub = db.liquidationSubmissions.find(l => l.id === id);
   if (!sub) return res.status(404).json({ status: "error", message: "Submission records not found" });
+  if (action !== "Validate" && action !== "Return") {
+    return res.status(400).json({ status: "error", message: 'The action must be "Validate" or "Return".' });
+  }
+  // Finance acts only on a report HR has verified. This is also what stops a second
+  // Validate from counting the same spending twice.
+  if (sub.status !== "Verified & Forwarded") {
+    return res.status(409).json({ status: "error", message: `${sub.submissionNo} isn't waiting for Finance validation (it is ${sub.status}).` });
+  }
+  let returnNote = "";
 
   if (action === "Validate") {
+    // Counted once: a report validated (or, under the old rules, approved by the Division
+    // Chief) may since have been returned and come back.
+    if (sub.financeValidatedAt || sub.divisionChiefApprovedAt) {
+      return res.status(409).json({ status: "error", message: `${sub.submissionNo} was already validated or approved, so its spending is already counted.` });
+    }
+    // Box C prints the Accountant on duty at validation. With none appointed nothing
+    // changes: the report waits until the Administrator appoints one.
+    const accountant = (db.signatories || []).find(s => s.role === "Accountant" && s.status === "Active");
+    if (!accountant) {
+      return res.status(409).json({
+        status: "error",
+        message: "No active Accountant to sign Box C. Ask the Administrator to appoint one in Utilities → Manage Signatories, then validate this report."
+      });
+    }
+    // The report must agree with the cash advance on file: a Reimbursement has none, and a
+    // Liquidation carries Finance's figure. Otherwise validating would settle the advance
+    // and still owe the claim, paying twice, so it has to come back corrected first.
+    const mismatch = advanceMismatch(sub);
+    if (mismatch) {
+      return res.status(409).json({ status: "error", message: `${mismatch} Return it so the employee can correct it.` });
+    }
+    // A copy, so appointing a new Accountant later never rewrites this report.
+    sub.accountantSignatoryId = accountant.id;
+    sub.accountantName = accountant.fullName;
+    sub.accountantPosition = accountant.position;
+
     sub.financeStatus = "Validated & Approved";
     sub.financeRemarks = remarks || "Financial documentations, vouchers, and ledger matching validated and finalized.";
     sub.financeValidatedBy = (req as any).user.fullName;
     sub.financeValidatedAt = new Date().toISOString();
     
     // HSAC RAB 1 delegates box B of the COA Liquidation Report ("Head of Agency /
-    // Authorized Representative") to the Financial Officer. This is a documented business
-    // rule from the stakeholder interview — the Chief's approval is not skipped, it is
-    // signed by the authorised representative the form itself provides for. Record who
-    // certified it: box B is a signature line, and "System" cannot sign one.
+    // Authorized Representative") — the Chief's approval is not skipped, it is signed by
+    // the authorised representative the form itself provides for. Reports filed with a
+    // Box B signatory (Utilities → Manage Signatories) name that person; older reports
+    // record the Financial Officer, who certified them under delegated authority.
+    // divisionChiefApprovedBy stays the record of who clicked Validate.
     sub.divisionChiefStatus = "Certified by Authorized Representative";
-    sub.divisionChiefRemarks = "Certified by the Financial Officer under delegated authority.";
+    sub.divisionChiefRemarks = sub.representativeName
+      ? `Box B certified by ${sub.representativeName}${sub.representativePosition ? `, ${sub.representativePosition}` : ""}; validated by the Financial Officer.`
+      : "Certified by the Financial Officer under delegated authority.";
     sub.divisionChiefApprovedBy = (req as any).user.fullName;
     sub.divisionChiefApprovedAt = new Date().toISOString();
     sub.status = "Completed";
@@ -3919,7 +4961,8 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
       amount: sub.totalSpent,
       description: `Official travel liquidation for activity: ${act ? act.title : sub.submissionNo}`,
       status: TransactionStatus.LIQUIDATED,
-      supportingDocuments: sub.supportingDocs.map((d: any) => ({
+      // The files the claim stands on now; copies a correction replaced stay on the report.
+      supportingDocuments: (Array.isArray(sub.supportingDocs) ? sub.supportingDocs : []).filter((d: any) => d && !d.supersededAt).map((d: any) => ({
         id: d.id,
         name: d.name,
         type: d.type,
@@ -3980,24 +5023,19 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
       });
     }
   } else {
+    // A Return carries the checklist; the corrected report comes straight back to Finance,
+    // since HR's verification still stands (open question 5).
+    const parsed = correctionRequestFrom(req.body, sub, req.user, "Verified & Forwarded");
+    if ("error" in parsed) return res.status(400).json({ status: "error", message: parsed.error });
+    sub.corrections = [...(sub.corrections || []), parsed.request];
     sub.financeStatus = "Returned by Finance";
-    sub.financeRemarks = remarks || "Receipt vouchers incomplete; returned for clarification.";
+    sub.financeRemarks = parsed.request.remarks;
     sub.status = "Returned";
-
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
-      title: "Liquidation Submission Returned (Finance)",
-      message: `Your liquidation report ${sub.submissionNo} was returned by Finance: ${remarks}`,
-      isRead: false,
-      type: "warning",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: sub.employeeId
-    });
+    notifyReportReturned(sub, "Finance", parsed.request);
+    returnNote = ` (round ${parsed.request.round}: ${parsed.request.items.map(i => i.field).join(", ")})`;
   }
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
   saveDB();
   res.json({ status: "success", data: sub });
 });
@@ -4024,6 +5062,16 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
   }
   if (sub.status !== "Completed") {
     return res.status(400).json({ status: "error", message: "Validate the liquidation report before releasing a reimbursement." });
+  }
+  // What is paid must still agree with the advance on file and with the report's own
+  // figures, or the same money goes out twice.
+  const mismatch = advanceMismatch(sub);
+  const expected = round2(Math.max(0, Number(sub.totalSpent || 0) - Number(sub.totalReleased || 0)));
+  if (mismatch || expected !== owed) {
+    return res.status(409).json({
+      status: "error",
+      message: `${mismatch || `${sub.submissionNo}'s figures no longer come to PHP ${owed.toFixed(2)} owed.`} It can't be paid until the report and the cash advance agree.`
+    });
   }
   if (!String(dvNo || "").trim() || !isIsoDate(date)) {
     return res.status(400).json({ status: "error", message: "A disbursement voucher number and a payment date are required." });
@@ -4119,7 +5167,12 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
     const facts = liquidationActivityFacts(p.id);
     const forms = employeeIdForms(p.employeeId);
     const advance = advanceFor(p.id, forms);
+    // Someone who did not attend gets no new advance and no liquidation form. One already
+    // released stays listed, flagged, so Finance collects it back in full.
+    const didNotAttend = p.attendance === "Did not attend";
+    if (didNotAttend && !(advance && advance.status === "Released")) continue;
     rows.push({
+      didNotAttend,
       activityId: p.id,
       activityTitle: facts ? facts.title : "Seminar",
       employeeId: emp.employeeId,
@@ -4189,6 +5242,10 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
   if (!facts) {
     return res.status(404).json({ status: "error", message: "That assignment no longer exists." });
   }
+  const enrolment = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
+  if (enrolment?.attendance === "Did not attend") {
+    return res.status(400).json({ status: "error", message: "HR recorded that this participant did not attend the seminar, so no cash advance can be released." });
+  }
   // HR's allocation is a ceiling. Releasing more than was set aside has to go back to HR
   // rather than be quietly absorbed here.
   if (facts.allocated > 0 && released > facts.allocated) {
@@ -4204,6 +5261,16 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     return res.status(400).json({
       status: "error",
       message: `${emp.fullName} already has an open advance for this assignment (${existing.advanceNo}, DV ${existing.dvNo}).`
+    });
+  }
+  // Once a report has been filed for the assignment, a new advance could never be settled
+  // (one report per assignment) and would pay twice for one activity. If the employee did
+  // receive an advance, their report is corrected to a Liquidation instead.
+  const filed = (db.liquidationSubmissions || []).find((l: any) => l.activityId === activityId);
+  if (filed) {
+    return res.status(409).json({
+      status: "error",
+      message: `${filed.submissionNo} has already been filed for this assignment, so no advance can be released for it. If the employee did receive one, return the report so they can correct it to a Liquidation.`
     });
   }
 
@@ -4243,107 +5310,16 @@ app.put("/api/liquidation-submissions/:id/chief-action", authenticateToken, (req
   if ((req as any).user.role !== UserRole.SUPER_ADMIN) {
     return res.status(403).json({ status: "error", message: "Only Division Chief can give the final seal" });
   }
-  const { id } = req.params;
-  const { action, remarks } = req.body; // action: "Approve" | "Reject" | "Return"
-
-  const sub = db.liquidationSubmissions.find(l => l.id === id);
+  const sub = db.liquidationSubmissions.find(l => l.id === req.params.id);
   if (!sub) return res.status(404).json({ status: "error", message: "Submission records not found" });
-
-  if (action === "Approve") {
-    sub.divisionChiefStatus = "Approved";
-    sub.divisionChiefRemarks = remarks || "Final liquidation approved. Record is finalized.";
-    sub.divisionChiefApprovedBy = (req as any).user.fullName;
-    sub.divisionChiefApprovedAt = new Date().toISOString();
-    sub.status = "Approved";
-
-    const act = db.activities.find(a => a.id === sub.activityId);
-
-    // Same automatic deduction as the Finance path. The idempotency guard inside
-    // autoDeductLiquidation makes running both harmless.
-    try {
-      autoDeductLiquidation(sub, {
-        id: (req as any).user.id,
-        username: (req as any).user.username,
-        role: (req as any).user.role
-      });
-    } catch (error) {
-      console.error("Auto budget deduction failed for", sub.submissionNo, error);
-    }
-
-    db.financialTransactions.push({
-      id: `tx-${Date.now()}`,
-      transactionId: `TX-LIQ-${Date.now().toString().slice(-4)}`,
-      transactionDate: new Date().toISOString().split("T")[0],
-      supplier: "Regional Expenses",
-      amount: sub.totalSpent,
-      description: `Official travel liquidation for activity: ${act ? act.title : sub.submissionNo}`,
-      status: TransactionStatus.LIQUIDATED,
-      supportingDocuments: sub.supportingDocs.map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        type: d.type,
-        filename: d.filename,
-        uploadedAt: d.uploadedAt,
-        validationStatus: "Validated"
-      })),
-      history: [
-        { id: `his-${Date.now()}`, status: TransactionStatus.LIQUIDATED, changedBy: (req as any).user.fullName, changedAt: new Date().toISOString(), remarks: "Approved and finalized from Employee Liquidation submission" }
-      ],
-      employeeRef: sub.employeeId,
-      department: "Administrative and Finance Division",
-      category: "Travel",
-      createdBy: sub.employeeName,
-      dateCreated: new Date().toISOString()
-    });
-
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
-      title: "Liquidation APPROVED",
-      message: `Your liquidation report ${sub.submissionNo} has received the final approved seal from Division Chief Hon. Romeo M. Alcantara!`,
-      isRead: false,
-      type: "success",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: sub.employeeId
-    });
-  } else if (action === "Return") {
-    sub.divisionChiefStatus = "Returned by Chief";
-    sub.divisionChiefRemarks = remarks || "Returned for revisions by Division Chief.";
-    sub.status = "Returned";
-
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
-      title: "Liquidation Submission Returned by Division Chief",
-      message: `Your liquidation report ${sub.submissionNo} was returned for adjustments by Division Chief: ${remarks}`,
-      isRead: false,
-      type: "warning",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: sub.employeeId
-    });
-  } else {
-    sub.divisionChiefStatus = "Rejected";
-    sub.divisionChiefRemarks = remarks || "Disapproved by Division Chief.";
-    sub.status = "Rejected";
-
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
-      title: "Liquidation Submission REJECTED",
-      message: `Your liquidation report ${sub.submissionNo} was Rejected by Division Chief: ${remarks}`,
-      isRead: false,
-      type: "urgent",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: sub.employeeId
-    });
-  }
-
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Chief Final Liquidation Seal", `Chief evaluated liquidation ${sub.submissionNo} with action ${action}`);
-  saveDB();
-  res.json({ status: "success", data: sub });
+  // Liquidation reports are verified by HR and validated by Finance, which certifies Box B
+  // for the Division Chief under delegated authority (a documented RAB 1 rule). The Chief no
+  // longer approves, returns or rejects them here; this used to act at any stage, even
+  // before HR or Finance had checked the report (open question 9).
+  return res.status(409).json({
+    status: "error",
+    message: `${sub.submissionNo} is verified by HR and validated by Finance, which certifies it for the Division Chief. The Division Chief doesn't approve, return or reject liquidation reports here.`
+  });
 });
 
 
@@ -4475,6 +5451,8 @@ function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef):
   const forms = employeeIdForms(employeeId);
   for (const p of db.trainingParticipants || []) {
     if (!forms.includes(p.employeeId) || p.status === "Cancelled") continue;
+    // HR recorded that they did not attend: no reason to keep them from enrolling again.
+    if (p.attendance === "Did not attend") continue;
     if (program.id && p.trainingProgramId === program.id) continue;
     const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
     if (prog && sameSeminar(prog, program)) {
@@ -4607,6 +5585,13 @@ function onOrBeforeAsOf(dateStr: string | null, asOf: string): boolean {
 }
 
 // Plan D: did this employee already take the training they were listed as needing?
+// Whether an enrolment counts as attended (Plan D): HR's attendance record when there is
+// one; for an enrolment never marked, the older evidence of a filed or settled report.
+function participantAttended(p: any): boolean {
+  if (p.attendance) return p.attendance === "Attended";
+  return p.status === "Liquidated" || p.status === "Liquidation Pending" || p.status === "Completed";
+}
+
 function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatus {
   if (typeof need.accomplishedOverride === "boolean") {
     return { accomplished: need.accomplishedOverride, source: "override" };
@@ -4617,7 +5602,7 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
   // 1. A seminar HR explicitly linked to this need — exact, no title guessing.
   for (const p of db.trainingParticipants || []) {
     if (!forms.includes(p.employeeId)) continue;
-    if (p.status !== "Liquidated" && p.status !== "Liquidation Pending" && p.status !== "Completed") continue;
+    if (!participantAttended(p)) continue;
     const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
     if (!prog || !(prog.fulfillsNeedTitles || []).some(t => normalizeTitle(t) === needKey)) continue;
     const when = toIsoDateLoose(prog.endDate);
@@ -4633,7 +5618,7 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
   // 2. A seminar whose title matches, for seminars created before the link existed.
   for (const p of db.trainingParticipants || []) {
     if (!forms.includes(p.employeeId)) continue;
-    if (p.status !== "Liquidated" && p.status !== "Liquidation Pending" && p.status !== "Completed") continue;
+    if (!participantAttended(p)) continue;
     const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
     if (!prog || !titlesMatch(need.title, prog.title)) continue;
     const when = toIsoDateLoose(prog.endDate);
@@ -5926,13 +6911,16 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
       if (p.status === "Cancelled") continue;
       const forms = employeeIdForms(p.employeeId);
       const stillSelected = forms.some(f => requested.has(f));
-      if (!stillSelected && p.status === "Assigned") {
+      // An enrolment with attendance on record is history, so editing the roster keeps it.
+      if (!stillSelected && p.status === "Assigned" && !p.attendance) {
         removedIds.add(p.id);
         continue;
       }
       if (!stillSelected) {
         const emp = (db.employees || []).find(e => forms.includes(e.id));
-        skippedMessages.push(`${emp ? emp.fullName : p.employeeId} was kept: their liquidation is already ${p.status === "Liquidated" ? "complete" : "in progress"}.`);
+        skippedMessages.push(p.status === "Assigned"
+          ? `${emp ? emp.fullName : p.employeeId} was kept: their attendance is already recorded.`
+          : `${emp ? emp.fullName : p.employeeId} was kept: their liquidation is already ${p.status === "Liquidated" ? "complete" : "in progress"}.`);
       }
       // Budget or head-count edits re-price only allowances nobody has liquidated yet.
       if (p.status === "Assigned") p.allowanceAllocated = participantAllowance(program);
@@ -5960,35 +6948,89 @@ app.delete("/api/training/programs/:id", authenticateToken, (req: any, res: any)
   res.json({ status: "success" });
 });
 
-app.post("/api/training/participants/:id/approve_liquidation", authenticateToken, (req: any, res: any) => {
-  const { id } = req.params;
-  
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.HR_OFFICER) {
-    return res.status(403).json({ status: "error", message: "Unauthorized" });
-  }
-
-  const pIndex = db.trainingParticipants.findIndex(p => p.id === id);
-  if (pIndex !== -1) {
-    db.trainingParticipants[pIndex].status = "Liquidated";
-    
-    // Auto-update the program's used budget based on the participant's allocation (or actual liquidation amount if we were tracking it)
-    const progIndex = db.trainingPrograms.findIndex(prog => prog.id === db.trainingParticipants[pIndex].trainingProgramId);
-    if (progIndex !== -1) {
-      db.trainingPrograms[progIndex].usedBudget += db.trainingParticipants[pIndex].allowanceAllocated || 0;
-    }
-    
-    saveDB();
-    res.json({ status: "success", message: "Liquidation approved and recorded in history." });
-  } else {
-    res.status(404).json({ status: "error", message: "Participant record not found" });
-  }
-});
+// POST /api/training/participants/:id/approve_liquidation was retired: it marked any
+// enrolment Liquidated with no report and no attendance, and charged the allowance (not
+// what was spent) to the seminar. Nothing called it. A seminar is settled only through a
+// liquidation report that Finance validates.
 
 app.get("/api/training/participants", authenticateToken, (req: any, res: any) => {
   if (!isTrainingRecordsRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Training program details are restricted to HR." });
   }
   res.json({ status: "success", data: db.trainingParticipants || [] });
+});
+
+// Attendance: HR records it per participant once the seminar has started. It is stored
+// apart from the liquidation status, and only "Attended" opens the liquidation form
+// (seminarFormEligibility). Marking someone Attended tells them their form is ready.
+app.put("/api/training/participants/:id/attendance", authenticateToken, (req: any, res: any) => {
+  if (req.user.role !== UserRole.HR_OFFICER) {
+    return res.status(403).json({ status: "error", message: "Only HR records seminar attendance." });
+  }
+  const participant = (db.trainingParticipants || []).find((p: any) => p.id === req.params.id);
+  if (!participant) return res.status(404).json({ status: "error", message: "Enrolment not found." });
+  const attendance = req.body?.attendance;
+  if (attendance !== "Attended" && attendance !== "Did not attend") {
+    return res.status(400).json({ status: "error", message: 'Attendance must be "Attended" or "Did not attend".' });
+  }
+  if (participant.status === "Cancelled" || participant.status === "Archived") {
+    return res.status(400).json({ status: "error", message: "This enrolment was cancelled." });
+  }
+  const prog = (db.trainingPrograms || []).find((p: any) => p.id === participant.trainingProgramId);
+  if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  const start = isIsoDate(prog.startDate) ? String(prog.startDate).slice(0, 10) : "";
+  if (!start || start > manilaToday()) {
+    return res.status(400).json({ status: "error", message: `Attendance can be recorded once the seminar starts${start ? ` on ${start}` : ""}.` });
+  }
+  if (attendance === "Did not attend") {
+    const report = (db.liquidationSubmissions || []).find((s: any) => s.activityId === participant.id);
+    if (report) {
+      return res.status(409).json({ status: "error", message: `This participant filed liquidation report ${report.submissionNo}, so they can't be marked as not attending.` });
+    }
+  }
+  if (participant.attendance === attendance) {
+    return res.json({ status: "success", message: "Attendance was already recorded that way.", data: participant });
+  }
+
+  const actor = req.user;
+  const previous = participant.attendance || "not recorded";
+  participant.attendance = attendance;
+  participant.attendanceBy = actor.fullName;
+  participant.attendanceAt = new Date().toISOString();
+
+  const emp = (db.employees || []).find((e: any) => e.id === participant.employeeId || e.employeeId === participant.employeeId);
+  // The form opens in the Employee Portal, which needs a Personnel login. Only then is
+  // there someone to notify (and never an untargeted notice every employee would see).
+  const personnelLogin = emp?.employeeId
+    ? (db.users || []).find((u: any) => u.employeeId === emp.employeeId && u.role === UserRole.EMPLOYEE && u.status !== "Archived")
+    : null;
+  const name = emp ? emp.fullName : participant.employeeId;
+  if (attendance === "Attended" && personnelLogin) {
+    if (!db.notifications) db.notifications = [];
+    db.notifications.push({
+      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      title: "Your liquidation form is ready",
+      message: `Your liquidation form for "${String(prog.title).trim()}" is ready. Click here, or the seminar's title under My Assigned Activities, to open it.`,
+      type: "info",
+      isRead: false,
+      timestamp: new Date().toISOString(),
+      targetRole: UserRole.EMPLOYEE,
+      targetEmployeeId: emp.employeeId,
+      link: { tab: "employee_portal", liquidationActivityId: participant.id }
+    });
+  }
+  logEvent(actor.id, actor.username, actor.role, "Record Attendance",
+    `${name} at "${String(prog.title).trim()}": ${previous} → ${attendance}`);
+  saveDB();
+  res.json({
+    status: "success",
+    message: attendance === "Did not attend"
+      ? `${name} is marked as not attending, so no liquidation form will open for them.`
+      : personnelLogin
+        ? `${name} is marked as attended. Their liquidation form is open, and they have been notified.`
+        : `${name} is marked as attended. They have no Personnel login, so they can't open the form in the Employee Portal yet.`,
+    data: participant
+  });
 });
 
 app.post("/api/training/participants", authenticateToken, (req: any, res: any) => {

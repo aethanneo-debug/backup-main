@@ -167,21 +167,30 @@ export default function LiquidationReportForm({ submission }: LiquidationReportF
               signedAt={submission.dateSubmitted || submission.createdAt}
               className="border-r border-black"
             />
-            {/* Box B is signed by the Financial Officer under delegated authority at RAB 1 -
-                the form's "Representative". This is not a skipped approval. */}
+            {/* Box B: the Authorized Representative chosen at filing and Box C: the Accountant
+                on duty at validation, both copied onto the report from Utilities → Manage
+                Signatories, so a later replacement never rewrites it. Reports filed before
+                those copies existed print as they always did: the Financial Officer who
+                validated under delegated authority (not a skipped approval). */}
+            {/* The representative signs and dates Box B by hand, so a new report leaves its
+                date blank; older reports keep the validation date they always printed. */}
             <CertificationCell
               letter="B"
               statement="Purpose of travel / cash advance duly accomplished"
-              name={submission.divisionChiefApprovedBy}
-              caption="Representative"
-              signedAt={submission.divisionChiefApprovedAt}
+              name={submission.representativeName || submission.divisionChiefApprovedBy}
+              caption={submission.representativeName ? (submission.representativePosition || "Representative") : "Representative"}
+              signedAt={submission.representativeName ? undefined : submission.divisionChiefApprovedAt}
               className="border-r-2 border-black"
             />
+            {/* A new report not yet validated has no Accountant copy yet: "Accountant" until
+                then. Only reports from before the signatory copies print "Accountant III". */}
             <CertificationCell
               letter="C"
               statement="Supporting documents complete and proper"
-              name={submission.financeValidatedBy}
-              caption="Accountant III"
+              name={submission.accountantName || submission.financeValidatedBy}
+              caption={submission.accountantName
+                ? (submission.accountantPosition || "Accountant")
+                : submission.representativeName ? "Accountant" : "Accountant III"}
               signedAt={submission.financeValidatedAt}
               jevNo={submission.jevNo ?? ""}
             />

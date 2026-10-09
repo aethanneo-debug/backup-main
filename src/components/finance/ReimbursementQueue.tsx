@@ -3,6 +3,13 @@ import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Wallet } from "lucide-
 import { apiCall, formatCurrency, formatDate } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
 import { overspendOf, OverspendBadge } from "../liquidation/overspend";
+import {
+  ClaimTypeBadge,
+  ClaimTypeFilter,
+  ClaimTypeFilterEmpty,
+  ClaimTypeFilterValue,
+  matchesClaimType
+} from "../liquidation/ClaimType";
 
 interface Props {
   /** Every liquidation submission Finance can see. Filtered here, not by the caller. */
@@ -37,6 +44,10 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Liquidations that spent more than the advance and Reimbursements (paid out of pocket)
+  // both end up here; the filter tells them apart (instructor's note 10).
+  const [filter, setFilter] = useState<ClaimTypeFilterValue>("All");
+
   const claims = useMemo(
     () => (submissions ?? []).filter(
       s => s?.reimbursementStatus === "Awaiting Reimbursement" && Number(s?.reimbursementAmount || 0) > 0
@@ -47,8 +58,11 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
   // The server refuses to release money on a report that is not yet validated, so showing
   // a "Record Payment" button on one would only produce a 400. Those claims are counted
   // below instead, so Finance can still see money is coming.
-  const pending = useMemo(() => claims.filter(s => s.status === "Completed"), [claims]);
+  const payable = useMemo(() => claims.filter(s => s.status === "Completed"), [claims]);
   const notYetValidated = useMemo(() => claims.filter(s => s.status !== "Completed"), [claims]);
+  // The filter narrows the list Finance acts on, the claims ready to pay; its counts are
+  // of that list too, so they agree with the header.
+  const pending = useMemo(() => payable.filter(s => matchesClaimType(s, filter)), [payable, filter]);
 
   const settled = useMemo(
     () => (submissions ?? [])
@@ -105,21 +119,33 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
     <SectionCard
       icon={<HandCoins size={12} className="text-blue-600" aria-hidden="true" />}
       title="Reimbursement Queue"
-      action={<SectionCount>{pending.length}</SectionCount>}
+      action={<SectionCount>{payable.length}</SectionCount>}
       caption="Money Back"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-[11px] text-slate-500 max-w-2xl">
-          Employees who paid out of their own pocket because the cash advance never reached
-          them. Validating the liquidation does not release any money &mdash; record the
-          disbursement voucher here to close the claim.
+          Money owed to employees: Reimbursements, paid out of their own pocket, and Liquidations
+          that spent more than the cash advance. Validating the report does not release any
+          money &mdash; record the disbursement voucher here to close the claim.
         </p>
-        {pending.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right shrink-0">
-            <span className="block text-[9px] font-mono font-bold uppercase tracking-wider text-amber-700">Total Owed</span>
-            <strong className="text-sm font-mono text-amber-800">{formatCurrency(owedTotal)}</strong>
-          </div>
-        )}
+        <div className="flex shrink-0 items-start gap-2">
+          {payable.length > 0 && (
+            <ClaimTypeFilter
+              value={filter}
+              onChange={setFilter}
+              items={payable}
+              label="Filter the claims ready to pay by claim type"
+            />
+          )}
+          {pending.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+              <span className="block text-[9px] font-mono font-bold uppercase tracking-wider text-amber-700">
+                Total Owed{filter !== "All" ? ` (${filter})` : ""}
+              </span>
+              <strong className="text-sm font-mono text-amber-800">{formatCurrency(owedTotal)}</strong>
+            </div>
+          )}
+        </div>
       </div>
 
       {notYetValidated.length > 0 && (
@@ -131,7 +157,9 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
         </p>
       )}
 
-      {pending.length === 0 ? (
+      {pending.length === 0 && payable.length > 0 ? (
+        <ClaimTypeFilterEmpty filter={filter} onShowAll={() => setFilter("All")} what="claims ready to pay" />
+      ) : pending.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
           <Wallet size={28} className="mx-auto text-slate-400 mb-2" />
           <p className="text-xs font-semibold text-slate-600">No reimbursements ready to pay</p>
@@ -146,9 +174,20 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
             const isOpen = openId === sub.id;
             return (
               <div key={sub.id} className="p-4 border border-amber-200 rounded-xl bg-amber-50/20 space-y-3">
-                {mismatch(sub) && (
+                {/* A Reimbursement always shows HR's allocation without an advance, and the
+                    server already refuses to pay one with an advance on record, so it gets a
+                    reminder rather than an alarm. */}
+                {mismatch(sub) && sub.claimType === "Reimbursement" ? (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-2">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>
+                      HR set aside <strong>{formatCurrency(Number(sub.allocatedAtFiling))}</strong> for this
+                      assignment and no cash advance is on record. Pay only if none was released outside the system.
+                    </span>
+                  </p>
+                ) : mismatch(sub) && (
                   <p className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5" aria-hidden="true" />
                     <span>
                       HR set aside <strong>{formatCurrency(Number(sub.allocatedAtFiling))}</strong> for this
                       assignment, but the claimant reports receiving{" "}
@@ -162,6 +201,7 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
                   <span className="text-[10px] font-mono bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
                     {sub.serialNo || sub.submissionNo}
                   </span>
+                  <ClaimTypeBadge claimType={sub.claimType} />
                   {/* An out-of-pocket claim often IS an overspend; say so at payment time. */}
                   {overspendOf(sub) && <OverspendBadge over={overspendOf(sub)!} />}
                   <span className="text-[10px] text-slate-400 font-mono">
@@ -280,6 +320,7 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
                 <span className="flex items-center gap-2 min-w-0">
                   <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
                   <span className="font-mono text-slate-500">{sub.serialNo || sub.submissionNo}</span>
+                  <ClaimTypeBadge claimType={sub.claimType} />
                   <span className="text-slate-700 truncate">{sub.employeeName}</span>
                 </span>
                 <span className="text-slate-500 font-mono shrink-0">

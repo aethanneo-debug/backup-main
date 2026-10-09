@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, UserRole, Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest } from "./types";
+import { User, UserRole, Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest, NotificationLink } from "./types";
 import { apiCall } from "./utils";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -10,6 +10,7 @@ import AssetsView from "./components/AssetsView";
 import RequestsView from "./components/RequestsView";
 import AuditView from "./components/AuditView";
 import BackupRestoreView from "./components/BackupRestoreView";
+import ManageSignatoriesView from "./components/utilities/ManageSignatoriesView";
 import ReportsView from "./components/ReportsView";
 import HsacLogo from "./components/HsacLogo";
 import UserAccountsView from "./components/UserAccountsView";
@@ -35,6 +36,11 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [activeFinanceSubTab, setActiveFinanceSubTab] = useState<string>("dashboard");
+  // A seminar enrolment whose liquidation form should open in the Employee Portal (from a
+  // seminar title or a "your form is ready" notice). The portal clears it once handled.
+  const [liquidationTarget, setLiquidationTarget] = useState<string | null>(null);
+  // A returned liquidation report to open for correction (from its notification).
+  const [correctionTarget, setCorrectionTarget] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -226,6 +232,24 @@ export default function App() {
     }
   }
 
+  // Opens the Employee Portal's Liquidation Report with this seminar enrolment chosen.
+  // Only an employee files their own report, so for anyone else this does nothing.
+  function openLiquidationFor(activityId: string) {
+    if (user?.role !== UserRole.EMPLOYEE) return;
+    setLiquidationTarget(activityId);
+    setActiveTab("employee_portal");
+  }
+
+  // Where a notification's link leads.
+  function openNotificationLink(link: NotificationLink) {
+    if (link.liquidationReportId && user?.role === UserRole.EMPLOYEE) {
+      // A returned report opens straight into correction mode.
+      setCorrectionTarget(link.liquidationReportId);
+      setActiveTab("employee_portal");
+    } else if (link.liquidationActivityId) openLiquidationFor(link.liquidationActivityId);
+    else if (link.tab) setActiveTab(link.tab);
+  }
+
   // Gated Page views dispatcher
   function renderActiveView() {
     if (!user) return null;
@@ -272,7 +296,7 @@ export default function App() {
           setActiveSubTab={setActiveFinanceSubTab}
         />;
       case "trainings_seminars":
-        return <TrainingsSeminarsView user={user} employees={employees} />;
+        return <TrainingsSeminarsView user={user} employees={employees} onOpenLiquidation={openLiquidationFor} />;
       case "training_development":
         return <TrainingDevelopmentView user={user} triggerRefresh={triggerRefresh} />;
       case "assets":
@@ -301,9 +325,13 @@ export default function App() {
           return <div id="access-denied" className="p-6 text-xs text-rose-500 font-mono font-bold">Unauthenticated credentials path error [RA 10173 Security Block].</div>;
         }
         return (
-          <EmployeePortalView fetchSummary={fetchSummary} 
-            user={user} 
+          <EmployeePortalView fetchSummary={fetchSummary}
+            user={user}
             onRefresh={triggerRefresh}
+            liquidationTarget={liquidationTarget}
+            onLiquidationTargetHandled={() => setLiquidationTarget(null)}
+            correctionTarget={correctionTarget}
+            onCorrectionTargetHandled={() => setCorrectionTarget(null)}
           />
         );
       case "backup-restore":
@@ -316,6 +344,11 @@ export default function App() {
           return <div id="access-denied" className="p-6 text-xs text-rose-500 font-mono font-bold">Unauthenticated credentials path error [RA 10173 Security Block].</div>;
         }
         return <AuditView user={user} onRefresh={triggerRefresh} />;
+      case "signatories":
+        if (user.role !== UserRole.SUPER_ADMIN) {
+          return <div id="access-denied" className="p-6 text-xs text-rose-500 font-mono font-bold">Unauthenticated credentials path error [RA 10173 Security Block].</div>;
+        }
+        return <ManageSignatoriesView user={user} employees={employees} />;
       case "reports":
         return (
           <ReportsView 
@@ -428,9 +461,10 @@ export default function App() {
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             
             {/* HEADER BRAND AND CLOCK */}
-            <Header 
-              user={user} 
+            <Header
+              user={user}
               onOpenHelp={() => setHelpOpen(true)}
+              onOpenLink={openNotificationLink}
             />
 
             {/* ACTIVE MODULE CONTAINER SCREEN */}

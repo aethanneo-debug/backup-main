@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { User, Notification } from "../types";
+import { User, Notification, NotificationLink } from "../types";
 import { apiCall } from "../utils";
 import { 
   Bell, 
@@ -16,9 +16,11 @@ import {
 interface HeaderProps {
   user: User;
   onOpenHelp: () => void;
+  /** Follows a notification's link, e.g. to the liquidation form it announces. */
+  onOpenLink?: (link: NotificationLink) => void;
 }
 
-export default function Header({ user, onOpenHelp }: HeaderProps) {
+export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
   const [time, setTime] = useState(new Date());
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -60,6 +62,15 @@ export default function Header({ user, onOpenHelp }: HeaderProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Marks the notice read; one with a link (e.g. "your liquidation form is ready") opens it.
+  const openNotification = (notif: Notification) => {
+    handleMarkAsRead(notif.id);
+    if (notif.link && onOpenLink) {
+      onOpenLink(notif.link);
+      setDropdownOpen(false);
+    }
+  };
 
   const handleMarkAsRead = async (id: string) => {
     try {
@@ -210,10 +221,19 @@ export default function Header({ user, onOpenHelp }: HeaderProps) {
                   </div>
                 ) : (
                   notifications.map((notif) => (
-                    <div 
+                    <div
                       key={notif.id}
-                      onClick={() => handleMarkAsRead(notif.id)}
-                      className={`p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex gap-3 ${!notif.isRead ? "bg-blue-50/20" : ""}`}
+                      // Operable from the keyboard too (Enter or Space), not only by mouse.
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openNotification(notif)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openNotification(notif);
+                        }
+                      }}
+                      className={`p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${!notif.isRead ? "bg-blue-50/20" : ""}`}
                     >
                       {/* Icon based on types */}
                       <div className="shrink-0 mt-0.5">
@@ -233,6 +253,9 @@ export default function Header({ user, onOpenHelp }: HeaderProps) {
                         <p className="text-[11px] text-slate-500 font-sans leading-normal">
                           {notif.message}
                         </p>
+                        {notif.link && onOpenLink && (
+                          <p className="text-[10px] font-semibold text-blue-700">Open &rarr;</p>
+                        )}
                         <p className="text-[9px] text-slate-400 font-mono">
                           {formatTimeAgo(notif.timestamp)}
                         </p>
