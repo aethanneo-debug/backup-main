@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee } from "../types";
-import { apiCall } from "../utils";
-import { seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
+import { apiCall, formatCurrency } from "../utils";
+import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import AttendanceModal from "./training/AttendanceModal";
@@ -127,20 +127,23 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
     draftTotalAllocated += Number(nr.allocatedBudget || 0);
   });
 
-  // Remaining follows the same rule as the server and Budget Monitoring
-  // (src/trainingBudget.ts): a settled seminar counts what it spent, any other its
-  // allocation — including an edit or a new row that hasn't been saved yet.
-  // A draft that enrols someone new reopens a settled seminar, as it will on save.
+  // Unallocated follows the same rule as the server and Budget Monitoring
+  // (src/trainingBudget.ts): a closed seminar counts what it spent, an open one its
+  // allocation less the shares of anyone who did not attend — including an edit or a new
+  // row that hasn't been saved yet. A draft that enrols someone new reopens a closed
+  // seminar, as it will on save.
   const draftAddsParticipants = (programId: string) => {
     const enrolled = participants
       .filter(part => part.trainingProgramId === programId && part.status !== "Cancelled" && part.status !== "Archived")
       .map(part => part.employeeId);
     return (editingRows[programId]?.participantIds || []).some((empId: string) => !enrolled.includes(empId));
   };
+  // The seats a draft will save, as the server reads them (a share is allocation ÷ seats).
+  const draftSeats = (row: any) => parseInt(String(row?.maxParticipants)) || 1;
   const savedCommitted = activePrograms.reduce((sum, p) => sum + seminarCommitment(p, participants), 0);
   const draftCommitted =
     activePrograms.reduce((sum, p) => sum + (editingRows[p.id]
-      ? commitmentAfterEdit(p, participants, Number(editingRows[p.id].allocatedBudget || 0), draftAddsParticipants(p.id))
+      ? commitmentAfterEdit(p, participants, Number(editingRows[p.id].allocatedBudget || 0), draftAddsParticipants(p.id), draftSeats(editingRows[p.id]))
       : seminarCommitment(p, participants)
     ), 0) +
     newRows.reduce((sum, nr) => sum + Number(nr.allocatedBudget || 0), 0);
@@ -182,10 +185,11 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
       return;
     }
 
-    // Same check as the server (trainingAllocationExceeds): only what this save adds needs
+    // Same check as the server (trainingAllocationProblem): only what this save adds needs
     // room in the budget, so an edit that adds nothing is never blocked by an overspend.
+    // New seats re-price what a non-attendee's share releases, so they are priced too.
     const saved = isNew ? undefined : programs.find(p => p.id === id);
-    const increase = allocationIncrease(saved, participants, Number(row.allocatedBudget || 0), !isNew && draftAddsParticipants(id));
+    const increase = allocationIncrease(saved, participants, Number(row.allocatedBudget || 0), !isNew && draftAddsParticipants(id), draftSeats(row));
     const projected = Math.round((savedCommitted + increase) * 100) / 100;
     if (increase > 0 && projected > Math.round(activeBudget * 100) / 100) {
       alert(`Seminars would then take ₱${projected.toLocaleString()} of the FY ${activeFy?.label || ""} training budget of ₱${activeBudget.toLocaleString()}. Lower this allocation, or another seminar's first.`);
@@ -235,13 +239,18 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
       return;
     }
     if (!confirm("Are you sure you want to delete this training program?")) return;
-    
-    const res = await apiCall(`/api/training/programs/${id}`, { method: "DELETE" });
-    if (res.status === "success") {
-      fetchData();
-      triggerRefresh();
-    } else {
-      alert("Error: " + res.message);
+
+    try {
+      const res = await apiCall(`/api/training/programs/${id}`, { method: "DELETE" });
+      if (res.status === "success") {
+        fetchData();
+        triggerRefresh();
+      } else {
+        alert("Error: " + res.message);
+      }
+    } catch (err: any) {
+      // apiCall throws on a refusal with the server's reason, e.g. a seminar with history.
+      alert(err?.message || "The seminar could not be deleted.");
     }
   };
 
@@ -565,7 +574,50 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
           {isEditing ? (
             <input type="number" value={row.allocatedBudget} onChange={e => updateRow(p.id, "allocatedBudget", e.target.value, isNew)} className={CELL_INPUT} placeholder="0.00" />
           ) : (
-            <div className="font-bold text-slate-800">₱{Number(p.allocatedBudget).toLocaleString()}</div>
+            <>
+              <div className="font-bold text-slate-800">{formatCurrency(Number(p.allocatedBudget) || 0)}</div>
+              {/* What this seminar gave back (requirement 6): once closed, allocated − spent;
+                  while open, the shares of participants who did not attend. */}
+              {(() => {
+                const budget = seminarBudget(p, participants);
+                return (
+                  <>
+                    {budget.returned > 0 ? (
+                      <p className="mt-0.5 text-[10px] font-semibold leading-snug text-emerald-700">
+                        Returned to Unallocated: {formatCurrency(budget.returned)}
+                        {budget.stage === "nobodyAttended" && <>{" "}<span className="block font-normal text-slate-500">Nobody attended</span></>}
+                      </p>
+                    ) : budget.released > 0 ? (
+                      <p className="mt-0.5 text-[10px] font-semibold leading-snug text-emerald-700">
+                        Released to Unallocated: {formatCurrency(budget.released)}{" "}
+                        <span className="block font-normal text-slate-500">
+                          {budget.absent} did not attend
+                        </span>
+                      </p>
+                    ) : null}
+                    {/* A non-attendee's cash advance not yet refunded keeps their share held. */}
+                    {budget.held > 0 && (
+                      <p className="mt-0.5 text-[10px] font-semibold leading-snug text-amber-700">
+                        Held until refunded: {formatCurrency(budget.held)}{" "}
+                        <span className="block font-normal text-slate-500">
+                          {budget.heldCount} cash advance{budget.heldCount === 1 ? "" : "s"} still out
+                        </span>
+                      </p>
+                    )}
+                    {/* Cut below the cash Finance has already released: the seminar holds that
+                        cash, beyond its allocation, until it is liquidated or refunded. */}
+                    {budget.stage === "open" && budget.outstanding > 0 && budget.committed > budget.allocated && (
+                      <p className="mt-0.5 text-[10px] font-semibold leading-snug text-amber-700">
+                        Holds {formatCurrency(budget.committed)}{" "}
+                        <span className="block font-normal text-slate-500">
+                          {formatCurrency(budget.outstanding)} in cash advances not yet liquidated or refunded
+                        </span>
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
+            </>
           )}
         </td>
         <td className="p-2 border-r border-slate-100 whitespace-nowrap">
@@ -738,7 +790,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
           </div>
           <div>
             <p className="text-sm font-medium text-slate-500 mb-1">Total Allocated</p>
-            <h3 className="text-2xl font-bold text-slate-800">₱{draftTotalAllocated.toLocaleString()}</h3>
+            <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(draftTotalAllocated)}</h3>
           </div>
         </div>
         <div className={`bg-white rounded-xl shadow-sm border p-6 flex items-center gap-4 ${remainingAnnualBudget < 0 ? 'border-red-500 bg-red-50' : (remainingAnnualBudget < 50000 ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}`}>
@@ -746,8 +798,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
             {remainingAnnualBudget < 0 ? <AlertTriangle size={24} /> : <Target size={24} />}
           </div>
           <div>
-            <p className={`text-sm font-medium mb-1 ${remainingAnnualBudget < 0 ? 'text-red-700' : 'text-slate-500'}`}>Remaining Budget</p>
-            <h3 className={`text-2xl font-bold ${remainingAnnualBudget < 0 ? 'text-red-700' : 'text-slate-800'}`}>₱{remainingAnnualBudget.toLocaleString()}</h3>
+            <p className={`text-sm font-medium mb-1 ${remainingAnnualBudget < 0 ? 'text-red-700' : 'text-slate-500'}`}>Unallocated</p>
+            <h3 className={`text-2xl font-bold ${remainingAnnualBudget < 0 ? 'text-red-700' : 'text-slate-800'}`}>{formatCurrency(remainingAnnualBudget)}</h3>
           </div>
         </div>
       </div>

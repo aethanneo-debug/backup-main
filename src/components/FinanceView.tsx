@@ -1539,13 +1539,30 @@ export default function FinanceView({
                             <span className="text-xl font-bold text-amber-700 tracking-tight">{formatCurrency(tb?.spent || 0)}</span>
                             <span className="text-[9px] font-mono text-slate-400 mt-0.5">{tb?.percentSpent || 0}% of total</span>
                           </div>
-                          {/* Remaining = total minus what the seminars take: actual spending once a
-                              seminar is settled, its allocation until then (src/trainingBudget.ts).
-                              The same figure carries over when the next fiscal year starts. */}
+                          {/* Unallocated = total minus what the seminars take: actual spending once
+                              a seminar is closed, its allocation less any non-attendee's share
+                              until then (src/trainingBudget.ts). The same figure carries over
+                              when the next fiscal year starts. */}
                           <div className="flex flex-col bg-blue-50/50 p-3 rounded-lg border border-blue-100">
-                            <span className="text-[10px] uppercase font-bold text-blue-800 mb-1">Remaining</span>
+                            <span className="text-[10px] uppercase font-bold text-blue-800 mb-1">Unallocated</span>
                             <span className={`text-2xl font-extrabold tracking-tight ${(tb?.remaining ?? approved) < 0 ? "text-red-600" : "text-slate-900"}`}>{formatCurrency(tb?.remaining ?? approved)}</span>
                             <span className="text-[9px] font-mono text-slate-400 mt-0.5">of {formatCurrency(approved)} total</span>
+                            {/* What came back to it this year (requirement 6). */}
+                            {Number(tb?.returnedFromSettled) > 0 && (
+                              <span className="text-[10px] font-semibold text-emerald-700 mt-1">
+                                Returned to Unallocated by {tb.settledReturning} seminar{tb.settledReturning === 1 ? "" : "s"}: {formatCurrency(Number(tb.returnedFromSettled))}
+                              </span>
+                            )}
+                            {Number(tb?.releasedForAbsent) > 0 && (
+                              <span className="text-[10px] font-semibold text-emerald-700 mt-0.5">
+                                Released for {tb.absentCount} participant{tb.absentCount === 1 ? "" : "s"} who did not attend: {formatCurrency(Number(tb.releasedForAbsent))}
+                              </span>
+                            )}
+                            {Number(tb?.heldForAdvances) > 0 && (
+                              <span className="text-[10px] font-semibold text-amber-700 mt-0.5">
+                                Held until {tb.heldCount} cash advance{tb.heldCount === 1 ? " is" : "s are"} refunded: {formatCurrency(Number(tb.heldForAdvances))}
+                              </span>
+                            )}
                           </div>
                         </div>
                         <p className="text-xs text-slate-500">

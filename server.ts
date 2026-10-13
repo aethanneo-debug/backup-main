@@ -9,7 +9,7 @@ import crypto from "crypto";
 import { readXlsxWorkbook, XlsxReadError } from "./src/server/xlsx/readXlsx";
 import { parsePlanASheet, PlanABlock } from "./src/server/xlsx/parsePlanA";
 import { matchWorkbookName } from "./src/server/xlsx/matchEmployeeName";
-import { seminarCommitment, allocationIncrease, isSeminarSettled } from "./src/trainingBudget";
+import { seminarBudget, allocationIncrease, isSeminarSettled } from "./src/trainingBudget";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -1165,14 +1165,12 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
     // the new year's seminars itself; one with the same title still counts as the same
     // seminar for the "attended before" rule, because sameSeminar() also matches by title.
     if (activeFy) {
-      const activePrograms = (db.trainingPrograms || []).filter(p => p.fiscalYear === activeFy.label);
-
       const activeTrainingBudget = (db.trainingBudgets || []).find(b => b.fiscalYearId === activeFy.id);
       if (activeTrainingBudget) {
-        // Settled seminars count what they actually spent, the rest their allocation
-        // (src/trainingBudget.ts) — the same figure Budget Monitoring shows as Remaining.
-        const committed = activePrograms.reduce((sum, p) => sum + seminarCommitment(p, db.trainingParticipants || []), 0);
-        const carryOver = Math.max(0, round2(Number(activeTrainingBudget.totalBudget || 0) - committed));
+        // The carry-over is the year's Unallocated figure itself, as Budget Monitoring shows
+        // it (computeTrainingUsage, src/trainingBudget.ts): closed seminars count what they
+        // actually spent, open ones their allocation less any non-attendee's share.
+        const carryOver = Math.max(0, computeTrainingUsage(activeFy.id).remaining);
 
         db.trainingBudgets = [...(db.trainingBudgets || []), {
           id: `atb-${Date.now()}`,
@@ -4032,9 +4030,10 @@ function releasedAdvanceForAssignment(activityId: string): CashAdvance | null {
 
 // The cash advance Finance has on file for a report: the one it is linked to, whatever its
 // status (a settled advance is still the record), the one it settled, or one released for
-// the same assignment since. A cancelled advance was never money in hand.
+// the same assignment since. A cancelled advance was never money in hand, and a refunded one
+// was given back in full.
 function advanceOnFileFor(sub: any): CashAdvance | null {
-  const advances = (db.cashAdvances || []).filter((a: any) => a && a.status !== "Cancelled");
+  const advances = (db.cashAdvances || []).filter((a: any) => a && a.status !== "Cancelled" && a.status !== "Refunded");
   return advances.find((a: any) => sub.cashAdvanceId && a.id === sub.cashAdvanceId)
     || advances.find((a: any) => a.liquidationId === sub.id)
     || releasedAdvanceForAssignment(sub.activityId)
@@ -5157,7 +5156,7 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
     const open = openAdvanceFor(activityId, forms);
     if (open) return open;
     return (db.cashAdvances || []).find((a: any) =>
-      a.activityId === activityId && forms.includes(a.employeeId) && a.status === "Liquidated") || null;
+      a.activityId === activityId && forms.includes(a.employeeId) && (a.status === "Liquidated" || a.status === "Refunded")) || null;
   };
 
   for (const p of (db.trainingParticipants || [])) {
@@ -5168,11 +5167,15 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
     const forms = employeeIdForms(p.employeeId);
     const advance = advanceFor(p.id, forms);
     // Someone who did not attend gets no new advance and no liquidation form. One already
-    // released stays listed, flagged, so Finance collects it back in full.
+    // released stays listed, flagged, so Finance collects it back in full and records the
+    // refund; a refunded one is listed as such.
     const didNotAttend = p.attendance === "Did not attend";
-    if (didNotAttend && !(advance && advance.status === "Released")) continue;
+    if (didNotAttend && !(advance && (advance.status === "Released" || advance.status === "Refunded"))) continue;
     rows.push({
       didNotAttend,
+      advanceId: advance ? advance.id : null,
+      refundOrNo: advance?.status === "Refunded" ? advance.refundOrNo : null,
+      refundOrDate: advance?.status === "Refunded" ? advance.refundOrDate : null,
       activityId: p.id,
       activityTitle: facts ? facts.title : "Seminar",
       employeeId: emp.employeeId,
@@ -5304,6 +5307,59 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     `Released PHP ${released.toFixed(2)} to ${emp.fullName} for ${facts.title} via DV ${advance.dvNo} (${advance.advanceNo})`);
   saveDB();
   res.json({ status: "success", data: advance });
+});
+
+// Recording a refund (requirement 6; the user's decision of 2026-10-10): someone HR marked
+// "Did not attend" gives their whole cash advance back. Until it is recorded their share
+// stays held in the seminar's budget, so the same money can't fund another seminar while it
+// is still out; once recorded, it returns to Unallocated. An attendee's advance is settled
+// by their liquidation report instead, which carries its own refund OR.
+app.post("/api/cash-advances/:id/refund", authenticateToken, (req: any, res) => {
+  if (!isCashAdvanceRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Only the Financial Officer can record a refund." });
+  }
+  const advance = (db.cashAdvances || []).find((a: any) => a && a.id === req.params.id);
+  if (!advance) return res.status(404).json({ status: "error", message: "Cash advance not found." });
+  if (advance.status !== "Released") {
+    return res.status(409).json({ status: "error", message: `${advance.advanceNo} is ${String(advance.status).toLowerCase()}, so there is no refund to record.` });
+  }
+  const enrolment = (db.trainingParticipants || []).find((p: any) => p && p.id === advance.activityId);
+  if (!enrolment || enrolment.attendance !== "Did not attend") {
+    return res.status(409).json({ status: "error", message: `${advance.advanceNo} is settled by the employee's liquidation report. Only an advance to someone who did not attend is refunded in full here.` });
+  }
+  const orNo = typeof req.body?.orNo === "string" ? req.body.orNo.trim() : "";
+  const orDate = req.body?.orDate;
+  if (!orNo || orNo.length > 50) {
+    return res.status(400).json({ status: "error", message: "Enter the official receipt (OR) number of the refund, up to 50 characters." });
+  }
+  if (!isCalendarDate(orDate) || orDate > manilaToday()) {
+    return res.status(400).json({ status: "error", message: "Enter the OR date as YYYY-MM-DD, no later than today." });
+  }
+  // Money can't come back before it went out.
+  if (isCalendarDate(advance.dvDate) && orDate < advance.dvDate) {
+    return res.status(400).json({ status: "error", message: `The OR date can't be before the advance was released (DV dated ${advance.dvDate}).` });
+  }
+
+  // What the seminar holds before and after, for the message and the audit entry.
+  const prog = (db.trainingPrograms || []).find((p: any) => p.id === enrolment.trainingProgramId);
+  const heldBefore = prog ? seminarBudget(prog, participantsForBudget()).committed : 0;
+  advance.status = "Refunded";
+  advance.refundOrNo = orNo;
+  advance.refundOrDate = orDate;
+  advance.refundedBy = (req as any).user.fullName;
+  advance.refundedAt = new Date().toISOString();
+  const freed = prog ? round2(heldBefore - seminarBudget(prog, participantsForBudget()).committed) : 0;
+  const fy = prog ? (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear) : null;
+  const note = freed > 0
+    ? fy && fy.status !== "Active"
+      ? ` ${pesoText(freed)} returns to FY ${fy.label}'s Unallocated; that year is closed, so what it carried over doesn't change.`
+      : ` ${pesoText(freed)} of the seminar's allocation returns to Unallocated.`
+    : "";
+
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Record Advance Refund",
+    `${advance.advanceNo}: ${advance.employeeName} refunded ${pesoText(advance.amount)} (OR ${orNo}, ${orDate}) for ${advance.activityTitle || "a seminar"}, which they did not attend.${note}`);
+  saveDB();
+  res.json({ status: "success", message: `Refund of ${pesoText(advance.amount)} from ${advance.employeeName} recorded (OR ${orNo}).${note}`, data: advance });
 });
 
 app.put("/api/liquidation-submissions/:id/chief-action", authenticateToken, (req: any, res) => {
@@ -5814,6 +5870,9 @@ function runLiquidationReminderSweep() {
     let sent = 0;
     for (const p of db.trainingParticipants || []) {
       if (p.status !== "Assigned") continue;
+      // Someone marked "Did not attend" dropped out (requirement 6) and gets no form, so they
+      // have nothing to liquidate; an advance they hold is refunded instead.
+      if (p.attendance === "Did not attend") continue;
       const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
       const due = liquidationDueDateFor(prog);
       if (!prog || !due) continue;
@@ -5940,25 +5999,38 @@ function autoAssignEmployeeToTraining(employee: Employee) {
     );
     if (candidates.length === 0) return null;
 
-    const withOpenSeats = candidates.filter(p => {
-      const count = (db.trainingParticipants || []).filter(pt => pt.trainingProgramId === p.id).length;
-      return count < (p.maxParticipants || Infinity);
-    });
+    // Only a seminar still to come can take them: not started, and not finished (requirement 6:
+    // enrolling someone reopens a finished seminar). Nothing upcoming matches: nothing to do.
+    const today = manilaToday();
+    const enrolments = participantsForBudget();
+    const upcoming = candidates.filter(p =>
+      !(isIsoDate(p.startDate) && String(p.startDate).slice(0, 10) <= today) && !isSeminarSettled(p, enrolments));
+    if (upcoming.length === 0) return null;
+    // ...and only one with a free seat. (Filling a free seat in an upcoming seminar adds nothing
+    // to what it holds, so the ceiling check is a guard that shouldn't fail.)
+    const seatsTaken = (p: TrainingProgram) => (db.trainingParticipants || []).filter(pt => pt.trainingProgramId === p.id).length;
+    const hasSeat = (p: TrainingProgram) => seatsTaken(p) < (p.maxParticipants || Infinity);
+    const withOpenSeats = upcoming.filter(p =>
+      hasSeat(p) && !trainingAllocationProblem(p.fiscalYear, Number(p.allocatedBudget || 0), p.id, true));
 
     if (withOpenSeats.length === 0) {
-      // Programs are at capacity - create notification for HR
-      const missedProgram = candidates[0];
-      const notif: Notification = {
-        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        title: "Training Program at Capacity",
-        message: `New employee ${employee.fullName} matched training program "${missedProgram.title}" but it is at capacity. Please review manually.`,
-        type: "warning",
-        isRead: false,
-        timestamp: new Date().toISOString(),
-        targetRole: UserRole.HR_OFFICER
-      };
+      // Tell HR, once per employee and seminar: every edit of their profile runs this again.
+      const full = !upcoming.some(hasSeat);
+      const missedProgram = full ? upcoming[0] : upcoming.find(hasSeat)!;
+      const dedupeKey = `auto-enrol-missed:${employee.id}:${missedProgram.id}`;
       if (!db.notifications) db.notifications = [];
-      db.notifications.push(notif);
+      if (!db.notifications.some((n: any) => n.dedupeKey === dedupeKey)) {
+        db.notifications.push({
+          id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          title: full ? "Training Program at Capacity" : "Training Budget Can't Cover Enrollment",
+          message: `${employee.fullName} matched training program "${missedProgram.title}", but ${full ? "it is full" : `the FY ${activeFy.label} training budget can't cover another participant`}. Please review manually.`,
+          type: "warning",
+          isRead: false,
+          timestamp: new Date().toISOString(),
+          targetRole: UserRole.HR_OFFICER,
+          dedupeKey
+        });
+      }
       return null;
     }
 
@@ -5999,6 +6071,33 @@ function autoAssignEmployeeToTraining(employee: Employee) {
 // would drift; deriving keeps HR's planner and the Budget Officer's monitor in step.
 // Note trainingBudgets joins on fiscalYearId while trainingPrograms joins on the
 // fiscal year LABEL — the label must be resolved through db.fiscalYears first.
+// Enrolments as the training budget rule reads them (src/trainingBudget.ts): each carries the
+// cash advance Finance released to it that is not yet liquidated or refunded, because a
+// seminar never holds less than the cash still out for it. The advance pays for what HR has
+// already entered for that participant by hand (that is in the seminar's spending), so only
+// the rest counts as out. That holds whatever their attendance, so recording it never moves
+// money (HR can't enter spending for someone marked "Did not attend"). A report or a refund
+// settles the advance. HR's planner reads this list too, so it prices seminars exactly as the
+// server does. `changed` prices an attendance change before it is saved.
+function participantsForBudget(changed?: { id: string; attendance: string }): any[] {
+  const out = new Map<string, number>();
+  for (const a of db.cashAdvances || []) {
+    if (a && a.status === "Released" && a.activityId) out.set(a.activityId, round2((out.get(a.activityId) || 0) + Number(a.amount || 0)));
+  }
+  // HR's hand entries per enrolment: the rows a validated report replaces.
+  const hand = new Map<string, number>();
+  for (const r of db.trainingLiquidations || []) {
+    if (r && r.trainingParticipantId && r.source !== "report") {
+      hand.set(r.trainingParticipantId, round2((hand.get(r.trainingParticipantId) || 0) + Number(r.amount || 0)));
+    }
+  }
+  return (db.trainingParticipants || []).map((p: any) => {
+    const q = p && changed && p.id === changed.id ? { ...p, attendance: changed.attendance } : p;
+    if (!q || !out.has(q.id)) return q;
+    return { ...q, advanceOutstanding: Math.max(0, round2(out.get(q.id)! - (hand.get(q.id) || 0))) };
+  });
+}
+
 function computeTrainingUsage(fiscalYearId: string) {
   const fy = (db.fiscalYears || []).find((f: any) => f.id === fiscalYearId);
   const tb = (db.trainingBudgets || []).find((b: any) => b.fiscalYearId === fiscalYearId);
@@ -6006,39 +6105,81 @@ function computeTrainingUsage(fiscalYearId: string) {
   const programs = (db.trainingPrograms || []).filter((p: any) => fy && p.fiscalYear === fy.label);
   const allocated = programs.reduce((s: number, p: any) => s + Number(p.allocatedBudget || 0), 0);
   const spent = programs.reduce((s: number, p: any) => s + Number(p.usedBudget || 0), 0);
-  // What the seminars take out of the budget: actual spending once a seminar is settled,
-  // its allocation until then (see src/trainingBudget.ts).
-  const committed = round2(programs.reduce((s: number, p: any) => s + seminarCommitment(p, db.trainingParticipants || []), 0));
+  // What the seminars take out of the budget: actual spending once a seminar is closed,
+  // its allocation less the shares released for non-attendees until then (see
+  // src/trainingBudget.ts). The rest is Unallocated.
+  const enrolments = participantsForBudget();
+  const seminars = programs.map((p: any) => seminarBudget(p, enrolments));
+  const committed = round2(seminars.reduce((s: number, b) => s + b.committed, 0));
   return {
     totalBudget,
     allocated,
     spent,
     committed,
+    // Unallocated. (Field name kept: existing consumers read `remaining`.)
     remaining: round2(totalBudget - committed),
+    // What came back to Unallocated: from closed seminars (allocated − spent) and, while
+    // seminars are still open, the shares of participants who did not attend.
+    returnedFromSettled: round2(seminars.reduce((s: number, b) => s + b.returned, 0)),
+    settledReturning: seminars.filter(b => b.returned > 0).length,
+    releasedForAbsent: round2(seminars.reduce((s: number, b) => s + b.released, 0)),
+    absentCount: seminars.reduce((s: number, b) => s + (b.released > 0 ? b.absent : 0), 0),
+    // Cash advances still out with non-attendees: held until Finance records the refund.
+    heldForAdvances: round2(seminars.reduce((s: number, b) => s + b.held, 0)),
+    heldCount: seminars.reduce((s: number, b) => s + b.heldCount, 0),
     percentAllocated: totalBudget > 0 ? Math.round((allocated / totalBudget) * 100) : 0,
     percentSpent: totalBudget > 0 ? Math.round((spent / totalBudget) * 100) : 0,
     programCount: programs.length
   };
 }
 
-// Server-side ceiling check for training allocations. Returns null when the change fits,
-// or the offending figures when it does not. Only what the change ADDS to the year's
-// seminars needs room (allocationIncrease in src/trainingBudget.ts): re-saving a row,
-// cutting it, or editing a settled seminar always passes, even after an approved
-// overspend has taken the year past its budget. `addsParticipants`: the save enrols
-// someone new, which reopens a settled seminar, so its allocation counts again.
-function trainingAllocationExceeds(fyLabel: string, newAmount: number, excludeProgramId?: string, addsParticipants = false) {
-  const fy = (db.fiscalYears || []).find((f: any) => f.label === fyLabel);
-  if (!fy) return null;
-  const usage = computeTrainingUsage(fy.id);
+// PHP amounts in messages, e.g. "PHP 2,500.00".
+const pesoText = (n: number) => `PHP ${round2(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// A seminar's allocation, read strictly: pesos from 0 to a billion, blank meaning 0.
+function readAllocation(value: unknown): number | null {
+  return value === undefined || value === null || value === "" ? 0 : parsePeso(value);
+}
+// A seminar's seats: a whole number from 1 to 1,000. Undefined when not given.
+function readSeats(value: unknown): number | null | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\d{1,4}$/.test(value.trim()) ? Number(value.trim()) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 1000 ? n : null;
+}
+const ALLOCATION_MESSAGE = "Enter the allocated budget as an amount in pesos, from 0 to 1,000,000,000.";
+const SEATS_MESSAGE = "Enter the number of seats as a whole number from 1 to 1,000.";
+
+// Server-side ceiling check for training allocations: null when the change fits, otherwise
+// why it doesn't. Only what the change ADDS to the year's seminars needs room
+// (allocationIncrease in src/trainingBudget.ts): re-saving a row, cutting it, or editing a
+// closed seminar always passes, even after an approved overspend has taken the year past
+// its budget. `addsParticipants`: the save enrols someone new, which reopens a closed
+// seminar. `newSeats`: the save changes the number of seats, which re-prices what a
+// non-attendee's share releases. A closed year's unallocated money was carried over, so
+// nothing in it can grow, and a label with no fiscal year is outside every budget.
+function trainingAllocationProblem(fyLabel: string, newAmount: number, excludeProgramId?: string, addsParticipants = false, newSeats?: number): string | null {
   const existing = excludeProgramId ? (db.trainingPrograms || []).find((p: any) => p.id === excludeProgramId) : undefined;
-  const increase = allocationIncrease(existing, db.trainingParticipants || [], Number(newAmount || 0), addsParticipants);
+  const increase = allocationIncrease(existing, participantsForBudget(), Number(newAmount || 0), addsParticipants, newSeats);
   if (increase <= 0) return null;
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === fyLabel);
+  if (!fy) {
+    return `There is no fiscal year ${String(fyLabel ?? "")}, so this change, which needs ${pesoText(increase)} more, can't be made.`;
+  }
+  if (fy.status !== "Active") {
+    return `FY ${fy.label} is closed and its unallocated training money was carried over, so this change, which needs ${pesoText(increase)} more, can't be made.`;
+  }
+  const usage = computeTrainingUsage(fy.id);
   const projected = round2(usage.committed + increase);
-  return projected > round2(usage.totalBudget) ? { projected, totalBudget: usage.totalBudget } : null;
+  return projected > round2(usage.totalBudget)
+    ? `Seminars would then take ${pesoText(projected)} of the ${fy.label} training budget of ${pesoText(usage.totalBudget)}.`
+    : null;
 }
 
 app.get("/api/training/budgets", authenticateToken, (req: any, res: any) => {
+  // Officers only: the figures include how many participants did not attend.
+  if (![UserRole.SUPER_ADMIN, UserRole.HR_OFFICER, UserRole.FINANCE_OFFICER, UserRole.BUDGET_OFFICER].includes(req.user.role)) {
+    return res.status(403).json({ status: "error", message: "Training budget figures are for the Administrator, HR, Finance and the Budget Officer." });
+  }
   // Derived usage is spread onto each row; purely additive, so existing consumers
   // that only read totalBudget/carryOverBudget/newAnnualBudget are unaffected.
   const data = (db.trainingBudgets || []).map((b: any) => ({ ...b, ...computeTrainingUsage(b.fiscalYearId) }));
@@ -6759,16 +6900,27 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
     return res.status(403).json({ status: "error", message: "Unauthorized" });
   }
   const body = req.body;
+  const allocation = readAllocation(body.allocatedBudget);
+  if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
+  const seats = readSeats(body.maxParticipants);
+  if (seats === null) return res.status(400).json({ status: "error", message: SEATS_MESSAGE });
+  // Seminars are planned in the active fiscal year, as the planner does: a closed year's
+  // unallocated money was carried over, and a label with no fiscal year is outside every budget.
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === body.fiscalYear);
+  if (!fy || fy.status !== "Active") {
+    const active = (db.fiscalYears || []).find((f: any) => f.status === "Active");
+    return res.status(400).json({
+      status: "error",
+      message: active ? `Seminars are added to the active fiscal year, FY ${active.label}.` : "There is no active fiscal year to add the seminar to."
+    });
+  }
 
   // The client warns about over-allocation too, but that alert is bypassable —
   // the fiscal year's training ceiling is enforced here so the Budget Officer's
   // monitor can be trusted.
-  const overBy = trainingAllocationExceeds(body.fiscalYear, parseFloat(body.allocatedBudget) || 0);
+  const overBy = trainingAllocationProblem(body.fiscalYear, allocation);
   if (overBy) {
-    return res.status(400).json({
-      status: "error",
-      message: `Seminars would then take PHP ${overBy.projected.toLocaleString()} of the ${body.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
-    });
+    return res.status(400).json({ status: "error", message: `${overBy} Please adjust the allocation.` });
   }
 
   // Calculate duration
@@ -6787,7 +6939,7 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
     title: body.title,
     description: body.description,
     category: body.category,
-    allocatedBudget: parseFloat(body.allocatedBudget) || 0,
+    allocatedBudget: allocation,
     usedBudget: 0,
     fiscalYear: body.fiscalYear,
     startDate: body.startDate,
@@ -6798,7 +6950,7 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
     totalHours: totalHours,
     venue: body.venue,
     facilitator: body.facilitator,
-    maxParticipants: parseInt(body.maxParticipants) || 1,
+    maxParticipants: seats ?? 1,
     targetSpecialization: body.targetSpecialization,
     targetDivision: body.targetDivision,
     budgetSplit: normalizeBudgetSplit(body.budgetSplit),
@@ -6832,29 +6984,51 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
 
   const body = req.body;
   const existingProgram = db.trainingPrograms[programIndex];
+  const allocation = body.allocatedBudget !== undefined ? readAllocation(body.allocatedBudget) : Number(existingProgram.allocatedBudget || 0);
+  if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
+  const newSeats = readSeats(body.maxParticipants);
+  if (newSeats === null) return res.status(400).json({ status: "error", message: SEATS_MESSAGE });
 
   // Same ceiling as on create, checked against the year the seminar is in (an edit never
-  // moves a seminar to another year). Enrolling someone new reopens a settled seminar, so
-  // that is checked too, even when the allocation itself is unchanged.
+  // moves a seminar to another year). Enrolling someone new reopens a closed seminar, and
+  // a new number of seats re-prices what a non-attendee's share releases, so both are
+  // checked too, even when the allocation itself is unchanged.
   const enrolledForms = new Set((db.trainingParticipants || [])
     .filter(p => p.trainingProgramId === existingProgram.id && p.status !== "Cancelled" && p.status !== "Archived")
     .flatMap(p => employeeIdForms(p.employeeId)));
   const addsParticipants = Array.isArray(body.participantIds)
     && body.participantIds.some((raw: string) => !employeeIdForms(raw).some(f => enrolledForms.has(f)));
-  if (body.allocatedBudget !== undefined || addsParticipants) {
-    const overBy = trainingAllocationExceeds(
-      existingProgram.fiscalYear,
-      body.allocatedBudget !== undefined ? (parseFloat(body.allocatedBudget) || 0) : Number(existingProgram.allocatedBudget || 0),
-      existingProgram.id,
-      addsParticipants
-    );
+  const seatsChange = newSeats !== undefined && newSeats !== Number(existingProgram.maxParticipants || 1);
+  // Enrolments with a cash advance on file (money Finance released for this seminar, held in
+  // its budget until liquidated or refunded) or a training evaluation are history: a roster
+  // edit keeps them, as it keeps those with attendance or a liquidation under way.
+  const withAdvance = new Set((db.cashAdvances || []).filter((a: any) => a && a.activityId).map((a: any) => a.activityId));
+  const evaluated = new Set((db.trainingEvaluations || []).filter((e: any) => e && e.trainingParticipantId).map((e: any) => e.trainingParticipantId));
+  const requested = Array.isArray(body.participantIds) ? new Set<string>(body.participantIds.map((raw: string) => employeeIdForms(raw)[0])) : null;
+  // Seats can't go below the participants the seminar keeps after this save (not counting
+  // anyone marked "Did not attend"): each one's allowance is allocation ÷ seats, so together
+  // they would need more than the allocation. That is a mistake more often than not.
+  if (seatsChange) {
+    const staying = (db.trainingParticipants || []).filter(p => p.trainingProgramId === existingProgram.id
+      && p.status !== "Cancelled" && p.status !== "Archived" && p.attendance !== "Did not attend"
+      && (!requested || employeeIdForms(p.employeeId).some(f => requested.has(f))
+        || p.status !== "Assigned" || !!p.attendance || withAdvance.has(p.id) || evaluated.has(p.id))).length;
+    if (newSeats! < staying) {
+      return res.status(400).json({
+        status: "error",
+        message: `This seminar keeps ${staying} participant${staying === 1 ? "" : "s"} (not counting anyone marked "Did not attend"), so it needs at least ${staying} seat${staying === 1 ? "" : "s"}.`
+      });
+    }
+  }
+  if (body.allocatedBudget !== undefined || addsParticipants || seatsChange) {
+    const overBy = trainingAllocationProblem(existingProgram.fiscalYear, allocation, existingProgram.id, addsParticipants, newSeats);
     if (overBy) {
-      const reopens = addsParticipants && isSeminarSettled(existingProgram.id, db.trainingParticipants || [])
+      const reopens = addsParticipants && isSeminarSettled(existingProgram, participantsForBudget())
         ? "Adding a participant reopens this finished seminar, so its allocation counts again. "
         : "";
       return res.status(400).json({
         status: "error",
-        message: `${reopens}Seminars would then take PHP ${overBy.projected.toLocaleString()} of the ${existingProgram.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
+        message: `${reopens}${overBy} Please adjust the allocation${seatsChange ? " or the number of seats" : ""}.`
       });
     }
   }
@@ -6875,7 +7049,7 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
     title: body.title,
     description: body.description,
     category: body.category,
-    allocatedBudget: body.allocatedBudget !== undefined ? (parseFloat(body.allocatedBudget) || 0) : existingProgram.allocatedBudget,
+    allocatedBudget: body.allocatedBudget !== undefined ? allocation : existingProgram.allocatedBudget,
     startDate: body.startDate,
     endDate: body.endDate,
     startTime: body.startTime !== undefined ? body.startTime : existingProgram.startTime,
@@ -6884,7 +7058,7 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
     totalHours: totalHours,
     venue: body.venue !== undefined ? body.venue : existingProgram.venue,
     facilitator: body.facilitator !== undefined ? body.facilitator : existingProgram.facilitator,
-    maxParticipants: body.maxParticipants !== undefined ? (parseInt(body.maxParticipants) || 1) : existingProgram.maxParticipants,
+    maxParticipants: newSeats ?? existingProgram.maxParticipants,
     targetDivision: body.targetDivision !== undefined ? body.targetDivision : existingProgram.targetDivision,
     targetSpecialization: body.targetSpecialization !== undefined ? body.targetSpecialization : existingProgram.targetSpecialization,
     budgetSplit: body.budgetSplit !== undefined ? normalizeBudgetSplit(body.budgetSplit) : normalizeBudgetSplit(existingProgram.budgetSplit),
@@ -6893,17 +7067,18 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
       : existingProgram.fulfillsNeedTitles
   };
 
+  // Budget or head-count edits re-price the allowances nobody has liquidated yet, whether or
+  // not the roster was sent: an allowance caps the cash advance Finance can release.
+  for (const p of db.trainingParticipants || []) {
+    if (p.trainingProgramId === existingProgram.id && p.status === "Assigned") p.allowanceAllocated = participantAllowance(db.trainingPrograms[programIndex]);
+  }
+
   let skippedMessages: string[] = [];
   // If participantIds are provided, reconcile the roster against them. Existing
   // enrolments are kept rather than deleted and re-created, so participant ids,
   // statuses and liquidation links survive an edit.
-  if (Array.isArray(body.participantIds)) {
+  if (requested) {
     const program = db.trainingPrograms[programIndex];
-    const requested = new Set<string>();
-    for (const rawId of body.participantIds) {
-      requested.add(employeeIdForms(rawId)[0]);
-    }
-
     const removedIds = new Set<string>();
     const keptForms = new Set<string>();
     let keptCount = 0;
@@ -6912,18 +7087,21 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
       const forms = employeeIdForms(p.employeeId);
       const stillSelected = forms.some(f => requested.has(f));
       // An enrolment with attendance on record is history, so editing the roster keeps it.
-      if (!stillSelected && p.status === "Assigned" && !p.attendance) {
+      if (!stillSelected && p.status === "Assigned" && !p.attendance && !withAdvance.has(p.id) && !evaluated.has(p.id)) {
         removedIds.add(p.id);
         continue;
       }
       if (!stillSelected) {
         const emp = (db.employees || []).find(e => forms.includes(e.id));
-        skippedMessages.push(p.status === "Assigned"
-          ? `${emp ? emp.fullName : p.employeeId} was kept: their attendance is already recorded.`
-          : `${emp ? emp.fullName : p.employeeId} was kept: their liquidation is already ${p.status === "Liquidated" ? "complete" : "in progress"}.`);
+        const name = emp ? emp.fullName : p.employeeId;
+        skippedMessages.push(p.status !== "Assigned"
+          ? `${name} was kept: their liquidation is already ${p.status === "Liquidated" ? "complete" : "in progress"}.`
+          : p.attendance
+            ? `${name} was kept: their attendance is already recorded.`
+            : withAdvance.has(p.id)
+              ? `${name} was kept: Finance has released a cash advance to them for this seminar.`
+              : `${name} was kept: their training evaluation is on record.`);
       }
-      // Budget or head-count edits re-price only allowances nobody has liquidated yet.
-      if (p.status === "Assigned") p.allowanceAllocated = participantAllowance(program);
       forms.forEach(f => keptForms.add(f));
       keptCount++;
     }
@@ -6937,15 +7115,41 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
   res.json({ status: "success", data: db.trainingPrograms[programIndex], message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
 });
 
+// Deleting a seminar: only one that nothing has happened to yet. Once attendance, spending,
+// a report, a cash advance, an evaluation or an expense is on record, the seminar is history.
+// Deleting it would orphan those records and hand what it spent, or holds for an advance
+// still out, back to the year's Unallocated (known issue 12b). A closed year's seminars stay
+// as they were when its unallocated money was carried over.
 app.delete("/api/training/programs/:id", authenticateToken, (req: any, res: any) => {
-  if (req.user.role !== "Super Admin" && req.user.role !== "HR Officer") {
-    return res.status(403).json({ status: "error", message: "Unauthorized" });
+  if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER) {
+    return res.status(403).json({ status: "error", message: "Only HR or the Administrator can delete a seminar." });
   }
-  db.trainingPrograms = (db.trainingPrograms || []).filter(p => p.id !== req.params.id);
-  db.trainingParticipants = (db.trainingParticipants || []).filter(p => p.trainingProgramId !== req.params.id);
-  db.trainingLiquidations = (db.trainingLiquidations || []).filter(l => l.trainingProgramId !== req.params.id);
+  const prog = (db.trainingPrograms || []).find((p: any) => p.id === req.params.id);
+  if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  const title = String(prog.title || "").trim();
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear);
+  if (fy && fy.status !== "Active") {
+    return res.status(409).json({ status: "error", message: `"${title}" can't be deleted: FY ${fy.label} is closed, and its seminars stay as they were when its unallocated money was carried over.` });
+  }
+  const enrolments = (db.trainingParticipants || []).filter((p: any) => p.trainingProgramId === prog.id);
+  const ids = new Set(enrolments.map((p: any) => p.id));
+  const history = enrolments.some((p: any) => p.attendance) ? "attendance has been recorded for it"
+    : Number(prog.usedBudget || 0) > 0 ? `${pesoText(Number(prog.usedBudget))} has been spent on it`
+    : (db.liquidationSubmissions || []).some((s: any) => ids.has(s.activityId)) ? "a liquidation report has been filed for it"
+    : (db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId)) ? "Finance has released a cash advance for it"
+    : (db.trainingEvaluations || []).some((e: any) => e && (e.trainingProgramId === prog.id || ids.has(e.trainingParticipantId))) ? "a training evaluation has been recorded for it"
+    : (db.trainingLiquidations || []).some((l: any) => l.trainingProgramId === prog.id) ? "expenses have been recorded for it"
+    : "";
+  if (history) {
+    return res.status(409).json({ status: "error", message: `"${title}" can't be deleted: ${history}, and that record has to be kept.` });
+  }
+
+  db.trainingPrograms = db.trainingPrograms.filter(p => p.id !== prog.id);
+  db.trainingParticipants = (db.trainingParticipants || []).filter(p => p.trainingProgramId !== prog.id);
+  logEvent(req.user.id, req.user.username, req.user.role, "Delete Training Program",
+    `Deleted "${title}" (FY ${prog.fiscalYear}, allocated ${pesoText(Number(prog.allocatedBudget || 0))})${enrolments.length ? `, unenrolling ${enrolments.length} participant${enrolments.length === 1 ? "" : "s"}` : ""}.`);
   saveDB();
-  res.json({ status: "success" });
+  res.json({ status: "success", message: `"${title}" was deleted.` });
 });
 
 // POST /api/training/participants/:id/approve_liquidation was retired: it marked any
@@ -6957,7 +7161,9 @@ app.get("/api/training/participants", authenticateToken, (req: any, res: any) =>
   if (!isTrainingRecordsRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Training program details are restricted to HR." });
   }
-  res.json({ status: "success", data: db.trainingParticipants || [] });
+  // With each enrolment's cash advance still out (see participantsForBudget), so HR's planner
+  // prices seminars exactly as the server does.
+  res.json({ status: "success", data: participantsForBudget() });
 });
 
 // Attendance: HR records it per participant once the seminar has started. It is stored
@@ -6994,9 +7200,48 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, (req: an
 
   const actor = req.user;
   const previous = participant.attendance || "not recorded";
+  // A non-attendee drops out of the seminar and their share returns to Unallocated at
+  // once (requirement 6). Marking them attended again holds it for the seminar again,
+  // which needs room like any other increase: refused in a closed year (its unallocated
+  // money was carried over) or when the year's Unallocated can't cover it. Priced before
+  // anything is saved.
+  // (A cash advance still out with them stays held either way: participantsForBudget attaches
+  // it to their enrolment.)
+  const outstanding = (db.cashAdvances || []).filter((a: any) => a && a.status === "Released" && a.activityId === participant.id)
+    .reduce((s: number, a: any) => round2(s + Number(a.amount || 0)), 0);
+  const heldBefore = seminarBudget(prog, participantsForBudget()).committed;
+  const after = seminarBudget(prog, participantsForBudget({ id: participant.id, attendance }));
+  const freed = round2(heldBefore - after.committed);
+  // Only marking someone attended again can hold more, so only that is checked. "Did not attend"
+  // never holds more (src/trainingBudget.ts keeps a non-attendee's cash on top), and it is a fact
+  // that is always recorded. A seminar under a label with no fiscal year is outside every
+  // budget, so it is treated as closed.
+  if (freed < 0 && attendance === "Attended") {
+    const fy = (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear);
+    if (!fy || fy.status !== "Active") {
+      return res.status(409).json({
+        status: "error",
+        message: fy
+          ? `FY ${fy.label} is closed and its unallocated training money was carried over, so ${pesoText(-freed)} can't be held for this seminar again.`
+          : `There is no fiscal year ${String(prog.fiscalYear ?? "")}, so ${pesoText(-freed)} can't be held for this seminar again.`
+      });
+    }
+    const usage = computeTrainingUsage(fy.id);
+    if (round2(usage.committed - freed) > round2(usage.totalBudget)) {
+      return res.status(409).json({ status: "error", message: `Marking them as attended holds ${pesoText(-freed)} for the seminar again, but only ${pesoText(Math.max(0, usage.remaining))} is Unallocated. Lower another seminar's allocation first.` });
+    }
+  }
   participant.attendance = attendance;
   participant.attendanceBy = actor.fullName;
   participant.attendanceAt = new Date().toISOString();
+  const budgetNote = freed > 0
+    ? after.stage === "nobodyAttended"
+      ? ` Nobody attended, so the seminar now counts only what it spent: ${pesoText(freed)} returns to Unallocated.`
+      : ` ${pesoText(freed)} of the seminar's allocation returns to Unallocated.`
+    : freed < 0 && attendance === "Attended" ? ` ${pesoText(-freed)} is held for the seminar again.` : "";
+  const heldNote = attendance === "Did not attend" && outstanding > 0
+    ? ` Their ${pesoText(outstanding)} cash advance is still out, and stays held for the seminar until Finance records the refund.`
+    : "";
 
   const emp = (db.employees || []).find((e: any) => e.id === participant.employeeId || e.employeeId === participant.employeeId);
   // The form opens in the Employee Portal, which needs a Personnel login. Only then is
@@ -7020,15 +7265,15 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, (req: an
     });
   }
   logEvent(actor.id, actor.username, actor.role, "Record Attendance",
-    `${name} at "${String(prog.title).trim()}": ${previous} → ${attendance}`);
+    `${name} at "${String(prog.title).trim()}": ${previous} → ${attendance}${budgetNote || heldNote ? `;${budgetNote}${heldNote}` : ""}`);
   saveDB();
   res.json({
     status: "success",
-    message: attendance === "Did not attend"
+    message: (attendance === "Did not attend"
       ? `${name} is marked as not attending, so no liquidation form will open for them.`
       : personnelLogin
         ? `${name} is marked as attended. Their liquidation form is open, and they have been notified.`
-        : `${name} is marked as attended. They have no Personnel login, so they can't open the form in the Employee Portal yet.`,
+        : `${name} is marked as attended. They have no Personnel login, so they can't open the form in the Employee Portal yet.`) + budgetNote + heldNote,
     data: participant
   });
 });
@@ -7047,13 +7292,14 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
     return res.status(400).json({ status: "error", message: "Program has reached maximum capacity" });
   }
 
-  // Enrolling someone in a seminar everyone had settled reopens it: its allocation counts
-  // again, so it needs room in the year's training budget, as on the program edit.
-  const overBy = trainingAllocationExceeds(prog.fiscalYear, Number(prog.allocatedBudget || 0), prog.id, true);
+  // Enrolling someone in a closed seminar reopens it: what it holds goes back up (its
+  // allocation, less any non-attendee's share), so it needs room in the year's training
+  // budget, as on the program edit.
+  const overBy = trainingAllocationProblem(prog.fiscalYear, Number(prog.allocatedBudget || 0), prog.id, true);
   if (overBy) {
     return res.status(400).json({
       status: "error",
-      message: `Adding a participant reopens this finished seminar, so its allocation counts again. Seminars would then take PHP ${overBy.projected.toLocaleString()} of the ${prog.fiscalYear} training budget of PHP ${overBy.totalBudget.toLocaleString()}. Please adjust the allocation.`
+      message: `Adding a participant reopens this finished seminar, so its allocation counts again. ${overBy} Please adjust the allocation.`
     });
   }
 
@@ -7175,6 +7421,14 @@ app.post("/api/training/liquidations", authenticateToken, (req: any, res: any) =
       return res.status(400).json({
         status: "error",
         message: `This participant's spending comes from their liquidation report ${report.submissionNo}, so it can't also be entered here. Program-wide costs (venue, speaker) can still be recorded without choosing a participant.`
+      });
+    }
+    // Someone marked "Did not attend" dropped out (requirement 6) and refunds any advance in
+    // full, so no spending is entered for them.
+    if (participant.attendance === "Did not attend") {
+      return res.status(400).json({
+        status: "error",
+        message: "HR recorded that this participant did not attend, so no expense can be charged to them. Program-wide costs (venue, speaker) can still be recorded without choosing a participant."
       });
     }
   }

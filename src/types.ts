@@ -566,9 +566,14 @@ export interface CashAdvance {
   purpose?: string;
   issuedBy: string;               // the Financial Officer who released it
   issuedAt: string;               // ISO timestamp
-  status: "Released" | "Liquidated" | "Cancelled";
+  // "Refunded": the employee did not attend and gave the whole advance back (requirement 6).
+  status: "Released" | "Liquidated" | "Cancelled" | "Refunded";
   liquidationId?: string;         // the report that settled it
   liquidatedAt?: string;
+  refundOrNo?: string;            // the official receipt for the refund
+  refundOrDate?: string;          // YYYY-MM-DD
+  refundedBy?: string;            // the Financial Officer who recorded it
+  refundedAt?: string;            // ISO timestamp
 }
 
 // The instructor's note 11: a reviewer returns a liquidation report with a checklist of what

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, Banknote, Loader2, RefreshCw } from "lucide-react";
-import { apiCall, formatCurrency } from "../../utils";
+import { apiCall, formatCurrency, formatDate } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
+import AdvanceRefundForm from "./AdvanceRefundForm";
 
 interface Props {
   /** Bumped by the parent so a liquidation elsewhere refreshes the funding state here. */
@@ -24,6 +25,10 @@ interface FundableRow {
   liquidationFiled: boolean;
   /** HR recorded that the participant did not attend: the advance must come back in full. */
   didNotAttend?: boolean;
+  advanceId?: string | null;
+  /** Set once the full refund of a non-attendee's advance is recorded. */
+  refundOrNo?: string | null;
+  refundOrDate?: string | null;
 }
 
 const todayIso = () => new Date().toISOString().split("T")[0];
@@ -47,6 +52,9 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
   const [dvDate, setDvDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  // Recording a non-attendee's refund: which advance, and what the server said it did.
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,10 +74,12 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
 
   // Only assignments that can still receive an advance: once a report is filed the server
   // refuses one (it could never be settled). Those are counted separately below.
-  const unfunded = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled), [rows]);
-  const filedWithoutAdvance = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus !== "Liquidated" && r.liquidationFiled), [rows]);
+  // (Someone who did not attend is never funded; their refunded advance is listed apart.)
+  const unfunded = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled), [rows]);
+  const filedWithoutAdvance = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && r.liquidationFiled), [rows]);
   const open = useMemo(() => rows.filter(r => r.funded), [rows]);
   const settled = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus === "Liquidated"), [rows]);
+  const refunded = useMemo(() => rows.filter(r => r.didNotAttend && r.advanceStatus === "Refunded"), [rows]);
   const outstanding = useMemo(
     () => open.reduce((sum, r) => sum + Number(r.advanceAmount || 0), 0),
     [open]
@@ -170,6 +180,16 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
           <button onClick={load} className="font-semibold underline shrink-0 cursor-pointer">Retry</button>
         </p>
       )}
+
+      {/* What a recorded refund did, in the server's words. */}
+      <div role="status" aria-live="polite">
+        {notice && (
+          <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-center gap-2">
+            <BadgeCheck size={13} className="shrink-0" aria-hidden="true" />
+            {notice}
+          </p>
+        )}
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-8 text-xs text-slate-500">
@@ -320,11 +340,36 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                       {row.didNotAttend ? "" : row.liquidationFiled ? " · liquidation filed" : " · not yet liquidated"}
                     </span>
                     {/* No liquidation form opens for a non-attendee, so the advance is
-                        collected back in full rather than liquidated. */}
+                        collected back in full rather than liquidated. Their share of the
+                        seminar stays held in the training budget until the refund is recorded. */}
                     {row.didNotAttend && (
-                      <span className="w-full rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                      <span className="w-full flex flex-wrap items-center justify-between gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
                         Did not attend: collect the full refund
+                        {row.advanceId && refundingId !== row.advanceId && (
+                          <button
+                            type="button"
+                            onClick={() => { setNotice(""); setRefundingId(row.advanceId!); }}
+                            className="cursor-pointer rounded border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                          >
+                            Record refund<span className="sr-only">: {row.employeeName}, {row.advanceNo}</span>
+                          </button>
+                        )}
                       </span>
+                    )}
+                    {row.didNotAttend && row.advanceId && refundingId === row.advanceId && (
+                      <AdvanceRefundForm
+                        advanceId={row.advanceId}
+                        advanceNo={row.advanceNo}
+                        employeeName={row.employeeName}
+                        amount={Number(row.advanceAmount || 0)}
+                        onCancel={() => setRefundingId(null)}
+                        onRecorded={async message => {
+                          setRefundingId(null);
+                          setNotice(message);
+                          await load();
+                          onReleased?.();
+                        }}
+                      />
                     )}
                   </li>
                 ))}
@@ -347,6 +392,29 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                     </span>
                     <span className="font-mono text-slate-500 shrink-0">
                       {formatCurrency(Number(row.advanceAmount || 0))} · liquidated
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {refunded.length > 0 && (
+            <div className="border-t border-slate-200 pt-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider mb-2">
+                Refunded by Non-Attendees ({refunded.length})
+              </h3>
+              <ul className="divide-y divide-slate-100">
+                {refunded.map(row => (
+                  <li key={row.activityId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <BadgeCheck size={13} className="text-emerald-600 shrink-0" aria-hidden="true" />
+                      <span className="font-mono text-slate-500">{row.advanceNo}</span>
+                      <span className="text-slate-700 truncate">{row.employeeName}</span>
+                    </span>
+                    <span className="font-mono text-slate-500 shrink-0">
+                      {formatCurrency(Number(row.advanceAmount || 0))} · refunded, OR {row.refundOrNo}
+                      {row.refundOrDate ? ` (${formatDate(row.refundOrDate)})` : ""}
                     </span>
                   </li>
                 ))}
