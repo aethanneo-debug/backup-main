@@ -704,6 +704,78 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1791833028276-821",
+      "timestamp": "2026-10-12T19:23:48.276Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791832725474-278",
+      "timestamp": "2026-10-12T19:18:45.474Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791832635454-870",
+      "timestamp": "2026-10-12T19:17:15.454Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791576261372-927",
+      "timestamp": "2026-10-09T20:04:21.372Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791576215345-958",
+      "timestamp": "2026-10-09T20:03:35.345Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791576191374-718",
+      "timestamp": "2026-10-09T20:03:11.374Z",
+      "userId": "u-7",
+      "username": "budget",
+      "role": "Budget Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791576169046-875",
+      "timestamp": "2026-10-09T20:02:49.046Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1791576143314-594",
+      "timestamp": "2026-10-09T20:02:23.314Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
       "id": "log-1791522207680-931",
       "timestamp": "2026-10-09T05:03:27.680Z",
       "userId": "u-7",
@@ -4840,7 +4912,8 @@
       "financeValidatedAt": "2026-09-25T06:30:33.784Z",
       "divisionChiefRemarks": "Certified by the Financial Officer under delegated authority.",
       "divisionChiefApprovedBy": "Juan dela Cruz",
-      "divisionChiefApprovedAt": "2026-09-25T06:30:33.784Z"
+      "divisionChiefApprovedAt": "2026-09-25T06:30:33.784Z",
+      "claimType": "Liquidation"
     },
     {
       "id": "liqsub-1791185620712",
@@ -4885,7 +4958,8 @@
       "hrStatus": "Returned by HR",
       "financeStatus": "Pending Validation",
       "divisionChiefStatus": "Pending Chief Approval",
-      "hrRemarks": "HR Return"
+      "hrRemarks": "HR Return",
+      "claimType": "Reimbursement"
     }
   ],
   "activityBudgetLinks": [
