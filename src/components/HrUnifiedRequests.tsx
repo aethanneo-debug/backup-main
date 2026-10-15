@@ -3,6 +3,7 @@ import { User, RequestStatus } from "../types";
 import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import ReturnForCorrectionDialog from "./liquidation/ReturnForCorrectionDialog";
+import ReportContents from "./liquidation/ReportContents";
 import { answeredCorrectionSummary } from "./liquidation/resubmit/correctionModel";
 import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
 
@@ -298,6 +299,9 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
                   {answeredCorrectionSummary(viewItem)}
                 </p>
               )}
+              {/* What was filed: the claim, its line items and the attached files, which HR
+                  checks before endorsing the report to Finance. */}
+              {viewItem._category === "Liquidation" && <ReportContents report={viewItem} />}
 
               {viewItem.destination && (
                 <div>

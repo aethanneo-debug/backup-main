@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ActiveSignatory, User, UserRole } from "../../types";
-import { apiCall, formatCurrency } from "../../utils";
+import { apiCall, formatCurrency, downloadBase64File as saveAttachedFile } from "../../utils";
 import CashAdvanceDesk from "./CashAdvanceDesk";
 import ReimbursementQueue from "./ReimbursementQueue";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
@@ -113,17 +113,9 @@ export default function LiquidationDeskView({
   }, [user.role]);
   const noAccountant = accountant === null;
 
+  // The shared helper only opens a real uploaded file (a base64 data URL), never a script.
   const downloadBase64File = (name: string, content: string) => {
-    if (!content) {
-      alert("No printable file attachments scanned for this mock metadata row.");
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = content;
-    link.download = name;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!saveAttachedFile(name, content)) alert(`"${name}" has no uploaded file that can be opened.`);
   };
 
   return (

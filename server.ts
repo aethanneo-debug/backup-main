@@ -1740,7 +1740,10 @@ app.delete("/api/employees/:id", authenticateToken, (req: any, res) => {
 app.get("/api/employees/:employeeId/pds-profile", authenticateToken, (req: any, res) => {
   const { employeeId } = req.params;
 
-  if ((req as any).user.role === UserRole.EMPLOYEE && req.user.employeeId !== employeeId) {
+  // A PDS holds an employee's ID numbers, addresses and family: HR and the Administrator may
+  // read anyone's, anyone else only their own (only Personnel were limited before).
+  const isHrOrAdmin = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.HR_OFFICER;
+  if (!isHrOrAdmin && req.user.employeeId !== employeeId) {
     return res.status(403).json({ status: "error", message: "Unauthorized: Employees can only access their own PDS" });
   }
 
@@ -1775,34 +1778,50 @@ app.post("/api/employees/:employeeId/pds", authenticateToken, (req: any, res) =>
   const { employeeId } = req.params;
   const { filename, data } = req.body;
 
+  // HR and the Administrator may save anyone's PDS; anyone else only their own. (It had no
+  // check at all: any signed-in user could overwrite anyone's PDS and official position.)
+  const isHrOrAdmin = req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.HR_OFFICER;
+  if (!isHrOrAdmin && req.user.employeeId !== employeeId) {
+    return res.status(403).json({ status: "error", message: "You can only save your own Personal Data Sheet." });
+  }
+  if (data !== undefined && (data === null || typeof data !== "object" || Array.isArray(data))) {
+    return res.status(400).json({ status: "error", message: "The PDS details must be sent as a form." });
+  }
+
   const emp = db.employees.find(e => e.employeeId === employeeId);
   if (!emp) {
     return res.status(404).json({ status: "error", message: "Target employee record not found" });
   }
 
-  if (filename) {
-    emp.pdsFieldName = filename || "PDS_Document_Uploaded.pdf";
+  if (filename && typeof filename === "string") {
+    emp.pdsFieldName = filename;
     emp.pdsUploadedAt = new Date().toISOString();
   }
 
 
   if (data) {
     if (!db.pds) db.pds = [];
-    
+    // The record's own keys stay the server's: an "employeeId" in the data would move this
+    // PDS to another employee. The official position is HR's and the Administrator's to set,
+    // and the salary the Administrator's alone, so they stay as stored when anyone else saves.
+    const { id: _id, employeeId: _employeeId, ...fields } = data;
+    if (!isHrOrAdmin) delete fields.position;
+    if (req.user.role !== UserRole.SUPER_ADMIN) delete fields.salary;
+
     // Update salary across the system if Admin modifies it
-    if (data.salary !== undefined && (req as any).user.role === UserRole.SUPER_ADMIN) {
+    if (data.salary !== undefined && req.user.role === UserRole.SUPER_ADMIN) {
       emp.salary = Number(data.salary);
     }
-    if (data.position !== undefined) {
+    if (data.position !== undefined && isHrOrAdmin) {
       emp.position = data.position;
     }
 
     const existingIndex = db.pds.findIndex((p: any) => p.employeeId === employeeId);
 
     if (existingIndex >= 0) {
-      db.pds[existingIndex] = { ...db.pds[existingIndex], ...data };
+      db.pds[existingIndex] = { ...db.pds[existingIndex], ...fields };
     } else {
-      db.pds.push({ id: `pds-${Date.now()}`, employeeId, ...data });
+      db.pds.push({ id: `pds-${Date.now()}`, employeeId, ...fields });
     }
   }
 
@@ -1814,10 +1833,19 @@ app.post("/api/employees/:employeeId/pds", authenticateToken, (req: any, res) =>
 // Employee specific details (Training & History)
 app.get("/api/employees/:employeeId/trainings", authenticateToken, (req: any, res: any) => {
   const { employeeId } = req.params;
-  const manualRecords = db.trainings.filter(t => t.employeeId === employeeId);
-  
+  // The PDS and Trainings & Seminars ask with the business id ("EMP001"), while seminar
+  // enrolments store Employee.id ("emp-..."), so match either form, as assigned_activities
+  // does. Matching only the first form meant a liquidated seminar never reached the
+  // employee's training history.
+  const forms = employeeIdForms(employeeId);
+  if (!canAccessEmployeeTrainingRecords(req.user, forms)) {
+    return res.status(403).json({ status: "error", message: "You can only view your own training history." });
+  }
+  const manualRecords = db.trainings.filter(t => forms.includes(t.employeeId));
+
+  // A seminar counts as completed once Finance has validated its liquidation report.
   const assignedRecords = db.trainingParticipants
-    .filter(p => p.employeeId === employeeId && p.status === "Liquidated")
+    .filter(p => forms.includes(p.employeeId) && p.status === "Liquidated")
     .map(p => {
       const prog = db.trainingPrograms.find(tp => tp.id === p.trainingProgramId);
       if (prog) {
@@ -1830,7 +1858,7 @@ app.get("/api/employees/:employeeId/trainings", authenticateToken, (req: any, re
           trainingHours: prog.totalHours || (prog.durationDays * 8),
           certificateFilename: "",
           status: "Verified",
-          remarks: `Assigned via Training Plan (${prog.category})`
+          remarks: `Assigned via Training Plan${prog.category ? ` (${prog.category})` : ""}`
         };
       }
       return null;
@@ -1928,7 +1956,13 @@ app.post("/api/employees/:employeeId/trainings", authenticateToken, (req: any, r
 
 app.get("/api/employees/:employeeId/history", authenticateToken, (req: any, res: any) => {
   const { employeeId } = req.params;
-  const history = db.employmentHistory.filter(h => h.employeeId === employeeId);
+  // Employment history is personal: HR and the Administrator may read anyone's, anyone else
+  // only their own (it had no check at all). Either id form, as the trainings route does.
+  const forms = employeeIdForms(employeeId);
+  if (!canAccessEmployeeTrainingRecords(req.user, forms)) {
+    return res.status(403).json({ status: "error", message: "You can only view your own employment history." });
+  }
+  const history = db.employmentHistory.filter(h => forms.includes(h.employeeId));
   res.json({ status: "success", data: history });
 });
 
@@ -3137,6 +3171,12 @@ function documentProblem(d: any): string | null {
   }
   for (const k of ["type", "filename", "size", "content"]) {
     if (d[k] !== undefined && d[k] !== null && typeof d[k] !== "string") return "A file's details must be text.";
+  }
+  // The file itself, as the upload screen sends it: a base64 data URL. Reviewers open it with a
+  // click, so anything else (a "javascript:" URL sent straight to the API) would run as a script
+  // in their session. Same pattern as SAFE_FILE_URL in src/utils.ts.
+  if (typeof d.content === "string" && d.content !== "" && !/^data:(?:[\w.+-]+\/[\w.+-]+)?(?:;[\w.+-]+=[^;,]*)*;base64,/i.test(d.content)) {
+    return "Each file must be uploaded from your device.";
   }
   return null;
 }
@@ -5908,9 +5948,11 @@ function runLiquidationReminderSweep() {
 }
 
 // Employees may read or act on their own training records; HR and Admin on anyone's.
+// HR and the Administrator may read anyone's training records; anyone else only their own
+// (an officer's login is linked to their own employee record too).
 function canAccessEmployeeTrainingRecords(user: any, employeeForms: string[]): boolean {
   if (isTrainingRecordsRole(user.role)) return true;
-  return user.role === UserRole.EMPLOYEE && !!user.employeeId && employeeForms.includes(user.employeeId);
+  return !!user.employeeId && employeeForms.includes(user.employeeId);
 }
 
 function computeTrainingHours(startDate: string, endDate: string, startTime?: string, endTime?: string): number {

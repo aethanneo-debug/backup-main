@@ -50,6 +50,24 @@ export function downloadCSV(data: any[], headers: string[], filename: string) {
   document.body.removeChild(link);
 }
 
+// What an uploaded file's stored content must look like: the base64 data URL the upload screens
+// make (FileReader.readAsDataURL). Anything else, such as a "javascript:" URL sent straight to
+// the API, would run as a script in the session of whoever clicked it.
+export const SAFE_FILE_URL = /^data:(?:[\w.+-]+\/[\w.+-]+)?(?:;[\w.+-]+=[^;,]*)*;base64,/i;
+
+// Saves a file attached to a record (a liquidation report's receipts, say), stored as a data
+// URL. Returns false when the record has no file content to save, or content that isn't one.
+export function downloadBase64File(name: string, content: string | undefined): boolean {
+  if (typeof content !== "string" || !SAFE_FILE_URL.test(content)) return false;
+  const link = document.createElement("a");
+  link.href = content;
+  link.download = name || "attachment";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  return true;
+}
+
 // Secure Fetch API wrapper
 export async function apiCall(endpoint: string, options: RequestInit = {}) {
   const token = localStorage.getItem("ipfms_token");

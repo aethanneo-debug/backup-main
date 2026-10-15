@@ -28,6 +28,9 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  // Whether the selected employee's record loaded. Until it has, the form holds blank defaults,
+  // and saving them would wipe the stored PDS.
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   useEffect(() => {
     if (!selectedEmployeeId) {
@@ -36,6 +39,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
       setServiceRecordsLedger([]);
       setErrorMsg("");
       setSuccessMsg("");
+      setProfileLoaded(false);
       return;
     }
 
@@ -48,14 +52,17 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
       setTrainingsLedger([]);
       setServiceRecordsLedger([]);
       setErrorMsg("");
+      setProfileLoaded(false);
       // Keep successMsg if it was set by handleSave
-      // setSuccessMsg(""); 
+      // setSuccessMsg("");
 
       try {
+        // The two side lists (training and service records) mustn't keep the PDS itself from
+        // loading: either may be refused (e.g. before the PDS upload) or fail on its own.
         const [pdsRes, trainRes, histRes] = await Promise.all([
           apiCall(`/api/employees/${requestedEmployeeId}/pds-profile`, { signal: controller.signal }),
-          apiCall(`/api/employees/${requestedEmployeeId}/trainings`, { signal: controller.signal }),
-          apiCall(`/api/employees/${requestedEmployeeId}/history`, { signal: controller.signal })
+          apiCall(`/api/employees/${requestedEmployeeId}/trainings`, { signal: controller.signal }).catch(() => null),
+          apiCall(`/api/employees/${requestedEmployeeId}/history`, { signal: controller.signal }).catch(() => null)
         ]);
 
         if (requestedEmployeeId !== selectedEmployeeId) {
@@ -63,6 +70,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
         }
 
         if (pdsRes.status === "success") {
+          setProfileLoaded(true);
           const emp = pdsRes.data.employee || {};
           const savedPds = pdsRes.data.pds || {};
 
@@ -120,7 +128,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
           }
         }
 
-        if (trainRes.status === "success") {
+        if (trainRes?.status === "success") {
           const trainData = trainRes.data || trainRes;
           if (Array.isArray(trainData)) {
             setTrainingsLedger(trainData.map(t => ({
@@ -133,7 +141,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
           }
         }
 
-        if (histRes.status === "success") {
+        if (histRes?.status === "success") {
            const histData = histRes.data || histRes;
            if (Array.isArray(histData)) {
              setServiceRecordsLedger(histData.map(h => ({
@@ -242,6 +250,11 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
   const handleSave = async () => {
     if (!selectedEmployeeId) {
       setErrorMsg("Please select an employee.");
+      return;
+    }
+    // The form holds blank defaults until the record loads; saving them would wipe it.
+    if (!profileLoaded) {
+      setErrorMsg("This employee's record didn't load, so it can't be saved. Select the employee again to reload it.");
       return;
     }
     try {
@@ -608,7 +621,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
               </>
             )}
             <button onClick={handlePrint} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded shadow text-xs font-bold uppercase transition">Print PDS</button>
-            <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow text-xs font-bold uppercase transition">Save Changes</button>
+            <button onClick={handleSave} disabled={!profileLoaded || loading} title={profileLoaded ? undefined : "The record hasn't loaded yet"} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow text-xs font-bold uppercase transition disabled:cursor-not-allowed disabled:opacity-50">Save Changes</button>
           </div>
 
         </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument } from "../types";
-import { apiCall, getLocalTodayString, formatCurrency } from "../utils";
+import { apiCall, getLocalTodayString, formatCurrency, downloadBase64File as saveAttachedFile } from "../utils";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
 import {
   newParticular,
@@ -864,17 +864,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     }
   };
 
+  // The shared helper only opens a real uploaded file (a base64 data URL), never a script.
   const downloadBase64File = (name: string, content: string) => {
-    if (!content) {
-      alert("No printable file attachments scanned for this mock metadata row.");
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = content;
-    link.download = name;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!saveAttachedFile(name, content)) alert(`"${name}" has no uploaded file that can be opened.`);
   };
 
   function handleRemoveAttached(id: string) {
