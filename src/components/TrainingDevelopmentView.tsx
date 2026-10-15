@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from "react";
-import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee } from "../types";
+import React, { useState, useEffect, useRef } from "react";
+import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem } from "../types";
 import { apiCall, formatCurrency } from "../utils";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import AttendanceModal from "./training/AttendanceModal";
 import NeedCoverageModal from "./training/NeedCoverageModal";
+import PlanNeedPicker, { PlanFill, PlanFillNote, eligibleListers } from "./training/PlanNeedPicker";
 import TrainingNeedsPlanA from "./training/TrainingNeedsPlanA";
 import TrainingMonitoringPlanD from "./training/TrainingMonitoringPlanD";
 import TrainingEvaluationsDesk from "./training/evaluation/TrainingEvaluationsDesk";
@@ -21,6 +22,17 @@ const TAB_BLURB: Record<string, string> = {
 // Shared with the Plan A / Plan D sheets so all three tabs read as one document.
 const CELL_INPUT = "w-full border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none";
 const CHIP_BTN = "text-[10px] font-semibold bg-white border border-slate-300 text-slate-700 px-2 py-1 rounded-lg hover:bg-slate-50 flex items-center gap-1.5";
+
+// A row's title box, so a row added from the plan can take focus once it renders.
+const titleInputId = (rowId: string) => `tdp-title-${rowId}`;
+// Unique even when rows are added in quick succession.
+const newDraftId = () => `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+// A set of plan needs, order-free, normalised as the server matches titles.
+const needsKey = (titles: string[]) => titles.map(t => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()).sort().join("|");
+const sameIds = (a?: string[], b?: string[]) => {
+  const x = new Set(a ?? []), y = new Set(b ?? []);
+  return x.size === y.size && [...x].every(id => y.has(id));
+};
 
 export default function TrainingDevelopmentView({ user, triggerRefresh }: { user: any, triggerRefresh: () => void }) {
   const [programs, setPrograms] = useState<TrainingProgram[]>([]);
@@ -45,7 +57,19 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
   const [newRows, setNewRows] = useState<any[]>([]);
   const [showParticipantModal, setShowParticipantModal] = useState<string | null>(null); // row id or "new-index"
   const [participantModalData, setParticipantModalData] = useState<{ program: PickerProgram; selectedIds: string[] } | null>(null);
-  
+
+  // Set by handleAddFromPlan: the draft row to bring into view and focus once it renders.
+  const focusRowOnRender = useRef<string | null>(null);
+  useEffect(() => {
+    const id = focusRowOnRender.current;
+    if (!id) return;
+    focusRowOnRender.current = null;
+    const input = document.getElementById(titleInputId(id)) as HTMLInputElement | null;
+    // The whole row, not just its first box; "nearest" doesn't scroll when it is already in view.
+    input?.closest("tr")?.scrollIntoView({ block: "nearest" });
+    input?.focus({ preventScroll: true });
+  }, [newRows]);
+
   const [showBreakdownModal, setShowBreakdownModal] = useState<string | null>(null);
   const [breakdownData, setBreakdownData] = useState<{ category: string; total: number }[]>([]);
   const [breakdownProgram, setBreakdownProgram] = useState<any>(null);
@@ -149,31 +173,86 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
     newRows.reduce((sum, nr) => sum + Number(nr.allocatedBudget || 0), 0);
   const remainingAnnualBudget = Math.round((activeBudget - draftCommitted) * 100) / 100;
 
+  const fyLabel = activeFy?.label || "2026";
+
+  // A blank draft row. It no longer sets `category`: that column is gone, and seminars
+  // saved before keep theirs.
+  const blankDraftRow = (id: string) => ({
+    id,
+    title: "",
+    description: "",
+    allocatedBudget: 0,
+    startDate: "",
+    endDate: "",
+    startTime: "08:00",
+    endTime: "17:00",
+    venue: "",
+    facilitator: "",
+    maxParticipants: 1,
+    targetDivision: "",
+    participantIds: [] as string[],
+    fulfillsNeedTitles: [] as string[],
+    fiscalYear: fyLabel
+  });
+
   const handleAddRow = () => {
-    const newId = `new-${Date.now()}`;
-    setNewRows([...newRows, {
-      id: newId,
-      title: "",
-      description: "",
-      category: "Technical",
-      allocatedBudget: 0,
-      startDate: "",
-      endDate: "",
-      startTime: "08:00",
-      endTime: "17:00",
-      venue: "",
-      facilitator: "",
-      maxParticipants: 1,
-      targetDivision: "",
-      participantIds: [],
-      fulfillsNeedTitles: [],
-      fiscalYear: activeFy?.label || "2026"
+    setNewRows(prev => [...prev, blankDraftRow(newDraftId())]);
+  };
+
+  // Seats a draft row with the eligible employees who listed any of `needs` in Plan A, and sets
+  // Max to their number. It patches the row by id with a functional update, so rows added in
+  // quick succession, or edited while it runs, keep each other's changes; a row discarded
+  // meanwhile is simply not found. The result applies only while the row still covers exactly
+  // those needs, so a need changed in between is never seated with the old need's employees.
+  // `planFillIds` remembers whom the lookup seated, and `planFillMax` the Max it set, to tell
+  // later whether HR changed them by hand.
+  const fillFromPlan = async (id: string, needs: string[], title: string) => {
+    const key = needsKey(needs);
+    const patchRow = (fields: (r: any) => Record<string, any>) =>
+      setNewRows(prev => prev.map(r => (r.id === id && needsKey(r.fulfillsNeedTitles || []) === key ? { ...r, ...fields(r) } : r)));
+    patchRow(() => ({ planFill: "loading" as PlanFill }));
+    try {
+      const ids = await eligibleListers(title, fyLabel, needs);
+      const seats = Math.max(1, ids.length);
+      patchRow(r => {
+        // Max follows the head count, unless HR set it by hand since the last fill: then it is
+        // kept, only growing to fit (each person's share is the allocation ÷ seats).
+        const ownMax = r.planFillMax === undefined || String(r.maxParticipants) === String(r.planFillMax);
+        return {
+          participantIds: ids,
+          planFillIds: ids,
+          maxParticipants: ownMax ? seats : Math.max(parseInt(String(r.maxParticipants)) || 1, ids.length),
+          ...(ownMax ? { planFillMax: seats } : {}),
+          planFill: (ids.length > 0 ? "done" : "nobody") as PlanFill
+        };
+      });
+    } catch {
+      // Participants stay as they were; the row says so, and HR picks them by hand.
+      patchRow(() => ({ planFill: "failed" as PlanFill }));
+    }
+  };
+
+  // "Add a seminar from the plan" (PlanNeedPicker): a draft row named after the training and
+  // linked to it, seated with the eligible employees who listed it.
+  const handleAddFromPlan = (item: TrainingNeedCatalogItem) => {
+    const id = newDraftId();
+    setNewRows(prev => [...prev, {
+      ...blankDraftRow(id),
+      title: item.title,
+      autoTitle: item.title,
+      fulfillsNeedTitles: [item.title],
+      planFill: "loading" as PlanFill
     }]);
+    focusRowOnRender.current = id;
+    fillFromPlan(id, [item.title], item.title);
   };
 
   const handleSaveRow = async (id: string, isNew: boolean) => {
     const row = isNew ? newRows.find(r => r.id === id) : editingRows[id];
     if (!row) return;
+    // Still looking up who listed it: saving now would save the seminar with nobody in it.
+    // (The Save button is disabled meanwhile; this is the guard behind it.)
+    if (row.planFill === "loading") return;
 
     if (!row.title || !row.startDate || !row.endDate) {
       alert("Please fill in the required fields (Title, Start Date, End Date).");
@@ -215,12 +294,17 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
     }
 
     if (res && res.status === "success") {
+      // Functional updates: other rows may have been added or edited while the save was in
+      // flight (a row added from the plan gets its participants a moment later), and the
+      // lists as they were before the await would drop those changes.
       if (isNew) {
-        setNewRows(newRows.filter(r => r.id !== id));
+        setNewRows(prev => prev.filter(r => r.id !== id));
       } else {
-        const updated = { ...editingRows };
-        delete updated[id];
-        setEditingRows(updated);
+        setEditingRows(prev => {
+          const updated = { ...prev };
+          delete updated[id];
+          return updated;
+        });
       }
       fetchData();
       triggerRefresh();
@@ -235,7 +319,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
 
   const handleDeleteProgram = async (id: string, isNew: boolean) => {
     if (isNew) {
-      setNewRows(newRows.filter(r => r.id !== id));
+      setNewRows(prev => prev.filter(r => r.id !== id));
       return;
     }
     if (!confirm("Are you sure you want to delete this training program?")) return;
@@ -266,7 +350,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
 
   const updateRow = (id: string, field: string, value: any, isNew: boolean) => {
     if (isNew) {
-      setNewRows(newRows.map(r => {
+      // Functional: a row added from the plan gets its participants a moment later
+      // (handleAddFromPlan), and a value computed from this render would undo that.
+      setNewRows(prev => prev.map(r => {
         if (r.id === id) {
           const updated = { ...r, [field]: value };
           if (field === 'startDate' && updated.endDate && new Date(updated.endDate) < new Date(value)) {
@@ -340,19 +426,25 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
 
     // The seminar is named after the need it answers — but only while HR hasn't
     // written their own title. `autoTitle` remembers what was filled in last, so a
-    // title the officer typed is never overwritten.
-    // All fields go in ONE state update: updateRow closes over the current render's
-    // state, so separate calls would overwrite each other.
-    const patchRow = (r: any) => {
+    // title the officer typed is never overwritten. One functional update per list,
+    // so a lookup landing meanwhile isn't lost.
+    const canAutofill = (r: any) => {
       const typed = (r.title || "").trim();
-      const canAutofill = !typed || typed === (r.autoTitle || "");
-      return titles.length > 0 && canAutofill
-        ? { ...r, fulfillsNeedTitles: titles, title: titles[0], autoTitle: titles[0] }
-        : { ...r, fulfillsNeedTitles: titles };
+      return !typed || typed === (r.autoTitle || "");
     };
+    const patchRow = (r: any) => titles.length > 0 && canAutofill(r)
+      ? { ...r, fulfillsNeedTitles: titles, title: titles[0], autoTitle: titles[0] }
+      : { ...r, fulfillsNeedTitles: titles };
 
     if (isNew) {
+      const before = newRows.find(r => r.id === rowId);
       setNewRows(prev => prev.map(r => (r.id === rowId ? patchRow(r) : r)));
+      // A row added from the plan follows its needs: it is seated again with whoever listed
+      // any of them, unless HR has picked the participants by hand since (that choice stays).
+      if (before?.planFill && titles.length > 0 && needsKey(titles) !== needsKey(before.fulfillsNeedTitles || [])
+          && sameIds(before.participantIds, before.planFillIds)) {
+        fillFromPlan(rowId, titles, canAutofill(before) ? titles[0] : before.title.trim());
+      }
     } else {
       setEditingRows(prev => ({ ...prev, [rowId]: patchRow(prev[rowId] || {}) }));
     }
@@ -447,52 +539,97 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
     
     // For participants, if viewing, we show count. If editing, we show a button.
     const partsCount = isEditing ? (row.participantIds ? row.participantIds.length : 0) : participants.filter(part => part.trainingProgramId === p.id).length;
+    // A row added from the plan while its participants are being looked up (handleAddFromPlan).
+    const filling = isNew && row.planFill === "loading";
 
     return (
       <tr key={p.id} className={`align-top hover:bg-slate-50/60 ${isEditing ? 'bg-blue-50/40' : ''}`}>
-        {/* 1. The plan need comes first: it ranks the participants and names the seminar. */}
-        <td className="p-2 border-r border-slate-100 min-w-[150px]">
+        {/* 1. What the seminar is: its title, and the Plan A needs it answers. The needs rank
+            the participants and let Plan D mark them accomplished. One seminar may cover several. */}
+        <td className="p-2 border-r border-slate-100 min-w-[180px]">
           {isEditing ? (
             <div className="space-y-1">
-              <button onClick={() => openCoverageModal(p.id, isNew)} className={CHIP_BTN}>
-                <Target size={12} /> Covers {(row.fulfillsNeedTitles || []).length} plan need{(row.fulfillsNeedTitles || []).length === 1 ? "" : "s"}
+              <input id={titleInputId(p.id)} type="text" value={row.title} onChange={e => updateRow(p.id, "title", e.target.value, isNew)} className={CELL_INPUT} placeholder="Title" aria-label="Training title" />
+              {(row.fulfillsNeedTitles || []).length > 0 ? (
+                (row.fulfillsNeedTitles || []).map((t: string) => (
+                  <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
+                ))
+              ) : (
+                <div className="px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200 text-[10px] font-semibold leading-snug">No plan need linked yet</div>
+              )}
+              {/* Disabled while the row's participants are being looked up for its current needs. */}
+              <button type="button" onClick={() => openCoverageModal(p.id, isNew)} disabled={filling} className="flex items-center gap-1 rounded text-[10px] font-semibold text-blue-700 hover:text-blue-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline">
+                <Target size={11} aria-hidden="true" /> Change plan needs
               </button>
-              {(row.fulfillsNeedTitles || []).map((t: string) => (
-                <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
-              ))}
             </div>
           ) : (
-            (p.fulfillsNeedTitles || []).length > 0 ? (
-              <div className="space-y-1">
-                {p.fulfillsNeedTitles.map((t: string) => (
+            <div className="space-y-1">
+              <div className="font-bold text-slate-800">{p.title}</div>
+              {(p.fulfillsNeedTitles || []).length > 0 ? (
+                p.fulfillsNeedTitles.map((t: string) => (
                   <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
-                ))}
-              </div>
-            ) : (
-              /* A seminar with no covered need can never mark anything accomplished in
-                 Plan D, and its participants lose the "Needs this" ranking. That used to
-                 read as grey italic small print, which is how it went unnoticed. */
-              <div className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 leading-snug">
-                <span className="block text-[10px] font-semibold text-amber-800">Not linked to the plan</span>
-                <span className="block text-[9px] text-amber-700">
-                  Edit this row and tick the need it answers &mdash; otherwise Plan D can never
-                  mark it accomplished.
-                </span>
-              </div>
-            )
+                ))
+              ) : (
+                /* A seminar with no covered need can never mark anything accomplished in
+                   Plan D, and its participants lose the "Needs this" ranking. That used to
+                   read as grey italic small print, which is how it went unnoticed. */
+                <div className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 leading-snug">
+                  <span className="block text-[10px] font-semibold text-amber-800">Not linked to the plan</span>
+                  <span className="block text-[9px] text-amber-700">
+                    Edit this row and tick the need it answers &mdash; otherwise Plan D can never
+                    mark it accomplished.
+                  </span>
+                </div>
+              )}
+            </div>
           )}
         </td>
 
-        {/* 2. Participants, ranked by that need. */}
-        <td className="p-2 border-r border-slate-100">
+        {/* 2. When. */}
+        <td className="p-2 border-r border-slate-100 whitespace-nowrap">
+          {isEditing ? (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <input type="date" value={row.startDate} min={new Date().toISOString().split('T')[0]} onChange={e => updateRow(p.id, "startDate", e.target.value, isNew)} className={`${CELL_INPUT} w-32`} aria-label="Start date" />
+                <input type="time" value={row.startTime} onChange={e => updateRow(p.id, "startTime", e.target.value, isNew)} className={`${CELL_INPUT} w-24`} aria-label="Start time" />
+              </div>
+              <div className="flex items-center gap-1">
+                <input type="date" value={row.endDate} min={row.startDate || new Date().toISOString().split('T')[0]} onChange={e => updateRow(p.id, "endDate", e.target.value, isNew)} className={`${CELL_INPUT} w-32 ${row.endDate && row.startDate && new Date(row.endDate) < new Date(row.startDate) ? 'border-rose-500' : ''}`} aria-label="End date" />
+                <input type="time" value={row.endTime} onChange={e => updateRow(p.id, "endTime", e.target.value, isNew)} className={`${CELL_INPUT} w-24`} aria-label="End time" />
+              </div>
+            </div>
+          ) : (
+            <div className="text-slate-600">
+              {p.startDate} {p.startTime} <br/>to {p.endDate} {p.endTime}
+              <div className="mt-1 font-semibold text-indigo-700">({p.totalHours} hrs)</div>
+            </div>
+          )}
+        </td>
+
+        {/* 3. Who attends, ranked by the plan needs. The target division and specialization
+            steer the recommendations and auto-enrolment, so they sit with the participants. */}
+        <td className="p-2 border-r border-slate-100 min-w-[180px]">
            {isEditing ? (
              <div className="flex flex-col gap-1.5 items-start">
+               {/* Disabled while a row added from the plan looks up who listed it, which
+                   sets both; the note below says so. */}
                <div className="flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-slate-500">
-                 Max <input type="number" className={`${CELL_INPUT} w-16`} value={row.maxParticipants} onChange={e => updateRow(p.id, "maxParticipants", e.target.value, isNew)} />
+                 Max <input type="number" className={`${CELL_INPUT} w-16 disabled:bg-slate-100 disabled:text-slate-400`} value={row.maxParticipants} onChange={e => updateRow(p.id, "maxParticipants", e.target.value, isNew)} disabled={filling} aria-label="Maximum participants" />
                </div>
-               <button onClick={() => openParticipantModal(p.id, isNew)} className={CHIP_BTN}>
+               <button onClick={() => openParticipantModal(p.id, isNew)} className={`${CHIP_BTN} disabled:cursor-not-allowed disabled:opacity-50`} disabled={filling}>
                  <Users size={12} /> {partsCount} Selected
                </button>
+               <PlanFillNote status={isNew ? row.planFill : undefined} selected={partsCount} />
+               <div className="w-full space-y-1 border-t border-slate-200 pt-2">
+                 <select value={row.targetDivision || ""} onChange={e => updateRow(p.id, "targetDivision", e.target.value, isNew)} className={`${CELL_INPUT} text-slate-600`} aria-label="Target division">
+                   <option value="">-- No Target Division --</option>
+                   <option value="Administrative and Finance Division">Administrative and Finance Division</option>
+                   <option value="Legal Division">Legal Division</option>
+                   <option value="Adjudication Division">Adjudication Division</option>
+                   <option value="Technical Division">Technical Division</option>
+                 </select>
+                 <input type="text" value={row.targetSpecialization || ""} onChange={e => updateRow(p.id, "targetSpecialization", e.target.value, isNew)} className={`${CELL_INPUT} text-slate-600`} placeholder="Target Specialization..." aria-label="Target specialization" />
+               </div>
              </div>
            ) : (
              <div className="text-slate-600">
@@ -520,59 +657,31 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
                    })}
                  </div>
                )}
+               {(p.targetDivision || p.targetSpecialization) && (
+                 <div className="mt-1.5 flex flex-col gap-1">
+                   {p.targetDivision && (
+                     <span className="text-[10px] text-slate-500 font-medium">Div: {p.targetDivision}</span>
+                   )}
+                   {p.targetSpecialization && (
+                     <span className="text-[10px] text-slate-500 font-medium">Spec: {p.targetSpecialization}</span>
+                   )}
+                 </div>
+               )}
              </div>
            )}
         </td>
 
-        {/* 3. Title — filled from the plan need, still editable. */}
-        <td className="p-2 border-r border-slate-100 min-w-[140px]">
-          {isEditing ? (
-            <input type="text" value={row.title} onChange={e => updateRow(p.id, "title", e.target.value, isNew)} className={CELL_INPUT} placeholder="Title" />
-          ) : (
-            <div className="font-semibold text-slate-800">{p.title}</div>
-          )}
-        </td>
+        {/* 4. Description, 5. Allocated Budget, 6. Facilitator, 7. Actions. */}
         <td className="p-2 border-r border-slate-100 min-w-[180px]">
           {isEditing ? (
-            <input type="text" value={row.description} onChange={e => updateRow(p.id, "description", e.target.value, isNew)} className={CELL_INPUT} placeholder="Description" />
+            <input type="text" value={row.description} onChange={e => updateRow(p.id, "description", e.target.value, isNew)} className={CELL_INPUT} placeholder="Description" aria-label="Description" />
           ) : (
             <div className="text-slate-600 truncate max-w-[200px]">{p.description}</div>
           )}
         </td>
         <td className="p-2 border-r border-slate-100">
           {isEditing ? (
-            <div className="flex flex-col gap-1">
-              <select value={row.category} onChange={e => updateRow(p.id, "category", e.target.value, isNew)} className={CELL_INPUT}>
-                <option>Technical</option>
-                <option>Leadership</option>
-                <option>Administrative</option>
-                <option>Legal/Judicial</option>
-                <option>Mandatory</option>
-              </select>
-              <select value={row.targetDivision || ""} onChange={e => updateRow(p.id, "targetDivision", e.target.value, isNew)} className={`${CELL_INPUT} text-slate-600`}>
-                <option value="">-- No Target Division --</option>
-                <option value="Administrative and Finance Division">Administrative and Finance Division</option>
-                <option value="Legal Division">Legal Division</option>
-                <option value="Adjudication Division">Adjudication Division</option>
-                <option value="Technical Division">Technical Division</option>
-              </select>
-              <input type="text" value={row.targetSpecialization || ""} onChange={e => updateRow(p.id, "targetSpecialization", e.target.value, isNew)} className={`${CELL_INPUT} text-slate-600`} placeholder="Target Specialization..." />
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1 items-start">
-              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700 border-slate-200 text-[10px] font-semibold">{p.category}</span>
-              {p.targetDivision && (
-                <span className="text-[10px] text-slate-500 font-medium">Div: {p.targetDivision}</span>
-              )}
-              {p.targetSpecialization && (
-                <span className="text-[10px] text-slate-500 font-medium">Spec: {p.targetSpecialization}</span>
-              )}
-            </div>
-          )}
-        </td>
-        <td className="p-2 border-r border-slate-100">
-          {isEditing ? (
-            <input type="number" value={row.allocatedBudget} onChange={e => updateRow(p.id, "allocatedBudget", e.target.value, isNew)} className={CELL_INPUT} placeholder="0.00" />
+            <input type="number" value={row.allocatedBudget} onChange={e => updateRow(p.id, "allocatedBudget", e.target.value, isNew)} className={CELL_INPUT} placeholder="0.00" aria-label="Allocated budget" />
           ) : (
             <>
               <div className="font-bold text-slate-800">{formatCurrency(Number(p.allocatedBudget) || 0)}</div>
@@ -620,28 +729,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
             </>
           )}
         </td>
-        <td className="p-2 border-r border-slate-100 whitespace-nowrap">
-          {isEditing ? (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1">
-                <input type="date" value={row.startDate} min={new Date().toISOString().split('T')[0]} onChange={e => updateRow(p.id, "startDate", e.target.value, isNew)} className={`${CELL_INPUT} w-32`} />
-                <input type="time" value={row.startTime} onChange={e => updateRow(p.id, "startTime", e.target.value, isNew)} className={`${CELL_INPUT} w-24`} />
-              </div>
-              <div className="flex items-center gap-1">
-                <input type="date" value={row.endDate} min={row.startDate || new Date().toISOString().split('T')[0]} onChange={e => updateRow(p.id, "endDate", e.target.value, isNew)} className={`${CELL_INPUT} w-32 ${row.endDate && row.startDate && new Date(row.endDate) < new Date(row.startDate) ? 'border-rose-500' : ''}`} />
-                <input type="time" value={row.endTime} onChange={e => updateRow(p.id, "endTime", e.target.value, isNew)} className={`${CELL_INPUT} w-24`} />
-              </div>
-            </div>
-          ) : (
-            <div className="text-slate-600">
-              {p.startDate} {p.startTime} <br/>to {p.endDate} {p.endTime}
-              <div className="mt-1 font-semibold text-indigo-700">({p.totalHours} hrs)</div>
-            </div>
-          )}
-        </td>
         <td className="p-2 border-r border-slate-100">
           {isEditing ? (
-            <input type="text" value={row.facilitator} onChange={e => updateRow(p.id, "facilitator", e.target.value, isNew)} className={CELL_INPUT} placeholder="Facilitator" />
+            <input type="text" value={row.facilitator} onChange={e => updateRow(p.id, "facilitator", e.target.value, isNew)} className={CELL_INPUT} placeholder="Facilitator" aria-label="Facilitator" />
           ) : (
             <div className="text-slate-600 truncate max-w-[150px]">{p.facilitator || "N/A"}</div>
           )}
@@ -649,7 +739,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
         <td className="p-2 whitespace-nowrap">
           {isEditing ? (
             <div className="flex gap-1.5">
-              <button onClick={() => handleSaveRow(p.id, isNew)} className="p-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100" title="Save">
+              <button onClick={() => handleSaveRow(p.id, isNew)} disabled={filling} className="p-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50" title="Save">
                 <Save size={14} />
               </button>
               <button onClick={() => handleDeleteProgram(p.id, isNew)} className="p-1.5 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100" title={isNew ? "Discard" : "Delete"}>
@@ -690,7 +780,10 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    // w-full min-w-0: App's <main> is a flex row, and a flex item never shrinks below its
+    // content's width by default. Without these, a row being edited (fixed-width date and
+    // time boxes) widened the whole page instead of scrolling inside the table's own box.
+    <div className="max-w-7xl mx-auto space-y-6 w-full min-w-0">
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Training Development Plan</h2>
@@ -814,27 +907,37 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
             {activePrograms.length} program{activePrograms.length === 1 ? "" : "s"}
           </span>
         </div>
+        {/* The quickest start: a training from this year's plan becomes a seminar row with
+            its title, its plan link and the employees who listed it. HR and the Administrator
+            only: they alone may read the plan and save seminars (server-side). */}
+        {[UserRole.SUPER_ADMIN, UserRole.HR_OFFICER].includes(user.role) && (
+          <PlanNeedPicker
+            fiscalYear={fyLabel}
+            seminars={activePrograms}
+            onPick={handleAddFromPlan}
+            onOpenPlan={() => setActiveTab("plan-a")}
+          />
+        )}
         <div className="overflow-x-auto border border-slate-200 rounded-lg">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              {/* Ordered as HR works: the plan need drives the ranking, which fills the title. */}
+              {/* Ordered as a seminar is read: what it is (and the plan needs it answers),
+                  when, who attends, then the details and the money. */}
               <tr className="bg-slate-900 text-white uppercase text-[9px] tracking-wide">
-                <th className="p-2 border-r border-slate-700">Plan Need</th>
-                <th className="p-2 border-r border-slate-700">Participants</th>
-                <th className="p-2 border-r border-slate-700">Training Title</th>
-                <th className="p-2 border-r border-slate-700">Description</th>
-                <th className="p-2 border-r border-slate-700">Category</th>
-                <th className="p-2 border-r border-slate-700">Allocated Budget</th>
-                <th className="p-2 border-r border-slate-700">Dates</th>
-                <th className="p-2 border-r border-slate-700">Facilitator</th>
-                <th className="p-2 w-24">Actions</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Plan Title</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Date &amp; Time</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Participants</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Description</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Allocated Budget</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Facilitator</th>
+                <th scope="col" className="p-2 w-24">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {newRows.map(nr => renderRow(nr, true))}
               {activePrograms.length === 0 && newRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-500">
+                  <td colSpan={7} className="p-8 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <BookOpen size={48} className="text-slate-300 mb-4" />
                       <p>No training programs found for this fiscal year.</p>

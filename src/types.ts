@@ -857,7 +857,9 @@ export interface TrainingProgram {
   id: string;
   title: string;
   description: string;
-  category: string;
+  // No longer asked for (the planner's Category column was dropped on 2026-10-14); seminars
+  // saved before keep theirs.
+  category?: string;
   allocatedBudget: number;
   usedBudget: number;
   fiscalYear: string;

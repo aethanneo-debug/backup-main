@@ -254,9 +254,13 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
                               {activity.status}
                             </span>
                           </div>
-                          <div className="text-xs text-slate-600 mb-1">
-                            <span className="font-semibold text-slate-700">Category:</span> {activity.category}
-                          </div>
+                          {/* Seminars created since the Category column was dropped have none;
+                              older ones keep showing theirs. */}
+                          {String(activity.category ?? "").trim() && (
+                            <div className="text-xs text-slate-600 mb-1">
+                              <span className="font-semibold text-slate-700">Category:</span> {activity.category}
+                            </div>
+                          )}
                           <div className="text-xs text-slate-600 mb-1">
                             <span className="font-semibold text-slate-700">Date:</span> {activity.dateConducted} ({activity.startTime} - {activity.endTime})
                           </div>
