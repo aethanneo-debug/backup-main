@@ -5680,12 +5680,48 @@ function onOrBeforeAsOf(dateStr: string | null, asOf: string): boolean {
   return !dateStr || daysBetween(dateStr, asOf) >= 0;
 }
 
-// Plan D: did this employee already take the training they were listed as needing?
+// Plan D: did this employee take, during the plan year, the training they were listed as needing?
 // Whether an enrolment counts as attended (Plan D): HR's attendance record when there is
 // one; for an enrolment never marked, the older evidence of a filed or settled report.
 function participantAttended(p: any): boolean {
   if (p.attendance) return p.attendance === "Attended";
   return p.status === "Liquidated" || p.status === "Liquidation Pending" || p.status === "Completed";
+}
+
+// Whether a dated record (a recorded training, a PDS entry) counts toward a need's plan year:
+// dated within that fiscal year, or from the day the need was listed until the year ends. The
+// second covers a year that started early, as when the next year is opened before its 1
+// January. An undated record can't be placed in a year, so it doesn't count; HR can still
+// mark the need accomplished by hand.
+function inNeedPlanYear(need: TrainingNeed, date: string | null): boolean {
+  if (!date) return false;
+  const fy: any = (db.fiscalYears || []).find((f: any) => f.label === need.fiscalYear);
+  const calendarYear = /^\d{4}$/.test(String(need.fiscalYear)) ? String(need.fiscalYear) : null;
+  const start = toIsoDateLoose(fy?.start_date) || (calendarYear ? `${calendarYear}-01-01` : null);
+  const end = toIsoDateLoose(fy?.end_date) || (calendarYear ? `${calendarYear}-12-31` : null);
+  const listed = toIsoDateLoose(need.createdAt);
+  const from = [start, listed].filter(Boolean).sort()[0] || null;
+  return (!from || date >= from) && (!end || date <= end);
+}
+
+// For a need the rollover carried forward because it was still unmet: the entry it continues,
+// the same need in the latest earlier plan year back to the one it was first raised in.
+// Fiscal-year labels are years ("2027"), so the search always moves to an earlier year. A
+// person can have one title under two columns; the carried copy keeps its column, so that
+// entry comes first.
+function earlierNeedEntry(need: TrainingNeed): TrainingNeed | null {
+  const own = String(need.fiscalYear);
+  const first = String(need.carriedFromFiscalYear || "");
+  if (!/^\d{4}$/.test(own) || !/^\d{4}$/.test(first)) return null;
+  const forms = employeeIdForms(need.employeeId);
+  const key = normalizeTitle(need.title);
+  for (let year = Number(own) - 1; year >= Number(first); year--) {
+    const entries = (db.trainingNeeds || []).filter((n: TrainingNeed) =>
+      n.fiscalYear === String(year) && forms.includes(n.employeeId) && normalizeTitle(n.title) === key);
+    const entry = entries.find(n => n.category === need.category) || entries[0];
+    if (entry) return entry;
+  }
+  return null;
 }
 
 function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatus {
@@ -5694,13 +5730,19 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
   }
   const forms = employeeIdForms(need.employeeId);
   const needKey = normalizeTitle(need.title);
+  // A need belongs to one plan year, and only training done for that year accomplishes it: a
+  // seminar of the same fiscal year (as the participant picker matches needs), or a record
+  // dated in that year. Before, a training completed in one year also "completed" the same
+  // need listed again for a later year. A need carried forward unmet also follows the entry it
+  // continues (5).
 
   // 1. A seminar HR explicitly linked to this need — exact, no title guessing.
   for (const p of db.trainingParticipants || []) {
     if (!forms.includes(p.employeeId)) continue;
     if (!participantAttended(p)) continue;
     const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
-    if (!prog || !(prog.fulfillsNeedTitles || []).some(t => normalizeTitle(t) === needKey)) continue;
+    if (!prog || prog.fiscalYear !== need.fiscalYear) continue;
+    if (!(prog.fulfillsNeedTitles || []).some(t => normalizeTitle(t) === needKey)) continue;
     const when = toIsoDateLoose(prog.endDate);
     if (!onOrBeforeAsOf(when, asOf)) continue;
     return {
@@ -5716,7 +5758,7 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
     if (!forms.includes(p.employeeId)) continue;
     if (!participantAttended(p)) continue;
     const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
-    if (!prog || !titlesMatch(need.title, prog.title)) continue;
+    if (!prog || prog.fiscalYear !== need.fiscalYear || !titlesMatch(need.title, prog.title)) continue;
     const when = toIsoDateLoose(prog.endDate);
     if (!onOrBeforeAsOf(when, asOf)) continue;
     return { accomplished: true, source: "seminar", evidence: `${prog.title} (FY ${prog.fiscalYear})`, date: when || undefined };
@@ -5727,7 +5769,7 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
     if (!forms.includes(t.employeeId) || t.status === "Rejected") continue;
     if (!titlesMatch(need.title, t.title)) continue;
     const when = toIsoDateLoose(t.dateConducted);
-    if (!onOrBeforeAsOf(when, asOf)) continue;
+    if (!inNeedPlanYear(need, when) || !onOrBeforeAsOf(when, asOf)) continue;
     return { accomplished: true, source: "recorded-training", evidence: t.title, date: when || undefined };
   }
 
@@ -5736,8 +5778,22 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
   for (const t of (pdsRecord?.trainings || [])) {
     if (!titlesMatch(need.title, t?.title || "")) continue;
     const when = toIsoDateLoose(t?.dateTo || t?.dateFrom);
-    if (!onOrBeforeAsOf(when, asOf)) continue;
+    if (!inNeedPlanYear(need, when) || !onOrBeforeAsOf(when, asOf)) continue;
     return { accomplished: true, source: "pds", evidence: t.title, date: when || undefined };
+  }
+
+  // 5. A carried need is the same need, still open, so it is met once the entry it continues
+  // is met: that year's seminar ended after the next year was opened (this office opens it
+  // early), HR recorded a certificate late, or HR marked it accomplished. Old-year training is
+  // judged only there, so HR's "not accomplished" on that entry still stands.
+  const earlier = earlierNeedEntry(need);
+  if (earlier) {
+    const status = needAccomplishment(earlier, asOf);
+    if (status.accomplished) {
+      return status.source === "override"
+        ? { ...status, evidence: `FY ${earlier.fiscalYear}'s need was marked accomplished` }
+        : status;
+    }
   }
 
   return { accomplished: false, source: null };
