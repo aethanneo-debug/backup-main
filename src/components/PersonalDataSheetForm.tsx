@@ -1,6 +1,36 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { apiCall } from '../utils';
 import { Upload, Loader2 } from 'lucide-react';
+
+// "MM/DD/YYYY" (the PDS parser) or "YYYY-MM-DD" (the system) as "YYYY-MM-DD"; anything else as typed.
+const isoDate = (value: any): string => {
+  const v = String(value ?? '').trim();
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : v.slice(0, 10);
+};
+const titleKey = (title: any) => String(title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// The PDS's L&D list (section VII): the trainings in the employee's own PDS together with the
+// ones the system recorded, i.e. HR's training records and each seminar Finance validated.
+// Before, a PDS listing any training of its own hid the system's, and an uploaded PDS always
+// does, so a seminar Finance finalized never appeared. A system record already in the PDS
+// (same title and start date) is listed once. Most recent first, as the CSC form asks.
+const mergeTrainingRows = (pdsTrainings: any, ledger: any) => {
+  const own = (Array.isArray(pdsTrainings) ? pdsTrainings : []).map((t: any) => ({ ...t, status: 'Completed' }));
+  const listed = new Set(own.map((t: any) => `${titleKey(t.title)}|${isoDate(t.dateFrom)}`));
+  const recorded = (Array.isArray(ledger) ? ledger : [])
+    .map((t: any) => ({
+      title: t.title,
+      dateFrom: t.dateConducted,
+      dateTo: t.dateConducted,
+      trainingHours: t.trainingHours,
+      typeOfLAndD: 'Technical',
+      organizer: t.organizer,
+      status: t.status
+    }))
+    .filter((t: any) => !listed.has(`${titleKey(t.title)}|${isoDate(t.dateFrom)}`));
+  return [...own, ...recorded].sort((a: any, b: any) => isoDate(b.dateFrom).localeCompare(isoDate(a.dateFrom)));
+};
 
 export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
   const isHrOrAdmin = ["Administrator / Division Chief", "HR Officer"].includes(user.role);
@@ -31,6 +61,8 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
   // Whether the selected employee's record loaded. Until it has, the form holds blank defaults,
   // and saving them would wipe the stored PDS.
   const [profileLoaded, setProfileLoaded] = useState(false);
+  // Section V and the printed section VII both list these.
+  const trainingRows = useMemo(() => mergeTrainingRows(formData.trainings, trainingsLedger), [formData.trainings, trainingsLedger]);
 
   useEffect(() => {
     if (!selectedEmployeeId) {
@@ -568,14 +600,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
             </tr>
           </thead>
           <tbody>
-            {(formData.trainings && formData.trainings.length > 0 ? formData.trainings : trainingsLedger.map(trn => ({
-              title: trn.title,
-              dateFrom: trn.dateConducted,
-              dateTo: trn.dateConducted,
-              trainingHours: trn.trainingHours,
-              typeOfLAndD: 'Technical',
-              organizer: trn.organizer
-            }))).map((trn: any, idx: number) => (
+            {trainingRows.map((trn: any, idx: number) => (
               <tr key={idx}>
                 <td className="border border-black p-1 text-left">{trn.title}</td>
                 <td className="border border-black p-1">{trn.dateFrom}</td>
@@ -585,7 +610,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
                 <td className="border border-black p-1">{trn.organizer}</td>
               </tr>
             ))}
-             {(!formData.trainings || formData.trainings.length === 0) && trainingsLedger.length === 0 && (
+             {trainingRows.length === 0 && (
               <tr><td colSpan={6} className="border border-black p-4 text-gray-500 italic">No records provided</td></tr>
             )}
           </tbody>
@@ -944,7 +969,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
                   <div className="border-b pb-2 mb-4">
                     <h4 className="text-sm font-bold uppercase text-slate-700">Trainings & Seminars Ledger</h4>
-                    <p className="text-[10px] text-slate-500">Includes all submitted seminars. The Trainings & Seminars module populates this automatically.</p>
+                    <p className="text-[10px] text-slate-500">Trainings from the uploaded PDS, plus each seminar once Finance validates its liquidation and each training HR records.</p>
                   </div>
                   <table className="w-full text-left text-xs border-collapse bg-white border border-slate-200">
                     <thead>
@@ -957,14 +982,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {(formData.trainings && formData.trainings.length > 0 ? formData.trainings.map((t: any) => ({ ...t, status: 'Completed' })) : trainingsLedger.map(trn => ({
-                        title: trn.title,
-                        dateFrom: trn.dateConducted,
-                        dateTo: trn.dateConducted,
-                        trainingHours: trn.trainingHours,
-                        organizer: trn.organizer,
-                        status: trn.status
-                      }))).map((trn: any, idx: number) => (
+                      {trainingRows.map((trn: any, idx: number) => (
                         <tr key={idx} className="border-b border-slate-100">
                           <td className="p-2 font-semibold text-slate-700">{trn.title}</td>
                           <td className="p-2">{trn.organizer}</td>
@@ -977,7 +995,7 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
                           </td>
                         </tr>
                       ))}
-                      {(!formData.trainings || formData.trainings.length === 0) && trainingsLedger.length === 0 && (
+                      {trainingRows.length === 0 && (
                         <tr><td colSpan={5} className="p-4 text-center text-slate-400 italic">No training records found.</td></tr>
                       )}
                     </tbody>
