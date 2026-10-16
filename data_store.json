@@ -704,6 +704,33 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1792082566365-948",
+      "timestamp": "2026-10-15T16:42:46.365Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792080232543-532",
+      "timestamp": "2026-10-15T16:03:52.543Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792080163605-157",
+      "timestamp": "2026-10-15T16:02:43.605Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
       "id": "log-1791914802387-223",
       "timestamp": "2026-10-13T18:06:42.387Z",
       "userId": "u-2",
