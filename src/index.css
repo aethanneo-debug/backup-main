@@ -31,6 +31,22 @@
   background: #94a3b8;
 }
 
+/* Text for screen readers only (Tailwind's `sr-only`) is absolutely positioned without
+   offsets, so the browser leaves it where it would have sat in the content, measured against
+   its nearest positioned ancestor, or the page when there is none. Inside a scrolling area that
+   isn't positioned, that spot comes from the area's whole unscrolled content: a hidden table
+   caption on the Liquidation Desk landed some 1,500px down, stretched the page beneath the app
+   frame, and the mouse wheel then scrolled the whole app up off the screen. Pinned to that
+   ancestor's corner it stays inside, wherever it is used. In the utilities layer, so a
+   `focus:` variant can still move it. Keep `sr-only` on text only: on something that takes
+   focus (an input, a button, a link) tabbing to it would scroll to that corner. */
+@layer utilities {
+  .sr-only {
+    top: 0;
+    left: 0;
+  }
+}
+
 /* --- COA Liquidation Report printing ---
    LiquidationReportModal renders through a React portal into <body> as #lr-print-portal
    and adds `.lr-printing` to <body> while it is open. Printing then hides every other
