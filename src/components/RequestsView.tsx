@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, UserRole, RequestType, RequestStatus, AnyRequest, SupplyItem } from "../types";
+import { User, UserRole, RequestType, RequestStatus, AnyRequest, SupplyItem, ScreenFocus } from "../types";
 import { 
   Plus, 
   Clock, 
@@ -28,9 +28,12 @@ interface RequestsViewProps {
   supplies: SupplyItem[];
   fetchSummary: () => void;
   onRefresh: () => void;
+  /** From a notification: a request or liquidation report to open (HR and Administrator lists). */
+  focus?: ScreenFocus | null;
+  onFocusHandled?: () => void;
 }
 
-export default function RequestsView({ user, requests, supplies, fetchSummary, onRefresh }: RequestsViewProps) {
+export default function RequestsView({ user, requests, supplies, fetchSummary, onRefresh, focus, onFocusHandled }: RequestsViewProps) {
   const [reqList, setReqList] = useState<AnyRequest[]>(requests);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [activeRequestType, setActiveRequestType] = useState<RequestType>(RequestType.LEAVE);
@@ -250,9 +253,9 @@ export default function RequestsView({ user, requests, supplies, fetchSummary, o
       </div>
 
       {user.role === UserRole.SUPER_ADMIN ? (
-        <AdminUnifiedRequests user={user} onRefresh={onRefresh} />
+        <AdminUnifiedRequests user={user} onRefresh={onRefresh} focus={focus} onFocusHandled={onFocusHandled} />
       ) : user.role === UserRole.HR_OFFICER ? (
-        <HrUnifiedRequests user={user} onRefresh={onRefresh} />
+        <HrUnifiedRequests user={user} onRefresh={onRefresh} focus={focus} onFocusHandled={onFocusHandled} />
       ) : (
         <>
           {/* Detailed single request adjudication for other roles if needed, though usually empty */}

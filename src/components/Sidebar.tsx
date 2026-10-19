@@ -37,20 +37,10 @@ interface SidebarProps {
   setActiveFinanceSubTab?: (tab: string) => void;
 }
 
-export default function Sidebar({ 
-  user, 
-  activeTab, 
-  setActiveTab, 
-  onLogout,
-  onChangePassword, 
-  activeFinanceSubTab = "dashboard", 
-  setActiveFinanceSubTab 
-}: SidebarProps) {
-  const role = user.role;
-  const [collapsedMenus, setCollapsedMenus] = React.useState<string[]>([]);
-
-  // Determine which navigation links are shown based on roles
-  const menuItems = [
+// The sidebar's sections for a role. The same list decides which screens a role may open
+// (tabsOpenTo), so a notification can never lead somewhere the sidebar wouldn't.
+function navigationFor(role: UserRole) {
+  return [
     { 
       id: "dashboard", 
       label: "Dashboard", 
@@ -142,6 +132,34 @@ export default function Sidebar({
       ]
     }
   ];
+}
+
+// The screens (activeTab ids) a role can open: every visible item, and the visible sub-items
+// of a visible section.
+export function tabsOpenTo(role: UserRole): string[] {
+  const tabs: string[] = [];
+  for (const item of navigationFor(role)) {
+    if (item.visible === false) continue;
+    // Financial Tracking has an empty subItems list (only for its arrow) and is a screen itself.
+    if (item.subItems && item.subItems.length > 0) tabs.push(...item.subItems.filter(s => s.visible !== false).map(s => s.id));
+    else tabs.push(item.id);
+  }
+  return tabs;
+}
+
+export default function Sidebar({ 
+  user, 
+  activeTab, 
+  setActiveTab, 
+  onLogout,
+  onChangePassword, 
+  activeFinanceSubTab = "dashboard", 
+  setActiveFinanceSubTab 
+}: SidebarProps) {
+  const role = user.role;
+  const [collapsedMenus, setCollapsedMenus] = React.useState<string[]>([]);
+
+  const menuItems = navigationFor(role);
 
   return (
     <aside id="ipfms-sidebar" className="w-68 bg-slate-900 text-white h-full min-h-0 flex flex-col justify-between border-r border-slate-800 shrink-0">

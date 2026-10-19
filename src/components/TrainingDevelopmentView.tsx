@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem } from "../types";
+import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus } from "../types";
+import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, formatCurrency } from "../utils";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck } from "lucide-react";
@@ -34,7 +35,13 @@ const sameIds = (a?: string[], b?: string[]) => {
   return x.size === y.size && [...x].every(id => y.has(id));
 };
 
-export default function TrainingDevelopmentView({ user, triggerRefresh }: { user: any, triggerRefresh: () => void }) {
+export default function TrainingDevelopmentView({ user, triggerRefresh, focus, onFocusHandled }: {
+  user: any;
+  triggerRefresh: () => void;
+  /** From a notification: a step to open, or a seminar to show in Programs & Budget. */
+  focus?: ScreenFocus | null;
+  onFocusHandled?: () => void;
+}) {
   const [programs, setPrograms] = useState<TrainingProgram[]>([]);
   const [activeFy, setActiveFy] = useState<any>(null);
   const [trainingBudgets, setTrainingBudgets] = useState<any[]>([]);
@@ -48,6 +55,21 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
   
   // Opens on Plan A: the plan is written before the seminars that answer it.
   const [activeTab, setActiveTab] = useState<"programs" | "plan-a" | "plan-d" | "evaluations">("plan-a");
+
+  // A notification opened this screen: a seminar is shown in Programs & Budget (scrolled to and
+  // outlined), anything else opens its step.
+  const [shownSeminar, setShownSeminar] = useState<{ id: string; key: number } | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.record?.kind === "seminar") {
+      setActiveTab("programs");
+      setShownSeminar({ id: focus.record.id, key: focus.nonce });
+    } else if (focus.subTab === "programs" || focus.subTab === "plan-a" || focus.subTab === "plan-d" || focus.subTab === "evaluations") {
+      setActiveTab(focus.subTab);
+    }
+    onFocusHandled?.();
+  }, [focus?.nonce]);
+  useRecordHighlight(shownSeminar?.id, shownSeminar?.key);
   const [coverageModalData, setCoverageModalData] = useState<{ rowId: string; isNew: boolean; seminarTitle: string; fiscalYear?: string; selectedTitles: string[] } | null>(null);
   const [showLiqModal, setShowLiqModal] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState("");
@@ -543,7 +565,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh }: { user
     const filling = isNew && row.planFill === "loading";
 
     return (
-      <tr key={p.id} className={`align-top hover:bg-slate-50/60 ${isEditing ? 'bg-blue-50/40' : ''}`}>
+      <tr key={p.id} data-record-id={p.id} className={`align-top hover:bg-slate-50/60 ${isEditing ? 'bg-blue-50/40' : ''}`}>
         {/* 1. What the seminar is: its title, and the Plan A needs it answers. The needs rank
             the participants and let Plan D mark them accomplished. One seminar may cover several. */}
         <td className="p-2 border-r border-slate-100 min-w-[180px]">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument } from "../types";
+import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument, ScreenFocus } from "../types";
+import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, getLocalTodayString, formatCurrency, downloadBase64File as saveAttachedFile } from "../utils";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
 import {
@@ -51,9 +52,12 @@ interface EmployeePortalViewProps {
   /** A returned report to open for correction (from its "returned" notification). */
   correctionTarget?: string | null;
   onCorrectionTargetHandled?: () => void;
+  /** From a notification: a request, liquidation report or assignment to show. */
+  focus?: ScreenFocus | null;
+  onFocusHandled?: () => void;
 }
 
-export default function EmployeePortalView({ user, fetchSummary, onRefresh, liquidationTarget, onLiquidationTargetHandled, correctionTarget, onCorrectionTargetHandled }: EmployeePortalViewProps) {
+export default function EmployeePortalView({ user, fetchSummary, onRefresh, liquidationTarget, onLiquidationTargetHandled, correctionTarget, onCorrectionTargetHandled, focus, onFocusHandled }: EmployeePortalViewProps) {
   const [activeSubMenu, setActiveSubMenu] = useState<"profile" | "requests" | "activities" | "liquidations" | "notifications">("profile");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -291,6 +295,33 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     fetchPortalData();
   }, [activeSubMenu, onRefresh]);
 
+  // A notification opened the portal on a record: its section opens (which reloads the data;
+  // reload it here when that section is already open), then the record is shown, scrolled to
+  // and outlined, once the fresh load has landed (portalLoads). A visit to Liquidations made
+  // this way shows that report, so it doesn't open the latest returned one for correction.
+  const [shownRecord, setShownRecord] = useState<{ id: string; key: number; afterLoad: number } | null>(null);
+  const focusVisit = useRef(false);
+  useEffect(() => {
+    if (!focus) return;
+    const record = focus.record;
+    const section = record?.kind === "request" ? "requests"
+      : record?.kind === "liquidationReport" ? "liquidations"
+      : record?.kind === "assignment" ? "activities"
+      : null;
+    if (record && section) {
+      if (section === activeSubMenu) {
+        if (section === "liquidations") autoOpenThisVisit.current = false;
+        fetchPortalData();
+      } else {
+        if (section === "liquidations") focusVisit.current = true;
+        setActiveSubMenu(section);
+      }
+      setShownRecord({ id: record.id, key: focus.nonce, afterLoad: portalLoads });
+    }
+    onFocusHandled?.();
+  }, [focus?.nonce]);
+  useRecordHighlight(shownRecord && portalLoads > shownRecord.afterLoad ? shownRecord.id : null, shownRecord?.key);
+
   // A seminar title (Trainings and Seminar) or a "form is ready" notice asked App to open
   // this seminar's liquidation form.
   useEffect(() => {
@@ -352,8 +383,11 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   useEffect(() => {
     const entered = activeSubMenu === "liquidations" && lastSubMenu.current !== "liquidations";
     lastSubMenu.current = activeSubMenu;
-    const busy = !!(resubmittingItem || selectedActivityId || pendingSeminar || pendingReport || correctionTarget);
-    if (entered) autoOpenThisVisit.current = !busy;
+    const busy = !!(resubmittingItem || selectedActivityId || pendingSeminar || pendingReport || correctionTarget || focusVisit.current);
+    if (entered) {
+      autoOpenThisVisit.current = !busy;
+      focusVisit.current = false;
+    }
     if (activeSubMenu !== "liquidations" || !autoOpenThisVisit.current) return;
     if (busy) {
       autoOpenThisVisit.current = false;
@@ -1366,7 +1400,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {requests.map((r: any) => (
-                    <div key={r.id} className="p-3.5 border border-slate-100 rounded-lg flex items-center justify-between text-xs bg-slate-50/20">
+                    <div key={r.id} data-record-id={r.id} className="p-3.5 border border-slate-100 rounded-lg flex items-center justify-between text-xs bg-slate-50/20">
                       <div>
                         <div className="flex items-center space-x-2">
                           <span className="font-semibold text-slate-800">{r.requestType}</span>
@@ -1443,7 +1477,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {activities.map((act: any) => (
-                  <div key={act.id} className="p-4 border border-slate-200 rounded-xl bg-slate-50/20 block space-y-3">
+                  <div key={act.id} data-record-id={act.id} className="p-4 border border-slate-200 rounded-xl bg-slate-50/20 block space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-mono bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold uppercase">
                         {act.activityNo}
@@ -1950,7 +1984,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               ) : (
                 <div className="space-y-3">
                   {(submissions ?? []).filter(s => matchesClaimType(s, logFilter)).map((sub: any) => (
-                    <div key={sub.id} className="p-4 border border-slate-100 rounded-xl bg-slate-50/10 space-y-2.5">
+                    <div key={sub.id} data-record-id={sub.id} className="p-4 border border-slate-100 rounded-xl bg-slate-50/10 space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="font-mono font-bold text-slate-800">{sub.serialNo || sub.submissionNo}</span>

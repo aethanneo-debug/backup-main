@@ -173,7 +173,7 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
             const owed = Number(sub.reimbursementAmount || 0);
             const isOpen = openId === sub.id;
             return (
-              <div key={sub.id} className="p-4 border border-amber-200 rounded-xl bg-amber-50/20 space-y-3">
+              <div key={sub.id} data-record-id={sub.id} className="p-4 border border-amber-200 rounded-xl bg-amber-50/20 space-y-3">
                 {/* A Reimbursement always shows HR's allocation without an advance, and the
                     server already refuses to pay one with an advance on record, so it gets a
                     reminder rather than an alarm. */}
@@ -316,7 +316,7 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
           </h3>
           <ul className="divide-y divide-slate-100">
             {settled.slice(0, 5).map(sub => (
-              <li key={sub.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
+              <li key={sub.id} data-record-id={sub.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
                 <span className="flex items-center gap-2 min-w-0">
                   <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
                   <span className="font-mono text-slate-500">{sub.serialNo || sub.submissionNo}</span>

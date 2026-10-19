@@ -31,6 +31,21 @@
   background: #94a3b8;
 }
 
+/* The record a notification opened, outlined for a moment (useRecordHighlight). HSAC navy
+   (blue-600) and blue-50, as in @theme above. */
+[data-highlight="true"] {
+  outline: 2px solid #001d85;
+  outline-offset: 2px;
+  animation: record-highlight 2.6s ease-out forwards;
+}
+tr[data-highlight="true"] > td {
+  background-color: #f0f3ff;
+}
+@keyframes record-highlight {
+  0%, 70% { outline-color: #001d85; }
+  100% { outline-color: transparent; }
+}
+
 /* Text for screen readers only (Tailwind's `sr-only`) is absolutely positioned without
    offsets, so the browser leaves it where it would have sat in the content, measured against
    its nearest positioned ancestor, or the page when there is none. Inside a scrolling area that

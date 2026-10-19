@@ -351,10 +351,15 @@ export interface Notification {
   title: string;
   message: string;
   type: "info" | "warning" | "success" | "urgent";
-  isRead: boolean;
+  // The user ids who have read it: everyone a notice is for reads it on their own, so one HR
+  // officer reading it no longer hides it from the others. Stored only.
+  readBy?: string[];
+  // Whether the caller has read it, worked out by GET /api/notifications. (Stored notices used
+  // to carry it as one flag shared by everyone; converted to readBy on load, 2026-10-19.)
+  isRead?: boolean;
   timestamp: string;
   targetRole?: string; // If undefined, visible to everyone. If specified, only visible to users with this role
-  targetEmployeeId?: string; // If specified, only visible specifically to this individual employee
+  targetEmployeeId?: string; // If specified, only visible to this employee's login (either id form)
   // Stable key for system-generated notices (e.g. "liq-due:<participantId>:overdue")
   // so a reminder is never sent twice, even across server restarts.
   dedupeKey?: string;
@@ -362,10 +367,24 @@ export interface Notification {
   link?: NotificationLink;
 }
 
+// What a notice is about: a request, a liquidation report, a seminar (Training Plan & Budget),
+// or the employee's own assignment (an enrolment or a general activity, My Assigned Activities).
+export type NotificationRecordKind = "request" | "liquidationReport" | "seminar" | "assignment";
+
 export interface NotificationLink {
   tab: string;                       // the app tab to open, e.g. "employee_portal"
+  subTab?: string;                   // Finance's sub-tab ("liquidation") or Training Plan & Budget's step ("plan-a")
+  record?: { kind: NotificationRecordKind; id: string }; // shown (opened or highlighted) on arrival
   liquidationActivityId?: string;    // open the Liquidation Report with this seminar chosen
   liquidationReportId?: string;      // open this returned report for correction
+}
+
+// What a screen should show when a notice opens it. `nonce` lets the same record be shown
+// again from a second notice.
+export interface ScreenFocus {
+  subTab?: string;
+  record?: { kind: NotificationRecordKind; id: string };
+  nonce: number;
 }
 
 export interface Activity {

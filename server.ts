@@ -45,6 +45,7 @@ import {
   BudgetAllocation,
   FinanceAuditLog,
   Notification,
+  NotificationLink,
   BudgetRequestItem,
   PDS,
   TrainingProgram,
@@ -244,7 +245,7 @@ function getInitialData(): DBStructure {
             title: "Leave Request Submitted",
             message: "Atty. Korrine Madeleine Flores - Fontanilla has submitted an urgent Vacation Leave Request for your review.",
             type: "urgent",
-            isRead: false,
+            readBy: [],
             timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
             targetRole: UserRole.HR_OFFICER
           },
@@ -253,7 +254,7 @@ function getInitialData(): DBStructure {
             title: "Low Supply Inventory Range Alert",
             message: "Supply stock for 'A4 Multi-purpose Bond Paper (80gsm)' is currently low (5 units left). Please arrange purchase acquisition.",
             type: "warning",
-            isRead: false,
+            readBy: [],
             timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
             targetRole: UserRole.SUPER_ADMIN
           },
@@ -262,7 +263,7 @@ function getInitialData(): DBStructure {
             title: "Financial Liquidation Verification",
             message: "Juan dela Cruz submitted a travel liquidation of ₱12,000 for travel request REQ-TRV-112. Support vouchers need verification.",
             type: "info",
-            isRead: false,
+            readBy: [],
             timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
             targetRole: UserRole.FINANCE_OFFICER
           },
@@ -271,7 +272,7 @@ function getInitialData(): DBStructure {
             title: "Comprehensive Security Compliance Log Audit",
             message: "All HR and Finance tables comply with RA 10173 Data Privacy protection directives. Periodic validation complete.",
             type: "success",
-            isRead: false,
+            readBy: [],
             timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
             targetRole: UserRole.SUPER_ADMIN
           },
@@ -280,7 +281,7 @@ function getInitialData(): DBStructure {
             title: "En Banc Board Case Reconciliation Scheduled",
             message: "A general assembly has been scheduled for case adjustments on Room B at 09:00 AM.",
             type: "info",
-            isRead: false,
+            readBy: [],
             timestamp: new Date(Date.now() - 3600000 * 28).toISOString(),
             targetRole: UserRole.EMPLOYEE
           },
@@ -289,7 +290,7 @@ function getInitialData(): DBStructure {
             title: "Meeting Room Assignment Active",
             message: "Zoom meeting 'RAB 1 En Banc Case Reconciliation Adjudication' setup is ready for launch.",
             type: "success",
-            isRead: false,
+            readBy: [],
             timestamp: new Date(Date.now() - 3600000 * 30).toISOString(),
             targetRole: UserRole.EMPLOYEE
           }
@@ -553,6 +554,18 @@ function getInitialData(): DBStructure {
         if (allocated === undefined) continue; // unresolvable id — leave it unset
         if (sub.allocatedAtFiling === undefined) sub.allocatedAtFiling = allocated;
         if (!sub.activityTitle) sub.activityTitle = title;
+        changed = true;
+      }
+
+      // Per-user read state (2026-10-19). A notice carried one isRead flag shared by everyone
+      // it was for, so one HR officer reading it hid it from the others. One already read
+      // counts as read by everyone it is for today; the rest start unread for all.
+      for (const n of loaded.notifications || []) {
+        if (!n || typeof n !== "object" || Array.isArray(n.readBy)) continue;
+        n.readBy = n.isRead
+          ? (loaded.users || []).filter((u: any) => noticeIsFor(n, u, loaded.employees || [])).map((u: any) => u.id)
+          : [];
+        delete n.isRead;
         changed = true;
       }
 
@@ -964,7 +977,7 @@ function getInitialData(): DBStructure {
         title: "Leave Request Submitted",
         message: "Atty. Korrine Madeleine Flores - Fontanilla has submitted an urgent Vacation Leave Request for your review.",
         type: "urgent",
-        isRead: false,
+        readBy: [],
         timestamp: "2026-06-16T02:00:00Z",
         targetRole: UserRole.HR_OFFICER
       },
@@ -973,7 +986,7 @@ function getInitialData(): DBStructure {
         title: "Low Supply Inventory Range Alert",
         message: "Supply stock for 'A4 Multi-purpose Bond Paper (80gsm)' is currently low (5 units left). Please arrange purchase acquisition.",
         type: "warning",
-        isRead: false,
+        readBy: [],
         timestamp: "2026-06-16T01:30:00Z",
         targetRole: UserRole.SUPER_ADMIN
       },
@@ -982,7 +995,7 @@ function getInitialData(): DBStructure {
         title: "Financial Liquidation Verification",
         message: "Juan dela Cruz submitted a travel liquidation of ₱12,000 for travel request REQ-TRV-112. Support vouchers need verification.",
         type: "info",
-        isRead: false,
+        readBy: [],
         timestamp: "2026-06-15T18:00:00Z",
         targetRole: UserRole.FINANCE_OFFICER
       },
@@ -991,7 +1004,7 @@ function getInitialData(): DBStructure {
         title: "Comprehensive Security Compliance Log Audit",
         message: "All HR and Finance tables comply with RA 10173 Data Privacy protection directives. Periodic validation complete.",
         type: "success",
-        isRead: false,
+        readBy: [],
         timestamp: "2026-06-15T10:00:00Z",
         targetRole: UserRole.SUPER_ADMIN
       },
@@ -1000,7 +1013,7 @@ function getInitialData(): DBStructure {
         title: "En Banc Board Case Reconciliation Scheduled",
         message: "A general assembly has been scheduled for case adjustments on Room B at 09:00 AM.",
         type: "info",
-        isRead: false,
+        readBy: [],
         timestamp: "2026-06-15T09:00:00Z",
         targetRole: UserRole.EMPLOYEE
       },
@@ -1009,7 +1022,7 @@ function getInitialData(): DBStructure {
         title: "Meeting Room Assignment Active",
         message: "Zoom meeting 'RAB 1 En Banc Case Reconciliation Adjudication' setup is ready for launch.",
         type: "success",
-        isRead: false,
+        readBy: [],
         timestamp: "2026-06-15T08:00:00Z",
         targetRole: UserRole.EMPLOYEE
       }
@@ -1048,19 +1061,6 @@ function getInitialData(): DBStructure {
   return seedDB;
 }
 
-const db = getInitialData();
-
-function saveDB() {
-  writeDataFile(db);
-}
-
-// RESTful API Routes
-
-// Helper to log audit actions
-function logEvent(userId: string, username: string, role: string, action: string, details: string) {
-  const newLog: AuditLog = {
-    id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    timestamp: new Date().toISOString(),
 // Writes the database so a crash can never leave it half-written: the new content goes to a
 // temporary file, which then replaces the old one in one step (a rename). OneDrive or an
 // antivirus can hold the file for a moment on Windows, so a refused rename is retried briefly;
@@ -1085,6 +1085,19 @@ function writeDataFile(data: unknown) {
   }
 }
 
+const db = getInitialData();
+
+function saveDB() {
+  writeDataFile(db);
+}
+
+// RESTful API Routes
+
+// Helper to log audit actions
+function logEvent(userId: string, username: string, role: string, action: string, details: string) {
+  const newLog: AuditLog = {
+    id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    timestamp: new Date().toISOString(),
     userId,
     username,
     role,
@@ -1247,15 +1260,11 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
 
         // Creating plan entries silently is how HR ends up confused about where they
         // came from, so say it plainly.
-        if (!db.notifications) db.notifications = [];
-        db.notifications.push({
-          id: `notif-${Date.now()}-needs`,
+        notify({ role: UserRole.HR_OFFICER }, {
           title: `${carriedNeeds.length} unmet training need${carriedNeeds.length === 1 ? "" : "s"} carried to ${newFy.label}`,
           message: `Plan A for ${newFy.label} starts with ${carriedNeeds.length} need${carriedNeeds.length === 1 ? "" : "s"} still unmet from ${activeFy.label}. Accomplished needs were left with ${activeFy.label}.`,
-          isRead: false,
           type: "info",
-          timestamp: new Date().toISOString(),
-          targetRole: UserRole.HR_OFFICER
+          link: { tab: "training_development", subTab: "plan-a" }
         });
       }
 
@@ -2262,15 +2271,11 @@ function autoDeductLiquidation(sub: any, actor: { id: string; username: string; 
   const spent = Number(sub.totalSpent || 0);
 
   if (!bucket) {
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    notify({ role: UserRole.BUDGET_OFFICER }, {
       title: "Budget Auto-Deduction Skipped",
       message: `Liquidation ${sub.submissionNo} (${category}, ₱${spent.toLocaleString()}) has no matching ${department} budget bucket for ${activeFy.label}. Please link it manually.`,
       type: "warning",
-      isRead: false,
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.BUDGET_OFFICER
+      link: { tab: "budget" }
     });
     return null;
   }
@@ -2903,22 +2908,14 @@ app.post("/api/requests", authenticateToken, (req: any, res) => {
 
   db.requests.push(fullReq);
   
-  // Trigger system notification dynamically
-  if (!db.notifications) {
-    db.notifications = [];
-  }
-  let targetRole: string | undefined = undefined;
-  if (fullReq.requestType === RequestType.LEAVE || fullReq.requestType === RequestType.SERVICE_RECORD || fullReq.requestType === RequestType.SUPPLY || fullReq.requestType === RequestType.VEHICLE || fullReq.requestType === RequestType.ZOOM) {
-    targetRole = UserRole.HR_OFFICER;
-  }
-  db.notifications.push({
-    id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+  // Tell whoever acts on it first: a Vehicle request skips HR and goes straight to the Division
+  // Chief (the Administrator); every other request starts with HR. (Before, HR was told about a
+  // Vehicle request too, and the Chief never was.)
+  notify({ role: fullReq.status === RequestStatus.ENDORSED_TO_CHIEF ? UserRole.SUPER_ADMIN : UserRole.HR_OFFICER }, {
     title: `New ${fullReq.requestType}`,
     message: `${fullReq.employeeName} submitted a ${fullReq.requestType} for verification and approval.`,
     type: "info",
-    isRead: false,
-    timestamp: new Date().toISOString(),
-    targetRole
+    link: { tab: "requests", record: { kind: "request", id: fullReq.id } }
   });
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Create Request", `Submitted digital request: ${fullReq.requestType} for processing.`);
@@ -3461,58 +3458,111 @@ app.put("/api/signatories/:id/reactivate", authenticateToken, (req: any, res: an
 });
 
 // 8. Dynamic Notifications APIs
-app.get("/api/notifications", authenticateToken, (req: any, res) => {
-  if (!db.notifications) {
-    db.notifications = [];
-  }
-  const role = (req as any).user.role;
-  const employeeId = req.user.employeeId;
-  // Send notifications belonging to this role OR globals (which have no targetRole), filtered by employeeId if targetRole is Employee
-  const filtered = db.notifications.filter(n => {
-    const roleMatches = !n.targetRole || n.targetRole === role;
-    if (role === UserRole.EMPLOYEE) {
-      return roleMatches && (!n.targetEmployeeId || n.targetEmployeeId === employeeId);
-    }
-    return roleMatches;
-  }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  res.json({ status: "success", data: filtered });
-});
 
-app.post("/api/notifications/:id/read", authenticateToken, (req: any, res) => {
-  if (!db.notifications) {
-    db.notifications = [];
+// Whether a notice is for this login: its role (if it names one) and, for one employee's
+// notice, that employee's own login. A notice naming neither is an old broadcast.
+// Both sides are resolved to the staff record, and the records compared: new notices name it
+// by its internal id, so if an employee code is ever reused, the new holder can't read the
+// earlier person's notices. (Older notices name the code; they resolve to whoever holds it.)
+// A notice whose employee no longer exists is for nobody.
+// Takes the employee list as an argument because the load migration runs before `db` exists.
+function noticeIsFor(n: Notification, user: { role: string; employeeId?: string }, employees: Employee[]): boolean {
+  if (n.targetRole && n.targetRole !== user.role) return false;
+  if (n.targetEmployeeId) {
+    if (!user.employeeId) return false;
+    const target = employees.find(e => e.id === n.targetEmployeeId) ?? employees.find(e => e.employeeId === n.targetEmployeeId);
+    const mine = employees.find(e => e.employeeId === user.employeeId) ?? employees.find(e => e.id === user.employeeId);
+    return !!target && !!mine && target.id === mine.id;
   }
-  const { id } = req.params;
-  const notif = db.notifications.find(n => n.id === id);
-  if (notif) {
-    notif.isRead = true;
-    saveDB();
-    res.json({ status: "success", data: notif });
+  return true;
+}
+
+// Adds one bell notice: for a role (everyone signed in with it) or for one employee's
+// Personnel login. Everyone it is for marks it read on their own (readBy). The id is random,
+// so nobody can guess it. Returns false when one with the same dedupeKey exists. Callers save.
+function notify(
+  to: { role: UserRole } | { employee: string },
+  notice: { title: string; message: string; type: Notification["type"]; link?: NotificationLink; dedupeKey?: string }
+): boolean {
+  if (!db.notifications) db.notifications = [];
+  if (notice.dedupeKey && db.notifications.some(n => n.dedupeKey === notice.dedupeKey)) return false;
+  let audience: Pick<Notification, "targetRole" | "targetEmployeeId">;
+  if ("role" in to) {
+    audience = { targetRole: to.role };
   } else {
-    res.status(404).json({ status: "error", message: "Notification slot not found" });
+    // Named by the staff record's internal id (see noticeIsFor).
+    const emp = (db.employees || []).find(e => e.id === to.employee || e.employeeId === to.employee);
+    if (!emp) return false;
+    audience = { targetRole: UserRole.EMPLOYEE, targetEmployeeId: emp.id };
   }
+  db.notifications.push({
+    id: `notif-${crypto.randomUUID()}`,
+    title: notice.title,
+    message: notice.message,
+    type: notice.type,
+    readBy: [],
+    timestamp: new Date().toISOString(),
+    ...audience,
+    ...(notice.link ? { link: notice.link } : {}),
+    ...(notice.dedupeKey ? { dedupeKey: notice.dedupeKey } : {})
+  });
+  return true;
+}
+
+const noticesFor = (user: Pick<User, "role" | "employeeId">) => (db.notifications || []).filter(n => noticeIsFor(n, user, db.employees || []));
+const noticeTime = (t: string | undefined) => { const ms = new Date(t || "").getTime(); return isNaN(ms) ? 0 : ms; };
+
+// The caller's own notices, newest first, each with whether they have read it. Who else a
+// notice is for, or who has read it, is not sent. A notice for a whole role that is older than
+// the account counts as read: a new HR officer doesn't start with the office's history as
+// unread. One addressed to the employee themself stays unread (e.g. an earlier assignment).
+app.get("/api/notifications", authenticateToken, (req: any, res) => {
+  const joined = noticeTime(req.user.createdAt);
+  const data = noticesFor(req.user)
+    .sort((a, b) => noticeTime(b.timestamp) - noticeTime(a.timestamp))
+    .map(n => ({
+      id: n.id,
+      title: n.title,
+      message: n.message,
+      type: n.type,
+      timestamp: n.timestamp,
+      isRead: (n.readBy || []).includes(req.user.id) || (!n.targetEmployeeId && joined > 0 && noticeTime(n.timestamp) < joined),
+      ...(n.link ? { link: n.link } : {})
+    }));
+  res.json({ status: "success", data });
 });
 
-app.post("/api/notifications/read-all", authenticateToken, (req: any, res) => {
-  if (!db.notifications) {
-    db.notifications = [];
+// Marks one of the caller's notices read for them. Anyone else's answers 404 (as if it
+// didn't exist), and nothing about the notice is sent back.
+app.post("/api/notifications/:id/read", authenticateToken, (req: any, res) => {
+  const notice = noticesFor(req.user).find(n => n.id === req.params.id);
+  if (!notice) return res.status(404).json({ status: "error", message: "Notification not found." });
+  if (!(notice.readBy || []).includes(req.user.id)) {
+    notice.readBy = [...(notice.readBy || []), req.user.id];
+    saveDB();
   }
-  const role = (req as any).user.role;
-  const employeeId = req.user.employeeId;
-  db.notifications.forEach(n => {
-    const roleMatches = !n.targetRole || n.targetRole === role;
-    if (role === UserRole.EMPLOYEE) {
-      if (roleMatches && (!n.targetEmployeeId || n.targetEmployeeId === employeeId)) {
-        n.isRead = true;
-      }
-    } else {
-      if (roleMatches) {
-        n.isRead = true;
-      }
-    }
-  });
-  saveDB();
-  res.json({ status: "success", message: "All user notifications marked as read successfully" });
+  res.json({ status: "success" });
+});
+
+// Marks the caller's notices read, for them only. The bell sends the ids it is showing, so a
+// notice that arrived since its last refresh isn't marked read unseen; without ids, all of them.
+app.post("/api/notifications/read-all", authenticateToken, (req: any, res) => {
+  const ids = req.body?.ids;
+  if (ids !== undefined && (!Array.isArray(ids) || !ids.every((id: unknown) => typeof id === "string"))) {
+    return res.status(400).json({ status: "error", message: "ids must be a list of notification ids." });
+  }
+  // A set, capped: the bell never shows anywhere near this many, and a huge list would tie up
+  // the server.
+  const wanted = ids ? new Set<string>(ids.slice(0, 500)) : null;
+  let marked = 0;
+  for (const notice of noticesFor(req.user)) {
+    if (wanted && !wanted.has(notice.id)) continue;
+    if ((notice.readBy || []).includes(req.user.id)) continue;
+    notice.readBy = [...(notice.readBy || []), req.user.id];
+    marked++;
+  }
+  if (marked > 0) saveDB();
+  res.json({ status: "success", message: `${marked} notification(s) marked as read.` });
 });
 
 
@@ -3750,19 +3800,18 @@ app.put("/api/requests/:id/hr-endorse", authenticateToken, (req: any, res) => {
     request.remarks = remarks || "Returned with HR verification queries.";
   }
   
-  if (!db.notifications) db.notifications = [];
-  db.notifications.push({
-    id: `notif-${Date.now()}`,
+  const requestNotice = {
     title: endorse ? "Request Endorsed" : "Request Returned to Employee",
-    message: endorse 
+    message: endorse
       ? `HR Officer ${(req as any).user.fullName} endorsed ${request.requestType} for ${request.employeeName} to Division Chief.`
       : `HR Officer ${(req as any).user.fullName} returned ${request.requestType} with remarks: "${remarks}".`,
-    type: endorse ? "success" : "warning",
-    isRead: false,
-    timestamp: new Date().toISOString(),
-    targetRole: endorse ? UserRole.SUPER_ADMIN : UserRole.EMPLOYEE,
-    targetEmployeeId: endorse ? undefined : request.employeeId
-  });
+    type: (endorse ? "success" : "warning") as Notification["type"]
+  };
+  if (endorse) {
+    notify({ role: UserRole.SUPER_ADMIN }, { ...requestNotice, link: { tab: "requests", record: { kind: "request", id: request.id } } });
+  } else {
+    notify({ employee: request.employeeId }, { ...requestNotice, link: { tab: "employee_portal", record: { kind: "request", id: request.id } } });
+  }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Endorse Personnel Request", `HR acted on request ${request.id}, status: ${request.status}`);
   saveDB();
@@ -3814,16 +3863,11 @@ app.put("/api/requests/:id/chief-decide", authenticateToken, (req: any, res) => 
     request.remarks = remarks || "Rejected by Division Chief.";
   }
 
-  if (!db.notifications) db.notifications = [];
-  db.notifications.push({
-    id: `notif-${Date.now()}`,
+  notify({ employee: request.employeeId }, {
     title: `Request ${request.status}`,
     message: `Division Chief Hon. Romeo M. Alcantara acted on your ${request.requestType}: ${request.status}`,
     type: request.status === RequestStatus.APPROVED ? "success" : "warning",
-    isRead: false,
-    timestamp: new Date().toISOString(),
-    targetRole: UserRole.EMPLOYEE,
-    targetEmployeeId: request.employeeId
+    link: { tab: "employee_portal", record: { kind: "request", id: request.id } }
   });
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Final Chief Decision", `Chief decided ${request.id}, status: ${request.status}`);
@@ -4199,19 +4243,11 @@ function correctionRequestFrom(
 // Addressed to their staff record's code, as the login carries it; never untargeted, which
 // every employee would see. The id is random: the reviewer's remarks are in the notice.
 function notifyReportReturned(sub: any, by: "HR" | "Finance", request: CorrectionRequest) {
-  const emp = (db.employees || []).find((e: any) => e.id === sub.employeeId || e.employeeId === sub.employeeId);
-  const target = emp?.employeeId || sub.employeeId;
-  if (!target) return;
-  if (!db.notifications) db.notifications = [];
-  db.notifications.push({
-    id: `notif-${crypto.randomUUID()}`,
+  if (!sub.employeeId) return;
+  notify({ employee: sub.employeeId }, {
     title: `Liquidation report returned by ${by}`,
     message: `${sub.submissionNo} was returned for correction: ${request.remarks} Only the parts ticked (${request.items.length}) can be changed.`,
-    isRead: false,
     type: "warning",
-    timestamp: new Date().toISOString(),
-    targetRole: UserRole.EMPLOYEE,
-    targetEmployeeId: target,
     link: { tab: "employee_portal", liquidationReportId: sub.id }
   });
 }
@@ -4433,15 +4469,11 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     db.trainingParticipants[pIndex].status = "Liquidation Pending";
   }
 
-  if (!db.notifications) db.notifications = [];
-  db.notifications.push({
-    id: `notif-${Date.now()}`,
+  notify({ role: UserRole.HR_OFFICER }, {
     title: "Liquidation Report Submitted",
     message: `${fullName} submitted a liquidation report for activity relationship evaluation.`,
-    isRead: false,
     type: "info",
-    timestamp: new Date().toISOString(),
-    targetRole: UserRole.HR_OFFICER
+    link: { tab: "requests", record: { kind: "liquidationReport", id: newSub.id } }
   });
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Liquidation", `Submitted liquidation report: ${subNo} (${claimType})`);
@@ -4804,25 +4836,21 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   delete sub.accountantName;
   delete sub.accountantPosition;
 
-  if (!db.notifications) db.notifications = [];
-  db.notifications.push({
-    id: `notif-${Date.now()}`,
+  // Back to whoever returned it: Finance on its Liquidation Desk, HR in Request Management.
+  const reportOnDesk: NotificationLink = { tab: "finance", subTab: "liquidation", record: { kind: "liquidationReport", id: sub.id } };
+  const toFinance = backTo === "Verified & Forwarded";
+  notify({ role: toFinance ? UserRole.FINANCE_OFFICER : UserRole.HR_OFFICER }, {
     title: "Liquidation Report Resubmitted",
     message: `${(req as any).user.fullName} corrected and resubmitted liquidation report ${sub.submissionNo}.${claimChanges.length ? ` Changed: ${claimChanges.join("; ")}.` : ""}`,
-    isRead: false,
     type: "info",
-    timestamp: new Date().toISOString(),
-    targetRole: backTo === "Verified & Forwarded" ? UserRole.FINANCE_OFFICER : UserRole.HR_OFFICER
+    link: toFinance ? reportOnDesk : { tab: "requests", record: { kind: "liquidationReport", id: sub.id } }
   });
   if (claimChanges.length) {
-    db.notifications.push({
-      id: `notif-${Date.now()}-claim`,
+    notify({ role: UserRole.FINANCE_OFFICER }, {
       title: "Corrected claim: check the cash advance",
       message: `${sub.submissionNo} was corrected by ${(req as any).user.fullName}. Changed: ${claimChanges.join("; ")}. Check the voucher before validating.`,
-      isRead: false,
       type: "warning",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.FINANCE_OFFICER
+      link: reportOnDesk
     });
   }
 
@@ -4858,15 +4886,11 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, (req: a
     sub.hrVerifiedAt = new Date().toISOString();
     sub.status = "Verified & Forwarded";
     
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
+    notify({ role: UserRole.FINANCE_OFFICER }, {
       title: "HR Verification Completed",
       message: `Liquidation submission ${sub.submissionNo} verified by HR & forwarded to Finance.`,
-      isRead: false,
       type: "success",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.FINANCE_OFFICER
+      link: { tab: "finance", subTab: "liquidation", record: { kind: "liquidationReport", id: sub.id } }
     });
   } else {
     // A Return carries the checklist of what to correct; the corrected report comes back to HR.
@@ -5047,21 +5071,16 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
       dateCreated: new Date().toISOString()
     });
 
-    if (!db.notifications) db.notifications = [];
     const owed = Number(sub.reimbursementAmount || 0);
     const claimPending = owed > 0 && sub.reimbursementStatus !== "Reimbursed";
 
-    db.notifications.push({
-      id: `notif-${Date.now()}`,
+    notify({ employee: sub.employeeId }, {
       title: "Liquidation APPROVED & FINALIZED",
       message: claimPending
         ? `Your liquidation report ${sub.submissionNo} has been validated. You spent ₱${owed.toFixed(2)} of your own money — Finance will reimburse you.`
         : `Your liquidation report ${sub.submissionNo} has been validated and finalized by Finance.`,
-      isRead: false,
       type: "success",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: sub.employeeId
+      link: { tab: "employee_portal", record: { kind: "liquidationReport", id: sub.id } }
     });
 
     // Settle the advance this report accounts for, so an outstanding cash advance stops
@@ -5079,14 +5098,11 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
     // The claimant is out of pocket until someone actually releases the money, so put it
     // in front of Finance rather than quietly closing the record.
     if (claimPending) {
-      db.notifications.push({
-        id: `notif-${Date.now()}-reimb`,
+      notify({ role: UserRole.FINANCE_OFFICER }, {
         title: "Reimbursement due",
         message: `${sub.employeeName} is owed ₱${owed.toFixed(2)} for ${sub.submissionNo}. Record the payment once the DV is released.`,
-        isRead: false,
         type: "warning",
-        timestamp: new Date().toISOString(),
-        targetRole: UserRole.FINANCE_OFFICER
+        link: { tab: "finance", subTab: "liquidation", record: { kind: "liquidationReport", id: sub.id } }
       });
     }
   } else {
@@ -5153,6 +5169,7 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
     title: "Reimbursement released",
     message: `₱${owed.toFixed(2)} for ${sub.submissionNo} was released on DV ${sub.reimbursementDvNo} dated ${formatLongDate(sub.reimbursementDate)}.`,
     type: "success",
+    link: { tab: "employee_portal", record: { kind: "liquidationReport", id: sub.id } },
     dedupeKey: `reimbursed:${sub.id}`
   });
 
@@ -5368,6 +5385,7 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     title: "Cash advance released",
     message: `PHP ${released.toFixed(2)} was released to you on DV ${advance.dvNo} dated ${formatLongDate(dvDate)} for ${facts.title}. Liquidate it within ${LIQUIDATION_DUE_DAYS} days of the activity.`,
     type: "info",
+    link: { tab: "employee_portal", record: { kind: "assignment", id: advance.activityId } },
     dedupeKey: `ca-released:${advance.id}`
   });
 
@@ -5894,24 +5912,10 @@ function sendEmployeeEmail(emp: Employee, subject: string, text: string) {
 
 // Bell notice (plus email) for one employee. Returns false when a notice with the
 // same dedupeKey already exists. Callers are responsible for saveDB().
-function notifyEmployee(employeeKey: string, notice: { title: string; message: string; type: Notification["type"]; dedupeKey?: string }): boolean {
+function notifyEmployee(employeeKey: string, notice: { title: string; message: string; type: Notification["type"]; link?: NotificationLink; dedupeKey?: string }): boolean {
   const emp = (db.employees || []).find(e => e.id === employeeKey || e.employeeId === employeeKey);
   if (!emp) return false;
-  if (!db.notifications) db.notifications = [];
-  if (notice.dedupeKey && db.notifications.some(n => n.dedupeKey === notice.dedupeKey)) return false;
-  db.notifications.push({
-    id: `notif-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-    title: notice.title,
-    message: notice.message,
-    type: notice.type,
-    isRead: false,
-    timestamp: new Date().toISOString(),
-    targetRole: UserRole.EMPLOYEE,
-    // GET /api/notifications compares this with the login's employeeId, which is
-    // the business form ("EMP001"), not Employee.id ("emp-...").
-    targetEmployeeId: emp.employeeId,
-    dedupeKey: notice.dedupeKey
-  });
+  if (!notify({ employee: emp.employeeId || emp.id }, notice)) return false;
   sendEmployeeEmail(emp, notice.title, notice.message);
   return true;
 }
@@ -5926,6 +5930,7 @@ function notifyTrainingAssignment(participant: TrainingParticipant, program: Tra
     message: `You are assigned to "${program.title}" on ${dates}.` +
       (due ? ` Your liquidation is due on ${formatLongDate(due)} (${LIQUIDATION_DUE_DAYS} days after the seminar ends).` : ""),
     type: "info",
+    link: { tab: "employee_portal", record: { kind: "assignment", id: participant.id } },
     dedupeKey: `assign:${participant.id}`
   });
 }
@@ -6020,7 +6025,8 @@ function runLiquidationReminderSweep() {
           message: `Your liquidation for "${prog.title}" is due on ${dueText}.`,
           type: "warning" as const
         };
-      if (notifyEmployee(p.employeeId, { ...notice, dedupeKey: `liq-due:${p.id}:${stage}` })) sent++;
+      // Opens the seminar's liquidation form, or says why it isn't open yet.
+      if (notifyEmployee(p.employeeId, { ...notice, link: { tab: "employee_portal", liquidationActivityId: p.id }, dedupeKey: `liq-due:${p.id}:${stage}` })) sent++;
     }
     if (sent > 0) {
       saveDB();
@@ -6143,20 +6149,13 @@ function autoAssignEmployeeToTraining(employee: Employee) {
       // Tell HR, once per employee and seminar: every edit of their profile runs this again.
       const full = !upcoming.some(hasSeat);
       const missedProgram = full ? upcoming[0] : upcoming.find(hasSeat)!;
-      const dedupeKey = `auto-enrol-missed:${employee.id}:${missedProgram.id}`;
-      if (!db.notifications) db.notifications = [];
-      if (!db.notifications.some((n: any) => n.dedupeKey === dedupeKey)) {
-        db.notifications.push({
-          id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          title: full ? "Training Program at Capacity" : "Training Budget Can't Cover Enrollment",
-          message: `${employee.fullName} matched training program "${missedProgram.title}", but ${full ? "it is full" : `the FY ${activeFy.label} training budget can't cover another participant`}. Please review manually.`,
-          type: "warning",
-          isRead: false,
-          timestamp: new Date().toISOString(),
-          targetRole: UserRole.HR_OFFICER,
-          dedupeKey
-        });
-      }
+      notify({ role: UserRole.HR_OFFICER }, {
+        title: full ? "Training Program at Capacity" : "Training Budget Can't Cover Enrollment",
+        message: `${employee.fullName} matched training program "${missedProgram.title}", but ${full ? "it is full" : `the FY ${activeFy.label} training budget can't cover another participant`}. Please review manually.`,
+        type: "warning",
+        link: { tab: "training_development", record: { kind: "seminar", id: missedProgram.id } },
+        dedupeKey: `auto-enrol-missed:${employee.id}:${missedProgram.id}`
+      });
       return null;
     }
 
@@ -6841,15 +6840,11 @@ app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res:
     `${skippedRows} row(s) skipped, ${skippedDuplicateInFile} duplicate(s) in the file, ${skippedAlreadyInPlan} already in the plan.`);
 
   if (imported > 0) {
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}-planA`,
+    notify({ role: UserRole.HR_OFFICER }, {
       title: `${imported} training need(s) imported into Plan A`,
       message: `Plan A for ${fiscalYear} gained ${imported} need(s) from the uploaded workbook "${safeName}".`,
-      isRead: false,
       type: "info",
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.HR_OFFICER
+      link: { tab: "training_development", subTab: "plan-a" }
     });
   }
 
@@ -7377,16 +7372,10 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, (req: an
     : null;
   const name = emp ? emp.fullName : participant.employeeId;
   if (attendance === "Attended" && personnelLogin) {
-    if (!db.notifications) db.notifications = [];
-    db.notifications.push({
-      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    notify({ employee: emp.employeeId }, {
       title: "Your liquidation form is ready",
       message: `Your liquidation form for "${String(prog.title).trim()}" is ready. Click here, or the seminar's title under My Assigned Activities, to open it.`,
       type: "info",
-      isRead: false,
-      timestamp: new Date().toISOString(),
-      targetRole: UserRole.EMPLOYEE,
-      targetEmployeeId: emp.employeeId,
       link: { tab: "employee_portal", liquidationActivityId: participant.id }
     });
   }
@@ -7797,6 +7786,17 @@ app.post("/api/pds/parse", authenticateToken, async (req: any, res) => {
     // Google's raw JSON to an HSAC clerk filling in their own PDS.
     console.error("PDS Parsing error:", err?.status || "", err?.message || err);
     const status = Number(err?.status) || 502;
+    res.status(502).json({
+      status: "error",
+      message: pdsParseUserMessage(status),
+      // The frontend keeps manual entry available regardless; this just makes the
+      // reason explicit for anyone reading the response.
+      canEnterManually: true
+    });
+  }
+});
+
+
 // The dev server hands files from the project folder to the browser (Vite), and that folder also
 // holds the database (data_store*.json: every employee, account and PDS), this server's source
 // and other private files. Anyone who could reach the port could download them without signing
@@ -7830,20 +7830,9 @@ function isPrivateProjectPath(urlPath: string): boolean {
   return fs.existsSync(path.join(process.cwd(), first));
 }
 
-    res.status(502).json({
-      status: "error",
-  app.use((req: any, res: any, next: any) => (isPrivateProjectPath(req.path) ? res.status(404).end() : next()));
-      message: pdsParseUserMessage(status),
-      // The frontend keeps manual entry available regardless; this just makes the
-      // reason explicit for anyone reading the response.
-      canEnterManually: true
-    });
-  }
-});
-
-
 // Handle serving the Vite client in development and compiled files in production
 if (process.env.NODE_ENV !== "production") {
+  app.use((req: any, res: any, next: any) => (isPrivateProjectPath(req.path) ? res.status(404).end() : next()));
   createViteServer({
     server: { middlewareMode: true },
     appType: "spa",

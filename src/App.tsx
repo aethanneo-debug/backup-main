@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { User, UserRole, Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest, NotificationLink } from "./types";
+import { User, UserRole, Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest, NotificationLink, ScreenFocus } from "./types";
 import { apiCall } from "./utils";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { tabsOpenTo } from "./components/Sidebar";
 import Header from "./components/Header";
 import DashboardView from "./components/DashboardView";
 import ActivitiesView from "./components/ActivitiesView";
@@ -41,6 +41,10 @@ export default function App() {
   const [liquidationTarget, setLiquidationTarget] = useState<string | null>(null);
   // A returned liquidation report to open for correction (from its notification).
   const [correctionTarget, setCorrectionTarget] = useState<string | null>(null);
+  // What the screen a notification opened should show (a step, or one record). The screen
+  // takes it over and clears it, so going back to that screen later doesn't replay it.
+  const [screenFocus, setScreenFocus] = useState<ScreenFocus | null>(null);
+  const focusProps = { focus: screenFocus, onFocusHandled: () => setScreenFocus(null) };
   const [helpOpen, setHelpOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -240,14 +244,25 @@ export default function App() {
     setActiveTab("employee_portal");
   }
 
-  // Where a notification's link leads.
+  // Where a notification's link leads: a screen, and on it the record it is about.
   function openNotificationLink(link: NotificationLink) {
-    if (link.liquidationReportId && user?.role === UserRole.EMPLOYEE) {
+    if (!user) return;
+    if (link.liquidationReportId && user.role === UserRole.EMPLOYEE) {
       // A returned report opens straight into correction mode.
       setCorrectionTarget(link.liquidationReportId);
       setActiveTab("employee_portal");
-    } else if (link.liquidationActivityId) openLiquidationFor(link.liquidationActivityId);
-    else if (link.tab) setActiveTab(link.tab);
+      return;
+    }
+    if (link.liquidationActivityId) {
+      openLiquidationFor(link.liquidationActivityId);
+      return;
+    }
+    // Only a screen this login can open (the sidebar's own rule); a notice about anything else
+    // just closes. The server still checks every request.
+    if (!link.tab || !tabsOpenTo(user.role as UserRole).includes(link.tab)) return;
+    if (link.tab === "finance" && link.subTab) setActiveFinanceSubTab(link.subTab);
+    setScreenFocus(link.record || link.subTab ? { record: link.record, subTab: link.subTab, nonce: Date.now() } : null);
+    setActiveTab(link.tab);
   }
 
   // Gated Page views dispatcher
@@ -278,13 +293,14 @@ export default function App() {
         }
         return <UserAccountsView currentUser={user} />;
       case "finance":
-        return <FinanceView 
+        return <FinanceView
           user={user}
           transactions={transactions}
           fetchSummary={fetchSummary}
           onRefresh={triggerRefresh}
           activeSubTab={activeFinanceSubTab}
           setActiveSubTab={setActiveFinanceSubTab}
+          {...focusProps}
         />;
       case "budget":
         return <FinanceView 
@@ -298,7 +314,7 @@ export default function App() {
       case "trainings_seminars":
         return <TrainingsSeminarsView user={user} employees={employees} onOpenLiquidation={openLiquidationFor} />;
       case "training_development":
-        return <TrainingDevelopmentView user={user} triggerRefresh={triggerRefresh} />;
+        return <TrainingDevelopmentView user={user} triggerRefresh={triggerRefresh} {...focusProps} />;
       case "assets":
         return <AssetsView 
           user={user}
@@ -309,12 +325,13 @@ export default function App() {
           onRefresh={triggerRefresh}
         />;
       case "requests":
-        return <RequestsView 
+        return <RequestsView
           user={user}
           requests={requests}
           fetchSummary={fetchSummary}
           supplies={supplies}
           onRefresh={triggerRefresh}
+          {...focusProps}
         />;
       case "activities":
         return <ActivitiesView user={user} onRefresh={triggerRefresh} />;
@@ -332,6 +349,7 @@ export default function App() {
             onLiquidationTargetHandled={() => setLiquidationTarget(null)}
             correctionTarget={correctionTarget}
             onCorrectionTargetHandled={() => setCorrectionTarget(null)}
+            {...focusProps}
           />
         );
       case "backup-restore":

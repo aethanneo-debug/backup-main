@@ -256,6 +256,7 @@ export default function LiquidationDeskView({
               visibleQueue.map((sub) => (
                 <article
                   key={sub.id}
+                  data-record-id={sub.id}
                   className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/40 p-4 transition-colors hover:border-blue-200 md:flex-row"
                 >
                   <div className="min-w-0 flex-1 space-y-3">
@@ -487,7 +488,7 @@ export default function LiquidationDeskView({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleIndex.map((liq) => (
-                <tr key={liq.id} className="hover:bg-blue-50/40">
+                <tr key={liq.id} data-record-id={liq.id} className="hover:bg-blue-50/40">
                   <td className="px-4 py-3 font-mono font-bold text-slate-800">
                     <span className="flex flex-wrap items-center gap-1.5">
                       {liq.submissionNo}

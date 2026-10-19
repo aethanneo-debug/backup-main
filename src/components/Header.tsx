@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { User, Notification, NotificationLink } from "../types";
-import { apiCall } from "../utils";
+import { apiCall, firstTimestamp } from "../utils";
+import { tabsOpenTo } from "./Sidebar";
 import { 
   Bell, 
   Clock, 
@@ -22,9 +23,19 @@ interface HeaderProps {
 
 export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
   const [time, setTime] = useState(new Date());
+  // Only the notices this user hasn't read, newest first. One leaves the list the moment it is
+  // clicked (or all are marked read), and the badge counts what is left.
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // Ids marked read here. A poll that set off before the server recorded them must not bring
+  // them back, so they stay filtered out for the session (unless the request failed).
+  const markedRead = useRef<Set<string>>(new Set());
+  // At the sign-in gates (new password, PDS upload) the server refuses this, so there is
+  // nothing to fetch and no bell.
+  const gated = !!(user.requirePasswordChange || user.requirePdsUpload);
+  // The screens this login can open, for the "Open →" hint (the clock re-renders every second).
+  const openableTabs = useMemo(() => tabsOpenTo(user.role), [user.role]);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -34,8 +45,10 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
   const fetchNotifications = async () => {
     try {
       const res = await apiCall("/api/notifications");
-      if (res.status === "success" && res.data) {
-        setNotifications(res.data || []);
+      if (res.status === "success" && Array.isArray(res.data)) {
+        setNotifications(res.data
+          .filter((n: Notification) => !n.isRead && !markedRead.current.has(n.id))
+          .sort((a: Notification, b: Notification) => firstTimestamp(b.timestamp) - firstTimestamp(a.timestamp)));
       }
     } catch (err: any) {
       if (err?.message === "Failed to fetch" || err?.message?.includes("fetch") || err?.toString()?.includes("Failed to fetch") || err?.message?.includes("HTML response instead of JSON")) {
@@ -47,10 +60,11 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
   };
 
   useEffect(() => {
+    if (gated) return;
     fetchNotifications();
     const timer = setInterval(fetchNotifications, 15000);
     return () => clearInterval(timer);
-  }, [user]);
+  }, [user, gated]);
 
   // Close dropdown on clicking outside
   useEffect(() => {
@@ -63,33 +77,31 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Marks the notice read; one with a link (e.g. "your liquidation form is ready") opens it.
+  // A click takes the notice off the list at once, records it as read, and opens what it is
+  // about (e.g. the seminar, the request, the report).
   const openNotification = (notif: Notification) => {
-    handleMarkAsRead(notif.id);
-    if (notif.link && onOpenLink) {
-      onOpenLink(notif.link);
-      setDropdownOpen(false);
-    }
+    markRead([notif.id], `/api/notifications/${notif.id}/read`);
+    setDropdownOpen(false);
+    if (notif.link && onOpenLink) onOpenLink(notif.link);
   };
 
-  const handleMarkAsRead = async (id: string) => {
-    try {
-      await apiCall(`/api/notifications/${id}/read`, { method: "POST" });
-      setNotifications(prev => 
-        prev.map(n => n.id === id ? { ...n, isRead: true } : n)
-      );
-    } catch (err) {
-      console.error("Failed to mark alert as read", err);
-    }
+  // Only the notices on screen: one that arrived since the last refresh stays unread.
+  const handleMarkAllRead = () => {
+    const ids = notifications.map(n => n.id);
+    markRead(ids, "/api/notifications/read-all", { ids });
   };
 
-  const handleMarkAllRead = async () => {
-    try {
-      await apiCall("/api/notifications/read-all", { method: "POST" });
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-    } catch (err) {
-      console.error("Failed to clear desk notifications", err);
-    }
+  // Removes the notices from the list right away and tells the server. keepalive lets the
+  // request finish even if the page is reloaded or closed straight after the click. If it
+  // fails they come back with the next fetch, since they are still unread.
+  const markRead = (ids: string[], endpoint: string, body?: object) => {
+    ids.forEach(id => markedRead.current.add(id));
+    setNotifications(prev => prev.filter(n => !ids.includes(n.id)));
+    apiCall(endpoint, { method: "POST", keepalive: true, ...(body ? { body: JSON.stringify(body) } : {}) }).catch(err => {
+      ids.forEach(id => markedRead.current.delete(id));
+      console.error("Failed to mark notifications as read", err);
+      fetchNotifications();
+    });
   };
 
   const getNotifIcon = (type: string) => {
@@ -134,7 +146,7 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
     day: "numeric",
   });
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = notifications.length;
 
   return (
     <header id="ipfms-header" className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm relative z-40">
@@ -175,12 +187,15 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
             <HelpCircle size={18} />
           </button>
           
-          <button 
-            id="btn-alert-notif" 
-            title="System Notifications"
+          {!gated && (
+          <button
+            id="btn-alert-notif"
+            title={unreadCount > 0 ? `Notifications: ${unreadCount} unread` : "Notifications"}
+            aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+            aria-expanded={dropdownOpen}
             className={`p-1.5 rounded-lg relative transition-colors cursor-pointer ${
-              dropdownOpen 
-                ? "text-blue-600 bg-blue-50" 
+              dropdownOpen
+                ? "text-blue-600 bg-blue-50"
                 : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
             }`}
             onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -191,33 +206,38 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
               <Bell size={18} />
             )}
             {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border border-white"></span>
+              <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 border border-white text-white text-[9px] font-bold leading-[14px] text-center">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
             )}
           </button>
+          )}
 
           {/* NOTIFICATION CENTER DROPDOWN PANEL */}
-          {dropdownOpen && (
+          {dropdownOpen && !gated && (
             <div className="absolute right-0 top-11 w-80 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden font-sans">
               {/* Header */}
               <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider font-mono">
-                  Desk alerts ({unreadCount})
+                  Notifications ({unreadCount})
                 </span>
                 {unreadCount > 0 && (
-                  <button 
+                  <button
                     onClick={handleMarkAllRead}
                     className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline font-medium transition-all cursor-pointer"
                   >
-                    Clear all
+                    Mark all as read
                   </button>
                 )}
               </div>
 
-              {/* List Container */}
+              {/* List Container: unread only, newest first */}
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
                 {notifications.length === 0 ? (
-                  <div className="p-5 text-center text-slate-400 text-xs font-sans">
-                    No active notifications recorded for your desk.
+                  <div className="px-5 py-8 text-center font-sans">
+                    <Bell size={20} className="mx-auto text-slate-300" aria-hidden="true" />
+                    <p className="mt-2 text-xs font-semibold text-slate-600">You're all caught up</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">New notifications will appear here.</p>
                   </div>
                 ) : (
                   notifications.map((notif) => (
@@ -233,27 +253,25 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
                           openNotification(notif);
                         }
                       }}
-                      className={`p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${!notif.isRead ? "bg-blue-50/20" : ""}`}
+                      className="p-3.5 bg-blue-50/20 hover:bg-slate-100 transition-colors cursor-pointer flex gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
                     >
                       {/* Icon based on types */}
                       <div className="shrink-0 mt-0.5">
                         {getNotifIcon(notif.type)}
                       </div>
-                      
+
                       {/* Content text */}
                       <div className="flex-1 space-y-1 text-left">
                         <div className="flex items-start justify-between gap-1">
-                          <p className={`text-xs leading-tight ${!notif.isRead ? "font-semibold text-slate-900" : "text-slate-600"}`}>
+                          <p className="text-xs leading-tight font-semibold text-slate-900">
                             {notif.title}
                           </p>
-                          {!notif.isRead && (
-                            <span className="w-1.5 h-1.5 bg-rose-500 rounded-full shrink-0 mt-1"></span>
-                          )}
+                          <span className="w-1.5 h-1.5 bg-rose-500 rounded-full shrink-0 mt-1" aria-hidden="true"></span>
                         </div>
                         <p className="text-[11px] text-slate-500 font-sans leading-normal">
                           {notif.message}
                         </p>
-                        {notif.link && onOpenLink && (
+                        {notif.link && onOpenLink && openableTabs.includes(notif.link.tab) && (
                           <p className="text-[10px] font-semibold text-blue-700">Open &rarr;</p>
                         )}
                         <p className="text-[9px] text-slate-400 font-mono">

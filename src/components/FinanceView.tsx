@@ -9,8 +9,10 @@ import {
   Liquidation,
   BudgetAllocation,
   FinanceAuditLog,
-  BudgetRequestItem
+  BudgetRequestItem,
+  ScreenFocus
 } from "../types";
+import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { 
   LayoutDashboard, 
   Search, 
@@ -52,16 +54,21 @@ interface FinanceViewProps {
   onRefresh: () => void;
   activeSubTab?: string;
   setActiveSubTab?: (tab: string) => void;
+  /** From a notification: a liquidation report to show on the Liquidation Desk. */
+  focus?: ScreenFocus | null;
+  onFocusHandled?: () => void;
 }
 
-export default function FinanceView({ 
-  user, 
-  transactions, 
+export default function FinanceView({
+  user,
+  transactions,
   employees = [],
-  fetchSummary, 
+  fetchSummary,
   onRefresh,
   activeSubTab: propsActiveSubTab,
-  setActiveSubTab: propsSetActiveSubTab
+  setActiveSubTab: propsSetActiveSubTab,
+  focus,
+  onFocusHandled
 }: FinanceViewProps) {
   // Navigation tabs
   const [internalActiveSubTab, setInternalActiveSubTab] = useState<string>("dashboard");
@@ -180,6 +187,22 @@ export default function FinanceView({
   const isFinanceOrAdmin = [UserRole.SUPER_ADMIN, UserRole.FINANCE_OFFICER].includes(user.role);
   const isBudgetOrAdmin = [UserRole.SUPER_ADMIN, UserRole.BUDGET_OFFICER].includes(user.role);
 
+  // A notification opened the Liquidation Desk (App sets the sub-tab): reload it, then show the
+  // report (scrolled to and outlined). Only after the fresh load lands (counted by
+  // financeLoads): until then the report may still sit where it was before, e.g. in the index
+  // rather than in the queue.
+  const [financeLoads, setFinanceLoads] = useState(0);
+  const [shownReport, setShownReport] = useState<{ id: string; key: number; afterLoad: number } | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.record?.kind === "liquidationReport") {
+      setShownReport({ id: focus.record.id, key: focus.nonce, afterLoad: financeLoads });
+      fetchFinanceAddons();
+    }
+    onFocusHandled?.();
+  }, [focus?.nonce]);
+  useRecordHighlight(shownReport && financeLoads > shownReport.afterLoad ? shownReport.id : null, shownReport?.key);
+
   // Fetch liquidations, budgets, and logs
   async function fetchFinanceAddons() {
     try {
@@ -235,6 +258,7 @@ export default function FinanceView({
       console.error("Error loading supplementary finance modules", err);
     } finally {
       setLoading(false);
+      setFinanceLoads(n => n + 1);
     }
   }
 

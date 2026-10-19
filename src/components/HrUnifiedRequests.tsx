@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, RequestStatus } from "../types";
+import { User, RequestStatus, ScreenFocus } from "../types";
 import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import ReturnForCorrectionDialog from "./liquidation/ReturnForCorrectionDialog";
@@ -10,9 +10,12 @@ import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
 interface HrUnifiedRequestsProps {
   user: User;
   onRefresh: () => void;
+  /** From a notification: a request or liquidation report to open. */
+  focus?: ScreenFocus | null;
+  onFocusHandled?: () => void;
 }
 
-export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequestsProps) {
+export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandled }: HrUnifiedRequestsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -33,6 +36,26 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
   useEffect(() => {
     fetchData();
   }, [onRefresh]);
+
+  // A notification opened this screen: its request or report opens once a fresh list is in
+  // (counted by `loads`), or the screen says why it can't.
+  const [loads, setLoads] = useState(0);
+  const [wanted, setWanted] = useState<{ uid: string; afterLoad: number } | null>(null);
+  useEffect(() => {
+    const record = focus?.record;
+    if (record?.kind === "request" || record?.kind === "liquidationReport") {
+      setWanted({ uid: `${record.kind === "request" ? "req" : "liq"}-${record.id}`, afterLoad: loads });
+      fetchData();
+    }
+    if (focus) onFocusHandled?.();
+  }, [focus?.nonce]);
+  useEffect(() => {
+    if (!wanted || loads <= wanted.afterLoad) return;
+    const item = allItems.find(i => i._unifiedId === wanted.uid);
+    if (item) setViewItem(item);
+    else setError(prev => prev || "The item that notification is about is no longer in this list.");
+    setWanted(null);
+  }, [wanted, loads]);
 
   async function fetchData() {
     setLoading(true);
@@ -97,6 +120,7 @@ export default function HrUnifiedRequests({ user, onRefresh }: HrUnifiedRequests
       setError("Failed to retrieve pending HR verifications payload.");
     } finally {
       setLoading(false);
+      setLoads(n => n + 1);
     }
   }
 
