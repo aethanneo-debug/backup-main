@@ -115,7 +115,7 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
                   aria-label="Filter by column"
                   className="w-full border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-700 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 >
-                  <option value="all">All columns ({needs.length})</option>
+                  <option value="all">Trainings ({needs.length})</option>
                   {TRAINING_NEED_CATEGORIES.map(c => (
                     <option key={c} value={c}>{TRAINING_NEED_COLUMN_LABELS[c]} ({columnCounts[c]})</option>
                   ))}

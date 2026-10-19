@@ -197,7 +197,7 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
               aria-label="Filter the plan by column"
               className="border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-700 focus:ring-1 focus:ring-blue-500 focus:outline-none"
             >
-              <option value="all">All columns ({needs.length})</option>
+              <option value="all">Trainings ({needs.length})</option>
               {TRAINING_NEED_CATEGORIES.map(c => (
                 <option key={c} value={c} title={TRAINING_NEED_COLUMN_LABELS[c]}>{c} ({columnCounts[c]})</option>
               ))}
