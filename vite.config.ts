@@ -16,7 +16,10 @@ export default defineConfig(() => {
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : { ignored: ['**/data_store.json'] },
+      watch: process.env.DISABLE_HMR === 'true' ? null : { ignored: ['**/data_store.json', '**/data_store.json.tmp'] },
+      // Never served (server.ts also refuses every private file at the project root first):
+      // Vite's own defaults, plus the database and any credentials export.
+      fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', 'data_store*', '**/*credentials*', 'server.ts'] },
     },
   };
 });

@@ -7797,8 +7797,42 @@ app.post("/api/pds/parse", authenticateToken, async (req: any, res) => {
     // Google's raw JSON to an HSAC clerk filling in their own PDS.
     console.error("PDS Parsing error:", err?.status || "", err?.message || err);
     const status = Number(err?.status) || 502;
+// The dev server hands files from the project folder to the browser (Vite), and that folder also
+// holds the database (data_store*.json: every employee, account and PDS), this server's source
+// and other private files. Anyone who could reach the port could download them without signing
+// in (found 2026-10-19). Only the app itself is served: index.html, src/, node_modules/ and
+// Vite's own /@ paths. Any other file or folder at the project root answers 404, however it is
+// spelled: Windows also opens "DATA_S~1.JSO" or "data_store.json.", so the file system is asked.
+const SERVED_ROOT_ENTRIES = new Set(["index.html", "src", "node_modules"]);
+function isPrivateProjectPath(urlPath: string): boolean {
+  let p: string;
+  try { p = decodeURIComponent(urlPath); } catch { return true; }
+  p = path.posix.normalize(p.replace(/\\/g, "/"));
+  if (p.startsWith("/@")) {
+    // Vite's own paths. /@vite/... and /@react-refresh are its client. Any other /@x/ path (fs,
+    // id, ...) can name a file, by its absolute path or relative to the project, so the rest is
+    // checked like any other request.
+    const m = p.match(/^\/@([^/]+)\/(.*)$/);
+    if (!m || m[1] === "vite") return false;
+    const rest = m[2];
+    if (/^([a-zA-Z]:)?\//.test(rest)) {
+      const rel = path.relative(process.cwd(), path.resolve(rest));
+      if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false;
+      p = "/" + rel.replace(/\\/g, "/");
+    } else {
+      p = "/" + rest;
+    }
+  }
+  // Windows ignores trailing dots and spaces, and ":name" opens a stream of the same file.
+  const first = p.split("/").find(Boolean)?.split(":")[0].replace(/[. ]+$/, "");
+  if (!first || first.toLowerCase().startsWith(".vite")) return false; // a Vite dependency cache
+  if (SERVED_ROOT_ENTRIES.has(first.toLowerCase())) return false;
+  return fs.existsSync(path.join(process.cwd(), first));
+}
+
     res.status(502).json({
       status: "error",
+  app.use((req: any, res: any, next: any) => (isPrivateProjectPath(req.path) ? res.status(404).end() : next()));
       message: pdsParseUserMessage(status),
       // The frontend keeps manual entry available regardless; this just makes the
       // reason explicit for anyone reading the response.
