@@ -729,6 +729,15 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1792449785600-143",
+      "timestamp": "2026-10-19T22:43:05.600Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
       "id": "log-1792448800381-709",
       "timestamp": "2026-10-19T22:26:40.381Z",
       "userId": "u-2",
