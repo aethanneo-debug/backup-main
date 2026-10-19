@@ -18,6 +18,8 @@ interface AttendanceModalProps {
   employees: Employee[];
   /** Only HR records attendance; everyone else sees the roster read-only. */
   canRecord: boolean;
+  /** The signed-in officer's staff code: recording their own attendance is allowed but flagged. */
+  currentEmployeeId?: string;
   onClose: () => void;
   /** Called after a change so the page can reload its data. */
   onChanged: () => void;
@@ -33,7 +35,7 @@ const BADGE: Record<AttendanceStatus | "none", string> = {
 const ACTION =
   "inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-export default function AttendanceModal({ program, participants, employees, canRecord, onClose, onChanged }: AttendanceModalProps) {
+export default function AttendanceModal({ program, participants, employees, canRecord, currentEmployeeId, onClose, onChanged }: AttendanceModalProps) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -45,8 +47,16 @@ export default function AttendanceModal({ program, participants, employees, canR
     (employees ?? []).find(e => e.id === p.employeeId || e.employeeId === p.employeeId)?.fullName || p.employeeId;
   // Filing a report moves the enrolment to Liquidation Pending; it stays attended from then on.
   const hasFiled = (p: TrainingParticipant) => p.status === "Liquidation Pending" || p.status === "Liquidated";
+  // The officer's own enrolment: they may record it, but it is flagged in the audit log (the
+  // user's decision, 2026-10-20), so they're told on the row and asked before it is saved.
+  const isOwn = (p: TrainingParticipant) => {
+    if (!currentEmployeeId) return false;
+    const emp = (employees ?? []).find(e => e.id === p.employeeId || e.employeeId === p.employeeId);
+    return p.employeeId === currentEmployeeId || emp?.employeeId === currentEmployeeId || emp?.id === currentEmployeeId;
+  };
 
   async function record(p: TrainingParticipant, attendance: AttendanceStatus) {
+    if (isOwn(p) && !window.confirm(`This is your own attendance. Recording it as "${attendance}" will be marked as self-approved in the audit log. Record it anyway?`)) return;
     setSavingId(p.id);
     setError("");
     setNotice("");
@@ -129,6 +139,11 @@ export default function AttendanceModal({ program, participants, employees, canR
                         <span>by {p.attendanceBy}, {formatDate(p.attendanceAt)}</span>
                       )}
                       {hasFiled(p) && <span>· liquidation report filed</span>}
+                      {canRecord && isOwn(p) && (
+                        <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                          You: flagged as self-approved if you record it
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">

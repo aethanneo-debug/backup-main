@@ -16,6 +16,8 @@ interface HrUnifiedRequestsProps {
 }
 
 export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandled }: HrUnifiedRequestsProps) {
+  // The HR officer's own liquidation report (reports carry the claimant's staff code).
+  const isOwnReport = (item: any) => item?._category === "Liquidation" && !!user.employeeId && item.employeeId === user.employeeId;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -174,6 +176,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
     let successCount = 0;
     let failCount = 0;
     let skippedReports = 0;
+    let skippedOwn = 0;
 
     for (const uid of selectedIds) {
       const item = allItems.find(i => i._unifiedId === uid);
@@ -182,6 +185,11 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
       // correct, so a bulk Return leaves it as it is (bulk Verify still applies).
       if (action === "return" && item._category === "Liquidation") {
         skippedReports++;
+        continue;
+      }
+      // Your own report is endorsed on its own, where you're told it will be flagged.
+      if (isOwnReport(item)) {
+        skippedOwn++;
         continue;
       }
 
@@ -207,6 +215,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
 
     setSuccess(`Processed successfully: ${successCount}. Failed: ${failCount}.${skippedReports
       ? ` ${skippedReports} liquidation report${skippedReports === 1 ? " was" : "s were"} left as ${skippedReports === 1 ? "it was" : "they were"}: open each one to return it with a checklist.`
+      : ""}${skippedOwn
+      ? ` ${skippedOwn === 1 ? "Your own report was" : `${skippedOwn} of your own reports were`} left out: open ${skippedOwn === 1 ? "it" : "each one"} to endorse ${skippedOwn === 1 ? "it" : "them"}.`
       : ""}`);
     setBulkActionType(null);
     setRemarks("");
@@ -366,6 +376,14 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
 
               {isActionable(viewItem.status) && (
                 <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+                  {/* Officers may act on their own report, but it is flagged (the user's decision,
+                      2026-10-20): they're told here, and asked again on Confirm. */}
+                  {isOwnReport(viewItem) && (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                      <strong>This is your own report.</strong> You can endorse it, but it will be marked as
+                      self-approved in the audit log.
+                    </p>
+                  )}
                   <div className="flex space-x-2">
                     <button
                       onClick={() => {
@@ -400,6 +418,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                       />
                       <button
                         onClick={async () => {
+                          if (modalActionType === "verify" && isOwnReport(viewItem)
+                            && !window.confirm(`${viewItem.submissionNo} is your own report. Endorsing it will be marked as self-approved in the audit log. Endorse it anyway?`)) return;
                           setLoading(true);
                           try {
                             if (viewItem._category === "Personnel Request") {

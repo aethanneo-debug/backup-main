@@ -708,7 +708,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
             <>
               <div className="font-bold text-slate-800">{formatCurrency(Number(p.allocatedBudget) || 0)}</div>
               {/* What this seminar gave back (requirement 6): once closed, allocated − spent;
-                  while open, the shares of participants who did not attend. */}
+                  while open, the shares of participants who did not attend, and what validated
+                  attendees didn't spend of theirs (the seminar budget flow). */}
               {(() => {
                 const budget = seminarBudget(p, participants);
                 return (
@@ -722,7 +723,10 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                       <p className="mt-0.5 text-[10px] font-semibold leading-snug text-emerald-700">
                         Released to Unallocated: {formatCurrency(budget.released)}{" "}
                         <span className="block font-normal text-slate-500">
-                          {budget.absent} did not attend
+                          {[
+                            budget.absent > 0 && `${budget.absent} did not attend`,
+                            budget.settled > 0 && `unspent by ${budget.settled} liquidated`
+                          ].filter(Boolean).join(" · ")}
                         </span>
                       </p>
                     ) : null}
@@ -986,6 +990,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id)}
           employees={employees}
           canRecord={user.role === UserRole.HR_OFFICER}
+          currentEmployeeId={user.employeeId}
           onClose={() => setAttendanceProgram(null)}
           onChanged={fetchData}
         />

@@ -4,6 +4,7 @@ import { ActiveSignatory, CorrectionField, LiquidationParticular, TRAINING_EXPEN
 import { newParticular, round2 } from "../ParticularsEditor";
 import { CoaHeaderFields } from "../LiquidationCoaFields";
 import { SHEET_FONT, amountText, longDate } from "./sheetFormat";
+import { getLocalTodayString } from "../../../utils";
 import { CertificationCell, SheetTotalRow } from "./SheetParts";
 import CorrectionNote from "../resubmit/CorrectionNote";
 import { CorrectionAccess } from "../resubmit/correctionModel";
@@ -33,6 +34,9 @@ interface LiquidationSheetFormProps {
   advanceOnRecord: boolean;
   /** A Reimbursement: paid out of pocket, so there is no advance and its DV boxes are off. */
   noAdvance?: boolean;
+  /** A seminar report (the seminar budget flow): its items can't go past the advance, so going
+   * over is a mistake to fix, not an amount to be reimbursed. */
+  withinAdvance?: boolean;
   /** The OR fields open only when part of the advance is being returned. */
   refundDue: boolean;
   particulars: LiquidationParticular[];
@@ -81,6 +85,7 @@ export default function LiquidationSheetForm({
   onCoaChange,
   advanceOnRecord,
   noAdvance = false,
+  withinAdvance = false,
   refundDue,
   particulars,
   onParticularsChange,
@@ -416,6 +421,10 @@ export default function LiquidationSheetForm({
                     value={coa.refundOrDate}
                     disabled={disabled || !refundDue}
                     readOnly={!can("refundOr")}
+                    // A seminar report's OR comes after the advance's DV, and no later than
+                    // today (the server checks the same).
+                    min={withinAdvance ? coa.cashAdvanceDvDate || undefined : undefined}
+                    max={withinAdvance ? getLocalTodayString() : undefined}
                     onChange={(e) => set({ refundOrDate: e.target.value })}
                     aria-label="Refund OR date"
                     aria-describedby={noteId("refundOr")}
@@ -427,7 +436,8 @@ export default function LiquidationSheetForm({
             }
             amount={<span className="font-bold tabular-nums">{amountText(refunded)}</span>}
           />
-          <SheetTotalRow label="AMOUNT TO BE REIMBURSED" amount={<span className="font-bold tabular-nums">{amountText(reimbursed)}</span>} />
+          {/* Never on a seminar report: going over its advance is refused, not reimbursed. */}
+          <SheetTotalRow label="AMOUNT TO BE REIMBURSED" amount={<span className="font-bold tabular-nums">{amountText(withinAdvance ? 0 : reimbursed)}</span>} />
 
           {/* --- Certifications: A is the employee filing. B is the Authorized Representative
                 the employee chooses here; C is the Accountant on duty, recorded when Finance
@@ -486,11 +496,19 @@ export default function LiquidationSheetForm({
 
       {/* What the figures mean, in words — the same three cases the old summary showed,
           plus a Reimbursement, which has no advance to measure against. */}
-      <p className={`mt-2 text-[12px] ${reimbursed > 0 ? "text-amber-700" : refunded > 0 ? "text-emerald-700" : "text-slate-600"}`}>
+      <p className={`mt-2 text-[12px] ${
+        withinAdvance && !(totalReleased > 0) ? "text-amber-700"
+          : reimbursed > 0 ? (withinAdvance ? "text-rose-700" : "text-amber-700")
+          : refunded > 0 ? "text-emerald-700" : "text-slate-600"
+      }`}>
         {noAdvance
           ? "A reimbursement: there is no cash advance, so everything you spent is to be reimbursed."
+          : withinAdvance && !(totalReleased > 0)
+            ? "No cash advance has been released for this seminar yet: this report settles it once it is."
           : reimbursed > 0
-            ? "You spent more than the cash advance."
+            ? withinAdvance
+              ? "Your items come to more than the cash advance. Lower or remove an item: a seminar report can't go past its advance."
+              : "You spent more than the cash advance."
             : refunded > 0
               ? "Return this balance and record the OR."
               : "Fully liquidated - nothing to refund."}

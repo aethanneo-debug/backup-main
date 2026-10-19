@@ -16,6 +16,8 @@ interface Props {
   submissions: any[];
   /** Re-runs the parent's fetch so a recorded payment leaves the queue. */
   onRecorded: () => void;
+  /** The signed-in officer's staff code: paying their own claim is allowed but flagged. */
+  currentEmployeeId?: string;
 }
 
 /**
@@ -37,7 +39,10 @@ function mismatch(sub: any): boolean {
  * that report does NOT hand over any money — until the disbursement voucher is recorded
  * here, the claimant is still out of pocket, which is why these stay visible.
  */
-export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
+export default function ReimbursementQueue({ submissions, onRecorded, currentEmployeeId }: Props) {
+  // The officer's own claim (reports carry the claimant's staff code): allowed, but they are told
+  // it will be marked as self-approved in the audit log (the user's decision, 2026-10-20).
+  const isOwnClaim = (sub: any) => !!currentEmployeeId && sub?.employeeId === currentEmployeeId;
   const [openId, setOpenId] = useState<string | null>(null);
   const [dvNo, setDvNo] = useState("");
   const [payDate, setPayDate] = useState("");
@@ -92,6 +97,9 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
     }
     if (!payDate) {
       setError("Enter the date the voucher was released.");
+      return;
+    }
+    if (isOwnClaim(sub) && !window.confirm(`${sub.submissionNo} is your own claim. Recording its payment will be marked as self-approved in the audit log. Record it anyway?`)) {
       return;
     }
 
@@ -194,6 +202,13 @@ export default function ReimbursementQueue({ submissions, onRecorded }: Props) {
                       <strong>{formatCurrency(Number(sub.totalReleased || 0))}</strong>. Confirm the advance was
                       never released before paying &mdash; otherwise this would pay the same money twice.
                     </span>
+                  </p>
+                )}
+
+                {isOwnClaim(sub) && (
+                  <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <strong>This is your own claim.</strong> You can record its payment, but it will be marked as
+                    self-approved in the audit log.
                   </p>
                 )}
 

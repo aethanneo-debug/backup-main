@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument, ScreenFocus } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
-import { apiCall, getLocalTodayString, formatCurrency, downloadBase64File as saveAttachedFile } from "../utils";
+import { apiCall, getLocalTodayString, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../utils";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
 import {
   newParticular,
@@ -23,6 +23,10 @@ import {
   matchesClaimType
 } from "./liquidation/ClaimType";
 import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal";
+import AdvanceRequestPanel, { currentAdvanceOf } from "./liquidation/AdvanceRequestPanel";
+import BalanceCheck, { BalanceStatusBadge, FundReturnNote } from "./liquidation/BalanceCheck";
+import { withinAdvanceSubmitProblem } from "./liquidation/withinAdvance";
+import { liquidationBalance } from "../liquidationMoney";
 import {
   User as UserIcon,
   Send,
@@ -74,6 +78,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // chosen assignment it is the authority on what was received, so the form shows it
   // read-only rather than asking - the server overrides the field either way.
   const [myAdvances, setMyAdvances] = useState<any[]>([]);
+  // The advances couldn't be loaded: a seminar's form then says so rather than "none released".
+  const [advancesFailed, setAdvancesFailed] = useState(false);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
 
@@ -125,6 +131,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const [claimType, setClaimType] = useState<ClaimType | "">("");
   const [claimTypeError, setClaimTypeError] = useState("");
   const claimTypeRef = useRef<HTMLSelectElement>(null);
+  // Why the last submit of a seminar's report was stopped (no advance, over it, the OR missing).
+  // Its banner goes once the items or the sheet change; the balance check shows where things stand.
+  const [moneyError, setMoneyError] = useState("");
   const isReimbursement = claimType === "Reimbursement";
   // My Settlement Log Entries, narrowed by claim type.
   const [logFilter, setLogFilter] = useState<ClaimTypeFilterValue>("All");
@@ -169,9 +178,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const effectiveSpent = hasParticularLines ? computedSpent : totalSpent;
 
   // Finance's advance for an assignment: the one a report being corrected is linked to
-  // (even once settled), or one released for it. The server reads the same record.
+  // (even once settled), or one released for it. Only money paid out counts, not a request.
+  // The server reads the same record (advanceOnFileFor).
   function advanceOnRecord(activityId: string, report?: any): CashAdvance | null {
-    const list = (myAdvances ?? []).filter((a: any) => a && a.status !== "Cancelled");
+    const list = (myAdvances ?? []).filter((a: any) => a && (a.status === "Released" || a.status === "Liquidated"));
     const linked = report && report.activityId === activityId
       ? list.find((a: any) => (report.cashAdvanceId && a.id === report.cashAdvanceId) || a.liquidationId === report.id)
       : null;
@@ -188,6 +198,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     ? Math.round(Number(activeAdvance.amount) * 100) / 100
     : isReimbursement ? 0 : totalReleased;
   const refundDue = Math.round((releasedOnSheet - effectiveSpent) * 100) / 100 > 0;
+
+  // The seminar budget flow: a seminar's report (a new one, or one filed under the flow)
+  // settles the advance Finance released. Its claim type is fixed, its items stay within the
+  // advance, and a leftover is handed back with an OR. The server enforces the same.
+  const selectedItem = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId);
+  const withinAdvanceForm = resubmittingItem ? !!resubmittingItem.withinAdvance : selectedItem?.source === "seminar";
+  const seminarAdvance = withinAdvanceForm ? currentAdvanceOf(myAdvances, selectedActivityId) : null;
+  const balance = liquidationBalance(releasedOnSheet, effectiveSpent);
 
   // Human label for a liquidation's activity, used on the printed report header.
   function activityLabelFor(activityId: string): string | undefined {
@@ -211,7 +229,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setRepresentativeError("");
     setClaimType("");
     setClaimTypeError("");
+    setMoneyError("");
     setReplacementFiles({});
+  }
+
+  function clearMoneyError() {
+    if (!moneyError) return;
+    setError(prev => (prev === moneyError ? "" : prev));
+    setMoneyError("");
   }
 
   // Finance and the Administrator get every advance from /api/cash-advances; the form only
@@ -225,7 +250,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   async function loadMyAdvances() {
     try {
       const res = await apiCall("/api/cash-advances");
-      if (res?.status === "success") setMyAdvances(ownAdvances(res.data));
+      if (res?.status === "success") {
+        setMyAdvances(ownAdvances(res.data));
+        setAdvancesFailed(false);
+      }
     } catch {
       // Keep what is loaded; the server still checks every claim.
     }
@@ -454,6 +482,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       ]);
       if (superseded()) return;
       setMyAdvances(advRes.status === "success" ? ownAdvances(advRes.data) : []);
+      setAdvancesFailed(advRes.status !== "success");
 
       // /api/activities also lists the employee's seminars (type "training"); those come
       // from the seminar list below instead, so each seminar appears once.
@@ -522,13 +551,20 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // The dropdown's choice of assignment, also used when a seminar title or a notice opens
   // the form: fills what Finance released, if it is on record.
   function chooseActivity(id: string) {
+    const wasSeminar = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId)?.source === "seminar";
     setSelectedActivityId(id);
     // What Finance released, if it is on record. Otherwise zero rather than HR's
     // allocation - an allocation is not money in hand, and seeding with it was what made
     // an unfunded assignment look funded.
     const advance = advanceOnRecord(id);
-    // Finance released an advance for this one, so it can only be a Liquidation.
-    if (advance && claimType === "Reimbursement") {
+    // A seminar's report always settles its advance (the seminar budget flow). A general
+    // activity's claimant chooses, so a type set for a seminar isn't carried over to one, and
+    // with an advance released it can only be a Liquidation.
+    if ((liquidatable ?? []).find((a: any) => a.id === id)?.source === "seminar") {
+      setClaimType("Liquidation");
+      if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
+      setClaimTypeError("");
+    } else if (wasSeminar || (advance && claimType === "Reimbursement")) {
       setClaimType("");
       if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
       setClaimTypeError("");
@@ -709,6 +745,28 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     if (!selectedActivityId) {
       setError("Please choose a valid Assigned Activity reference.");
       return;
+    }
+
+    // A seminar's report, mirroring the server: Finance's advance is out, the items stay
+    // within it, and a leftover has its OR (where the OR can still be entered).
+    if (withinAdvanceForm) {
+      const problem = withinAdvanceSubmitProblem({
+        advance: activeAdvance,
+        current: seminarAdvance,
+        advancesFailed,
+        hasItems: filledParticulars(particulars).length > 0,
+        itemsEditable: access.editable("particulars"),
+        balance,
+        itemsTotal: effectiveSpent,
+        orEditable: access.editable("refundOr"),
+        orNo: coaFields.refundOrNo,
+        orDate: coaFields.refundOrDate
+      });
+      if (problem) {
+        setMoneyError(problem);
+        setError(problem);
+        return;
+      }
     }
 
     // Claim type, mirroring the server: a Liquidation needs a cash advance (Finance's
@@ -1517,6 +1575,21 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                         <LiquidationDueBadge dueDate={act.liquidationDueDate} />
                       </div>
                     )}
+
+                    {/* The seminar budget flow: ask Finance for the cash advance, then follow it. */}
+                    {act.type === "training" && (
+                      <AdvanceRequestPanel
+                        activityId={act.id}
+                        allowance={Number(act.allottedBudget) || 0}
+                        canRequest={!!act.canRequestAdvance}
+                        blockedReason={act.advanceBlockedReason}
+                        advance={currentAdvanceOf(myAdvances, act.id)}
+                        onRequested={message => {
+                          setSuccess(message);
+                          fetchPortalData();
+                        }}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -1610,7 +1683,22 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 </div>
 
                 {/* One form, but the claimant says which kind of claim it is (instructor's
-                    note 10). The server checks the choice against Finance's records. */}
+                    note 10). The server checks the choice against Finance's records. A seminar's
+                    report always settles its cash advance, so its type is fixed (the seminar
+                    budget flow, decision 4). */}
+                {withinAdvanceForm ? (
+                  <div className="space-y-1">
+                    <label htmlFor="liq-claim-type-fixed" className="block text-[10px] font-bold text-slate-400 uppercase font-mono">Claim Type</label>
+                    <input
+                      id="liq-claim-type-fixed"
+                      type="text"
+                      readOnly
+                      value="Liquidation: settles your cash advance"
+                      aria-describedby="liq-claim-type-hint"
+                      className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold bg-slate-100"
+                    />
+                  </div>
+                ) : (
                 <div className="space-y-1">
                   <label htmlFor="liq-claim-type" className="text-[10px] font-bold text-slate-400 uppercase font-mono">
                     Claim Type <span className="text-rose-600" aria-hidden="true">*</span>
@@ -1640,6 +1728,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   )}
                   <CorrectionNote id="note-claimType" note={access.noteFor("claimType")} />
                 </div>
+                )}
               </div>
 
               {/* The cash advance itself is entered on the sheet below, on its AMOUNT OF CASH
@@ -1647,10 +1736,47 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               <p
                 id="liq-claim-type-hint"
                 className={`text-[10px] font-mono leading-snug ${
-                  activeAdvance ? "text-blue-700" : !selectedActivityId ? "text-slate-400" : isReimbursement || !access.editable("cashAdvance") ? "text-slate-600" : "text-amber-700"
+                  activeAdvance ? "text-blue-700" : !selectedActivityId ? "text-slate-400" : withinAdvanceForm ? "text-amber-700" : isReimbursement || !access.editable("cashAdvance") ? "text-slate-600" : "text-amber-700"
                 }`}
               >
-                {activeAdvance ? (
+                {withinAdvanceForm && activeAdvance ? (
+                  <>
+                    Cash advance <strong>{formatCurrency(Number(activeAdvance.amount))}</strong> from{" "}
+                    <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {formatDate(activeAdvance.dvDate)}, as
+                    Finance released it. Your items can&rsquo;t go past it, and what you don&rsquo;t spend is handed back with an OR.
+                  </>
+                ) : withinAdvanceForm ? (
+                  advancesFailed ? (
+                    <>
+                      <strong>Your cash advance record couldn&rsquo;t be loaded</strong>, so this report can&rsquo;t be checked
+                      yet.{" "}
+                      <button
+                        type="button"
+                        onClick={() => loadMyAdvances()}
+                        className="cursor-pointer font-bold underline hover:text-amber-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                      >
+                        Try again
+                      </button>
+                    </>
+                  ) : seminarAdvance?.status === "Requested" ? (
+                    <>
+                      <strong>Your cash advance request is waiting for Finance.</strong> You can file this report once it is
+                      released.
+                    </>
+                  ) : (
+                    <>
+                      <strong>No cash advance has been released for this seminar.</strong> Request it under{" "}
+                      <button
+                        type="button"
+                        onClick={() => setActiveSubMenu("activities")}
+                        className="cursor-pointer font-bold underline hover:text-amber-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                      >
+                        My Assigned Activities
+                      </button>
+                      ; this report settles it.
+                    </>
+                  )
+                ) : activeAdvance ? (
                   <>
                     Cash advance <strong>{formatCurrency(Number(activeAdvance.amount))}</strong> from{" "}
                     <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {activeAdvance.dvDate}.
@@ -1743,13 +1869,15 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   coa={activeAdvance
                     ? { ...coaFields, cashAdvanceDvNo: activeAdvance.dvNo || "", cashAdvanceDvDate: activeAdvance.dvDate || "" }
                     : coaFields}
-                  onCoaChange={setCoaFields}
-                  advanceOnRecord={!!activeAdvance}
+                  onCoaChange={next => { setCoaFields(next); clearMoneyError(); }}
+                  // A seminar's advance only ever comes from Finance's record, never typed.
+                  advanceOnRecord={!!activeAdvance || withinAdvanceForm}
                   noAdvance={isReimbursement}
+                  withinAdvance={withinAdvanceForm}
                   correction={inCorrection ? access : undefined}
                   refundDue={refundDue}
                   particulars={particulars}
-                  onParticularsChange={setParticulars}
+                  onParticularsChange={next => { setParticulars(next); clearMoneyError(); }}
                   particularErrors={particularErrors}
                   totalSpent={effectiveSpent}
                   totalReleased={releasedOnSheet}
@@ -1759,29 +1887,40 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     // (Also locked, as filed, when a correction didn't reopen the advance.)
                     value: activeAdvance
                       ? amountText(Number(activeAdvance.amount))
-                      : isReimbursement ? amountText(0)
+                      : isReimbursement || withinAdvanceForm ? amountText(0)
                       : !access.editable("cashAdvance") ? amountText(totalReleased)
                       : (releasedDraft ?? String(totalReleased)),
-                    locked: !!activeAdvance || isReimbursement || !access.editable("cashAdvance"),
+                    locked: !!activeAdvance || isReimbursement || withinAdvanceForm || !access.editable("cashAdvance"),
                     ariaLabel: activeAdvance
                       ? "Cash advance received, taken from the voucher Finance released"
                       : isReimbursement
                         ? "Cash advance: none, because this is a Reimbursement"
-                        : "Amount of the cash advance received, as on its DV",
+                        : withinAdvanceForm
+                          ? "Cash advance: none released yet"
+                          : "Amount of the cash advance received, as on its DV",
                     onChange: raw => {
-                      if (activeAdvance || isReimbursement || !access.editable("cashAdvance")) return;
+                      if (activeAdvance || isReimbursement || withinAdvanceForm || !access.editable("cashAdvance")) return;
                       setReleasedDraft(raw);
                       const n = Number(raw);
                       if (isFinite(n) && n >= 0) setTotalReleased(n);
                     },
                     onBlur: () => {
-                      if (activeAdvance || isReimbursement || !access.editable("cashAdvance")) return;
+                      if (activeAdvance || isReimbursement || withinAdvanceForm || !access.editable("cashAdvance")) return;
                       setReleasedDraft(null);
                       setTotalReleased(v => Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
                     }
                   }}
                 />
               </div>
+
+              {/* The seminar budget flow: the advance, the items so far and what is left, live. */}
+              {withinAdvanceForm && activeAdvance && (
+                <BalanceCheck
+                  advance={releasedOnSheet}
+                  itemsTotal={effectiveSpent}
+                  orFilled={!!coaFields.refundOrNo.trim() && !!coaFields.refundOrDate}
+                />
+              )}
 
               {/* REAL DRAG & DROP ATTACHMENT UPLOADER */}
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -1937,7 +2076,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               <button
                 type="submit"
                 // A new report needs a Box B representative; with none set up it can't be filed.
-                disabled={submittingLiq || (signatories !== null && boxBChoices.length === 0 && !resubmittingItem?.representativeId)}
+                // A seminar's report needs its advance, and items within it (the balance check
+                // above says why).
+                disabled={submittingLiq || (signatories !== null && boxBChoices.length === 0 && !resubmittingItem?.representativeId)
+                  || (withinAdvanceForm && (!activeAdvance || balance.status === "Over"))}
                 className={`px-6 py-2 rounded-lg shadow-sm font-semibold text-xs cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-60 ${
                   resubmittingItem
                     ? "bg-amber-600 hover:bg-amber-700 text-white"
@@ -1992,7 +2134,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                           <span className="text-[10px] text-slate-400 font-mono">
                             Cash Advance: {formatCurrency(Number(sub.totalReleased) || 0)} · Spent: {formatCurrency(Number(sub.totalSpent) || 0)}
                           </span>
-                          {Number(sub.remainingBalance) !== 0 && (
+                          {/* A seminar report kept within its advance shows its balance; others
+                              their refund or reimbursement, as before. */}
+                          <BalanceStatusBadge report={sub} />
+                          {!sub.withinAdvance && Number(sub.remainingBalance) !== 0 && (
                             <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border ${
                               Number(sub.remainingBalance) > 0
                                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
@@ -2033,6 +2178,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                           </span>
                         </div>
                       </div>
+
+                      <FundReturnNote report={sub} />
 
                       {/* PARTICULARS FILED ON THIS REPORT */}
                       {(sub.particulars ?? []).length > 0 && (

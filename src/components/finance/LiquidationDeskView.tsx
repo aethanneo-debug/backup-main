@@ -13,8 +13,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ActiveSignatory, User, UserRole } from "../../types";
-import { apiCall, formatCurrency, downloadBase64File as saveAttachedFile } from "../../utils";
+import { apiCall, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../../utils";
 import CashAdvanceDesk from "./CashAdvanceDesk";
+import AdvanceRequestsList from "./AdvanceRequestsList";
 import ReimbursementQueue from "./ReimbursementQueue";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
 import { overspendOf, OverspendBadge, OverspendNotice } from "../liquidation/overspend";
@@ -27,6 +28,8 @@ import {
 } from "../liquidation/ClaimType";
 import ReturnForCorrectionDialog from "../liquidation/ReturnForCorrectionDialog";
 import { answeredCorrectionSummary } from "../liquidation/resubmit/correctionModel";
+import { BalanceStatusBadge } from "../liquidation/BalanceCheck";
+import { liquidationBalance } from "../../liquidationMoney";
 
 /** The mandated sequence a liquidation dossier must travel, in order. */
 const PIPELINE_STEPS = ["Pending Submission", "Submitted", "Under Review", "Approved", "Completed"];
@@ -54,6 +57,9 @@ interface LiquidationDeskViewProps {
   onExport: (rows?: any[]) => void;
   /** Re-runs the parent's fetches after money moves. */
   onQueueRefresh: () => void;
+  /** From a notification: an employee's cash advance request to show. */
+  focusAdvance?: { id: string; nonce: number } | null;
+  onFocusAdvanceHandled?: () => void;
 }
 
 /** Status pill for the index — house badge pattern: -50 bg, -700 text, -200 border. */
@@ -82,9 +88,15 @@ export default function LiquidationDeskView({
   setSubRemarks,
   onValidate,
   onExport,
-  onQueueRefresh
+  onQueueRefresh,
+  focusAdvance,
+  onFocusAdvanceHandled
 }: LiquidationDeskViewProps) {
   const validationQueue = (submissions ?? []).filter(s => s.status === "Verified & Forwarded");
+  // Bumped when a request is released or declined, so the Cash Advance Desk reloads too.
+  const [deskVersion, setDeskVersion] = useState(0);
+  // The signed-in officer's own report (reports carry the claimant's staff code).
+  const isOwnReport = (sub: any) => !!user.employeeId && sub?.employeeId === user.employeeId;
   // Each list can be narrowed to Liquidations or Reimbursements (instructor's note 10).
   const [queueFilter, setQueueFilter] = useState<ClaimTypeFilterValue>("All");
   const [indexFilter, setIndexFilter] = useState<ClaimTypeFilterValue>("All");
@@ -185,7 +197,15 @@ export default function LiquidationDeskView({
       {/* MONEY OUT. Comes before validation because the advance has to exist before
           there is anything to liquidate against it. */}
       {(user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN) && (
-        <CashAdvanceDesk onReleased={onQueueRefresh} />
+        <>
+          {/* Employees' own requests for their seminar's advance (the seminar budget flow). */}
+          <AdvanceRequestsList
+            focus={focusAdvance}
+            onFocusHandled={onFocusAdvanceHandled}
+            onChanged={() => { setDeskVersion(v => v + 1); onQueueRefresh(); }}
+          />
+          <CashAdvanceDesk refreshKey={deskVersion} onReleased={onQueueRefresh} />
+        </>
       )}
 
       {/* FINANCE LIQUIDATION VALIDATION QUEUE */}
@@ -265,6 +285,7 @@ export default function LiquidationDeskView({
                         {sub.submissionNo}
                       </span>
                       <ClaimTypeBadge claimType={sub.claimType} />
+                      <BalanceStatusBadge report={sub} />
                       <span className="font-mono text-[10px] text-slate-400">{sub.createdAt?.split("T")[0]}</span>
                       <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-blue-700">
                         <ShieldCheck size={10} aria-hidden="true" />
@@ -339,6 +360,25 @@ export default function LiquidationDeskView({
                       </div>
                     </div>
 
+                    {/* A seminar report kept within its advance (the seminar budget flow): what
+                        validating returns to the training budget, with the employee's OR. */}
+                    {sub.withinAdvance && (() => {
+                      const { leftover } = liquidationBalance(sub.totalReleased ?? 0, sub.totalSpent ?? 0);
+                      return (
+                        <p className={`max-w-md rounded-lg border p-2.5 text-[11px] ${leftover > 0 ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                          {leftover > 0 ? (
+                            <>
+                              <strong>{formatCurrency(leftover)}</strong> of the advance was handed back
+                              {sub.refundOrNo ? ` (OR ${sub.refundOrNo}${sub.refundOrDate ? `, ${formatDate(sub.refundOrDate)}` : ""})` : ""}. Check
+                              the receipt: validating returns it to the training budget.
+                            </>
+                          ) : (
+                            <>Balanced: the items use up the cash advance exactly, so nothing is handed back.</>
+                          )}
+                        </p>
+                      );
+                    })()}
+
                     {sub.remarks && (
                       <p className="max-w-md rounded-lg border border-slate-200 bg-white p-2 text-[11px] italic text-slate-500">
                         &ldquo;{sub.remarks}&rdquo;
@@ -405,6 +445,14 @@ export default function LiquidationDeskView({
                       <p className="font-mono text-[9px] text-slate-400">Go with Validate. A Return has its own checklist.</p>
                     </div>
 
+                    {/* Officers may act on their own report, but it is flagged (the user's
+                        decision, 2026-10-20): they're told here, and asked again on Validate. */}
+                    {isOwnReport(sub) && (
+                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
+                        <strong>This is your own report.</strong> You can validate it, but it will be marked as
+                        self-approved in the audit log.
+                      </p>
+                    )}
                     <div className="flex justify-end gap-2 pt-3">
                       <button
                         type="button"
@@ -417,7 +465,10 @@ export default function LiquidationDeskView({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onValidate(sub.id, selectedSub?.id === sub.id ? subRemarks : "")}
+                        onClick={() => {
+                          if (isOwnReport(sub) && !window.confirm(`${sub.submissionNo} is your own report. Validating it will be marked as self-approved in the audit log. Validate it anyway?`)) return;
+                          onValidate(sub.id, selectedSub?.id === sub.id ? subRemarks : "");
+                        }}
                         disabled={noAccountant}
                         title={noAccountant ? "Appoint an Accountant in Utilities → Manage Signatories first" : undefined}
                         className="flex cursor-pointer items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-50"
@@ -445,7 +496,7 @@ export default function LiquidationDeskView({
       {/* OUT-OF-POCKET CLAIMS. Validation does not release money, so these stay
           open until Finance records the disbursement voucher. */}
       {(user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN) && (
-        <ReimbursementQueue submissions={submissions} onRecorded={onQueueRefresh} />
+        <ReimbursementQueue submissions={submissions} onRecorded={onQueueRefresh} currentEmployeeId={user.employeeId} />
       )}
 
       {/* LIQUIDATIONS INDEX TABLE */}
@@ -493,6 +544,7 @@ export default function LiquidationDeskView({
                     <span className="flex flex-wrap items-center gap-1.5">
                       {liq.submissionNo}
                       <ClaimTypeBadge claimType={liq.claimType} />
+                      <BalanceStatusBadge report={liq} />
                       {overspendOf(liq) && <OverspendBadge over={overspendOf(liq)!} />}
                     </span>
                   </td>

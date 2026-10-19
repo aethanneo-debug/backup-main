@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, FileText } from "lucide-react";
 import { downloadBase64File, formatCurrency, formatDate } from "../../utils";
+import { BalanceStatusBadge, FundReturnNote } from "./BalanceCheck";
 
 interface Props {
   /** A liquidation report as GET /api/liquidation-submissions returns it. */
@@ -49,6 +50,19 @@ export default function ReportContents({ report }: Props) {
           <p className="text-slate-700">{advance > 0 ? formatCurrency(advance) : "None"}</p>
         </div>
       </div>
+
+      {/* A seminar report kept within its advance (the seminar budget flow): balanced, or what
+          was handed back with its OR, and once validated, what went back to the fund. */}
+      {report?.withinAdvance && (
+        <div className="space-y-1.5">
+          <p className={LABEL}>Balance</p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <BalanceStatusBadge report={report} />
+            {report.refundOrNo && <span>OR {report.refundOrNo}{report.refundOrDate ? `, ${formatDate(report.refundOrDate)}` : ""}</span>}
+          </div>
+          <FundReturnNote report={report} />
+        </div>
+      )}
 
       <div>
         <p className={LABEL}>Particulars ({items.length})</p>

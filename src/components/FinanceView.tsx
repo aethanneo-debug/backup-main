@@ -193,11 +193,15 @@ export default function FinanceView({
   // rather than in the queue.
   const [financeLoads, setFinanceLoads] = useState(0);
   const [shownReport, setShownReport] = useState<{ id: string; key: number; afterLoad: number } | null>(null);
+  // An employee's cash advance request: the request list loads on its own and shows it.
+  const [focusAdvance, setFocusAdvance] = useState<{ id: string; nonce: number } | null>(null);
   useEffect(() => {
     if (!focus) return;
     if (focus.record?.kind === "liquidationReport") {
       setShownReport({ id: focus.record.id, key: focus.nonce, afterLoad: financeLoads });
       fetchFinanceAddons();
+    } else if (focus.record?.kind === "cashAdvance") {
+      setFocusAdvance({ id: focus.record.id, nonce: focus.nonce });
     }
     onFocusHandled?.();
   }, [focus?.nonce]);
@@ -1382,6 +1386,8 @@ export default function FinanceView({
             onValidate={handleFinanceValidate}
             onExport={exportMethods.liquidations}
             onQueueRefresh={() => { fetchFinanceAddons(); onRefresh(); }}
+            focusAdvance={focusAdvance}
+            onFocusAdvanceHandled={() => setFocusAdvance(null)}
           />
         )}
 

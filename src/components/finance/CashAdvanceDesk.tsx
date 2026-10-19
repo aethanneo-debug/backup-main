@@ -29,6 +29,9 @@ interface FundableRow {
   /** Set once the full refund of a non-attendee's advance is recorded. */
   refundOrNo?: string | null;
   refundOrDate?: string | null;
+  /** The employee asked for this advance themself: it is released from Cash Advance Requests. */
+  pendingRequestId?: string | null;
+  requestedAt?: string | null;
 }
 
 const todayIso = () => new Date().toISOString().split("T")[0];
@@ -239,7 +242,13 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                       </div>
                     </div>
 
-                    {!isOpen && (
+                    {/* An employee's own request is released (or declined) from the request
+                        list above, so the assignment keeps one record; the server agrees. */}
+                    {row.pendingRequestId ? (
+                      <p className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                        Requested{row.requestedAt ? ` on ${formatDate(row.requestedAt)}` : ""}: see Cash Advance Requests
+                      </p>
+                    ) : !isOpen && (
                       <button
                         onClick={() => openForm(row)}
                         className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
@@ -249,7 +258,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                     )}
                   </div>
 
-                  {isOpen && (
+                  {isOpen && !row.pendingRequestId && (
                     <div className="border-t border-slate-200 pt-3 space-y-3">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
                         <div className="space-y-1">

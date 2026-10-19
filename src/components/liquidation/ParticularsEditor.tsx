@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { LiquidationParticular, TRAINING_EXPENSE_CATEGORIES } from "../../types";
 import { formatCurrency } from "../../utils";
+import { sumPesos } from "../../liquidationMoney";
 import { Plus, Trash2, ListPlus } from "lucide-react";
 
 interface ParticularsEditorProps {
@@ -28,8 +29,10 @@ export function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+// Added up in whole centavos, as the server does (src/liquidationMoney.ts), so the total the
+// form shows is the total the server records.
 export function sumParticulars(particulars: LiquidationParticular[]): number {
-  return round2((particulars ?? []).reduce((s, p) => s + (Number(p.amount) || 0), 0));
+  return sumPesos((particulars ?? []).map((p) => p.amount));
 }
 
 /** Rows the server will actually keep - a blank row is skipped, never an error. */

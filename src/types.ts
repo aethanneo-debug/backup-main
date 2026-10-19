@@ -369,7 +369,7 @@ export interface Notification {
 
 // What a notice is about: a request, a liquidation report, a seminar (Training Plan & Budget),
 // or the employee's own assignment (an enrolment or a general activity, My Assigned Activities).
-export type NotificationRecordKind = "request" | "liquidationReport" | "seminar" | "assignment";
+export type NotificationRecordKind = "request" | "liquidationReport" | "seminar" | "assignment" | "cashAdvance";
 
 export interface NotificationLink {
   tab: string;                       // the app tab to open, e.g. "employee_portal"
@@ -586,7 +586,15 @@ export interface CashAdvance {
   issuedBy: string;               // the Financial Officer who released it
   issuedAt: string;               // ISO timestamp
   // "Refunded": the employee did not attend and gave the whole advance back (requirement 6).
-  status: "Released" | "Liquidated" | "Cancelled" | "Refunded";
+  // "Requested": an employee asked for it from their seminar and Finance hasn't acted yet; no
+  // money is out, so dvNo, dvDate, issuedBy and issuedAt stay blank until it is released.
+  // "Declined": Finance turned the request down (declineReason). The employee may ask again.
+  status: "Requested" | "Released" | "Declined" | "Liquidated" | "Cancelled" | "Refunded";
+  requestedAt?: string;           // ISO timestamp of the employee's request
+  requestedBy?: string;           // the employee's name, as signed in
+  decidedBy?: string;             // the Financial Officer who released or declined the request
+  decidedAt?: string;             // ISO timestamp
+  declineReason?: string;
   liquidationId?: string;         // the report that settled it
   liquidatedAt?: string;
   refundOrNo?: string;            // the official receipt for the refund
@@ -747,6 +755,22 @@ export interface LiquidationSubmission {
   reimbursementDvNo?: string;        // the DV the reimbursement was paid on
   reimbursementDate?: string;        // YYYY-MM-DD
   reimbursedBy?: string;             // the Financial Officer who released it
+
+  // --- Seminar budget flow (user spec 2026-10-18) ---
+  // Set on seminar reports filed from 2026-10-19: the report settles a cash advance the
+  // employee requested and Finance released. Its items may not come to more than the advance
+  // (form and server), the claim type is always Liquidation, and a leftover is handed back with
+  // an OR. Reports filed before keep the rules they were filed under.
+  withinAdvance?: boolean;
+  // The leftover of the advance, recorded once when Finance validates: what went back to the
+  // training budget, with the employee's refund OR.
+  fundReturn?: {
+    amount: number;
+    orNo: string;
+    orDate: string;                  // YYYY-MM-DD
+    recordedAt: string;              // ISO timestamp (the validation)
+    recordedBy: string;              // the Financial Officer who validated
+  };
 
   // Stamped by the server at filing time from HR's own assignment record — never taken
   // from the request body. `totalReleased` is what the claimant says they received, and

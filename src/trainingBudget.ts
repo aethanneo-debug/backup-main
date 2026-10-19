@@ -16,6 +16,9 @@ interface SeminarEnrolment {
   attendance?: string;
   /** A cash advance Finance released to this enrolment that is not yet liquidated or refunded (set by the server). */
   advanceOutstanding?: number | string;
+  /** What Finance validated as spent by this enrolment once it is "Liquidated" (set by the server
+   * when it is known). An enrolment liquidated without it keeps its share held, as before. */
+  settledSpent?: number | string;
 }
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -36,7 +39,10 @@ export interface SeminarBudget {
   share: number;
   /** Participants marked "Did not attend". They drop out of the seminar. */
   absent: number;
-  /** Their shares, released to Unallocated as soon as attendance is recorded (open seminars). */
+  /** Attendees Finance has validated while the seminar is still open. Each counts what they spent. */
+  settled: number;
+  /** Released to Unallocated while the seminar is open: the non-attendees' shares, and what the
+   * validated attendees didn't spend of theirs. */
   released: number;
   /** Cash advances still out with non-attendees: held until Finance records the refund. */
   held: number;
@@ -69,6 +75,12 @@ export interface SeminarBudget {
  *   can't stand in for anyone's share. So money still owed to it, or not yet back, is never
  *   counted as free, even after its allocation or seats are cut below the cash Finance has
  *   already released.
+ * - An attendee Finance has validated counts what they spent instead of their share, so what
+ *   they didn't spend returns to Unallocated at once (the user's decision, 2026-10-19: the
+ *   leftover goes back per person, not when the whole seminar settles). The rule above then
+ *   applies to those still to report, as if the validated attendees' seats were taken out.
+ *   Only when what they spent is known (`settledSpent`): an enrolment liquidated by older code
+ *   without a record of its own spending keeps its share held, as it always did.
  *
  * `allocatedOverride` lets the HR planner price an unsaved edit. Rounded to centavos here,
  * at the boundary, so every figure built from it adds up.
@@ -111,9 +123,23 @@ export function seminarBudget(program: SeminarAmounts, participants: SeminarEnro
   const units = (pesos: number) => Math.round((Number(pesos) || 0) * 100) * seats;
   const shareUnits = Math.round(allocated * 100);
   const absentShares = Math.max(0, Math.min(absent * shareUnits, units(allocated) - attending.length * shareUnits));
-  const attendeesFloor = attending.length > seats ? attending.length * shareUnits : 0;
-  const attendeeExcess = attending.reduce((s, p) => s + Math.max(0, units(Math.max(0, Number(p.advanceOutstanding) || 0)) - shareUnits), 0);
-  const openUnits = Math.max(Math.max(units(allocated) - absentShares, attendeesFloor) + attendeeExcess, units(spent) + units(outstanding) - units(held)) + units(held);
+  // Validated attendees whose spending is known: their seats come out of the shares part (never
+  // below the shares of those still to report, at least one allowance each, which also covers
+  // seats cut below the number attending), and what they spent goes in instead. With none of
+  // them this is exactly the rule as it was.
+  const spendingKnown = (p: SeminarEnrolment) =>
+    p.status === "Liquidated" && p.settledSpent !== undefined && p.settledSpent !== null && p.settledSpent !== "";
+  const settledAttendees = attending.filter(spendingKnown);
+  const stillToReport = attending.length - settledAttendees.length;
+  const sharesPart = Math.max(units(allocated) - absentShares - settledAttendees.length * shareUnits, stillToReport * shareUnits);
+  const settledSpent = settledAttendees.reduce((s, p) => s + units(Math.max(0, Number(p.settledSpent) || 0)), 0);
+  // Cash still out with an attendee: beyond their own share while it still counts; all of it
+  // once their spending counts instead.
+  const attendeeExcess = attending.reduce((s, p) => {
+    const cash = units(Math.max(0, Number(p.advanceOutstanding) || 0));
+    return s + (spendingKnown(p) ? cash : Math.max(0, cash - shareUnits));
+  }, 0);
+  const openUnits = Math.max(sharesPart + settledSpent + attendeeExcess, units(spent) + units(outstanding) - units(held)) + units(held);
   const openCommitted = Math.round(openUnits / seats) / 100;
   return {
     stage,
@@ -121,6 +147,7 @@ export function seminarBudget(program: SeminarAmounts, participants: SeminarEnro
     spent,
     share,
     absent,
+    settled: stage === "open" ? settledAttendees.length : 0,
     released: stage === "open" ? round2(Math.max(0, allocated - openCommitted)) : 0,
     held,
     heldCount: absentees.filter((p) => Number(p.advanceOutstanding) > 0).length,

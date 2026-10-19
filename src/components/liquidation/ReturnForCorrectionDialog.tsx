@@ -42,6 +42,7 @@ function lockedBecause(field: CorrectionField, report: LiquidationSubmission, fi
   if (field === "cashAdvance" && report.cashAdvanceId) return "Taken from Finance's record of the advance";
   if (field === "cashAdvance" && report.claimType === "Reimbursement") return "A Reimbursement has no cash advance (tick Claim type if one was received)";
   if (field === "refundOr" && report.claimType === "Reimbursement") return "A Reimbursement has no refund";
+  if (field === "claimType" && report.withinAdvance) return "A seminar report always settles its cash advance";
   if (field === "replaceDocuments" && files.length === 0) return "No files attached";
   return "";
 }

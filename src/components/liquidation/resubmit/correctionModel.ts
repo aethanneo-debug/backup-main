@@ -36,7 +36,9 @@ export interface CorrectionAccess {
  * Which parts of a returned report reopen. The same rule as the server's /resubmit, which
  * ignores anything else the form sends: ticking the claim type reopens the cash advance and
  * its refund OR too (a new type can mean a new advance), and a report filed before Box B
- * existed must name a representative either way.
+ * existed must name a representative either way. On a seminar report kept within its advance,
+ * reopened particulars reopen the refund OR as well: new items can change what is left to
+ * hand back.
  */
 export function correctionAccess(report: Partial<LiquidationSubmission> | null | undefined): CorrectionAccess {
   const open = openCorrectionOf(report);
@@ -45,6 +47,7 @@ export function correctionAccess(report: Partial<LiquidationSubmission> | null |
     open,
     editable: (field) => !open || ticked.has(field)
       || ((field === "cashAdvance" || field === "refundOr") && ticked.has("claimType"))
+      || (field === "refundOr" && !!report?.withinAdvance && ticked.has("particulars"))
       || (field === "representative" && !report?.representativeId),
     noteFor: (field) => open?.items.find(i => i.field === field)?.remark,
     lineIds: open?.items.find(i => i.field === "particulars")?.lineIds,

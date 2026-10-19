@@ -10,6 +10,8 @@ import { readXlsxWorkbook, XlsxReadError } from "./src/server/xlsx/readXlsx";
 import { parsePlanASheet, PlanABlock } from "./src/server/xlsx/parsePlanA";
 import { matchWorkbookName } from "./src/server/xlsx/matchEmployeeName";
 import { seminarBudget, allocationIncrease, isSeminarSettled } from "./src/trainingBudget";
+import { centavos, pesos, sumPesos, liquidationBalance } from "./src/liquidationMoney";
+import { createTransactions } from "./src/server/jsonTransaction";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -1087,7 +1089,12 @@ function writeDataFile(data: unknown) {
 
 const db = getInitialData();
 
+// Routes that move money run as one transaction (src/server/jsonTransaction.ts): all or
+// nothing, saved once before the reply. While one runs, saves wait for its end.
+const { deferSave, transactional, afterCommit } = createTransactions(db, () => writeDataFile(db));
+
 function saveDB() {
+  if (deferSave()) return;
   writeDataFile(db);
 }
 
@@ -3905,6 +3912,11 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
             const e = seminarFormEligibility(t);
             return { canLiquidate: e.canLiquidate, liquidationBlockedReason: e.reason || null };
           })(),
+          // Whether they may ask Finance for their cash advance (advanceRequestEligibility).
+          ...(() => {
+            const r = advanceRequestEligibility(t);
+            return { canRequestAdvance: r.canRequest, advanceBlockedReason: r.reason || null };
+          })(),
           allottedBudget: t.allowanceAllocated || 0,
           budgetId: "training-budget",
           assignedEmployeeId: employeeId,
@@ -3993,6 +4005,18 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+// A line's amount, read strictly: pesos with at most two decimals, from 0 up to a billion (so
+// no total can overflow into Infinity). Blank is 0. Text, a third decimal or a negative is
+// not an amount, rather than being rounded or read as 0.
+function lineAmount(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return 0;
+  const n = typeof value === "number" ? value
+    : typeof value === "string" && /^\s*\d+(\.\d+)?\s*$/.test(value) ? Number(value)
+    : NaN;
+  if (!isFinite(n) || n < 0 || n > 1e9) return null;
+  return Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ? round2(n) : null;
+}
+
 // Normalises the PARTICULARS block. Returns null when the payload carries no usable
 // lines, so an older client sending only `totalSpent` keeps working unchanged.
 function normalizeParticulars(raw: any): { particulars: any[]; total: number; error?: string } | null {
@@ -4004,14 +4028,13 @@ function normalizeParticulars(raw: any): { particulars: any[]; total: number; er
   for (let i = 0; i < raw.length; i++) {
     const p = raw[i] || {};
     const description = String(p.description || "").trim();
-    const amount = round2(Number(p.amount));
-    if (!description && !amount) continue; // blank row the user never filled in
+    const amount = lineAmount(p.amount);
+    if (!description && amount === 0) continue; // blank row the user never filled in
     if (!description) {
       return { particulars: [], total: 0, error: `Particular ${i + 1} needs a description.` };
     }
-    // Up to a billion pesos a line, so no total can overflow into Infinity.
-    if (!isFinite(amount) || amount < 0 || amount > 1e9) {
-      return { particulars: [], total: 0, error: `"${description}" needs an amount of zero or more.` };
+    if (amount === null) {
+      return { particulars: [], total: 0, error: `"${description}" needs an amount in pesos of zero or more, with at most two decimals.` };
     }
     // An unrecognised or missing bucket falls back rather than failing the whole
     // report — the claimant's money is not held up by a bad dropdown value.
@@ -4023,7 +4046,8 @@ function normalizeParticulars(raw: any): { particulars: any[]; total: number; er
     particulars.push({ id, description, amount, category });
   }
   if (particulars.length === 0) return null;
-  return { particulars, total: round2(particulars.reduce((s, p) => s + p.amount, 0)) };
+  // Added up in whole centavos (src/liquidationMoney.ts), so the total never drifts.
+  return { particulars, total: sumPesos(particulars.map(p => p.amount)) };
 }
 
 // What HR actually set aside for this assignment, plus a human label. Read from the
@@ -4142,10 +4166,11 @@ function releasedAdvanceForAssignment(activityId: string): CashAdvance | null {
 
 // The cash advance Finance has on file for a report: the one it is linked to, whatever its
 // status (a settled advance is still the record), the one it settled, or one released for
-// the same assignment since. A cancelled advance was never money in hand, and a refunded one
-// was given back in full.
+// the same assignment since. Only money actually paid out counts: a cancelled advance was
+// never money in hand, a refunded one was given back in full, and a request (pending or
+// declined) is not money at all.
 function advanceOnFileFor(sub: any): CashAdvance | null {
-  const advances = (db.cashAdvances || []).filter((a: any) => a && a.status !== "Cancelled" && a.status !== "Refunded");
+  const advances = (db.cashAdvances || []).filter((a: any) => a && (a.status === "Released" || a.status === "Liquidated"));
   return advances.find((a: any) => sub.cashAdvanceId && a.id === sub.cashAdvanceId)
     || advances.find((a: any) => a.liquidationId === sub.id)
     || releasedAdvanceForAssignment(sub.activityId)
@@ -4209,6 +4234,9 @@ function correctionRequestFrom(
     if (field === "refundOr" && storedType === "Reimbursement") {
       return { error: "A Reimbursement has no refund to correct." };
     }
+    if (field === "claimType" && sub.withinAdvance) {
+      return { error: "A seminar report always settles its cash advance, so its claim type can't be returned for correction." };
+    }
     items.push(item);
   }
   // A Return the employee couldn't answer would leave the report stuck as "Returned" (no one
@@ -4268,7 +4296,67 @@ function advanceMismatch(sub: any): string | null {
   return null;
 }
 
-app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
+// --- The seminar budget flow (the user's spec, 2026-10-18; decisions of 2026-10-19) ---
+// An attendee asks for their seminar's cash advance (their allowance), Finance releases it,
+// and their liquidation report settles it: its items may never come to more than the advance,
+// and what is left is handed back with an OR. When Finance validates the report, that leftover
+// returns to the training budget (fundReturn), once.
+
+// What the employee's report has to show about its money, at filing and on correction: the
+// advance Finance released, items within it, and an OR for a leftover (dated from the advance's
+// DV up to today, and not already on another report or refund). The refusal, or null when the
+// report may go on. `reportId`: the report being corrected, whose own OR doesn't count as used.
+function withinAdvanceProblem(
+  activityId: string,
+  advance: CashAdvance | null,
+  spent: number,
+  refund: { orNo: string; orDate: unknown },
+  reportId?: string
+): { code: number; message: string } | null {
+  if (!advance) {
+    const asked = currentAdvanceFor(activityId);
+    return {
+      code: 409,
+      message: asked?.status === "Requested"
+        ? "Your cash advance request is still with Finance. File the report once it is released."
+        : asked?.status === "Declined"
+          ? `Finance declined your cash advance request${asked.declineReason ? ` (${asked.declineReason})` : ""}. Ask for it again under My Assigned Activities.`
+          : "Request your cash advance first, under My Assigned Activities. A seminar report settles the advance Finance releases, and its items can't go past it."
+    };
+  }
+  const balance = liquidationBalance(advance.amount, spent);
+  if (balance.status === "Over") {
+    return {
+      code: 400,
+      message: `Your items come to ${pesoText(spent)}, ${pesoText(balance.over)} more than your ${pesoText(advance.amount)} cash advance (${advance.advanceNo}). A seminar report can't go past its advance: lower or remove an item.`
+    };
+  }
+  if (balance.leftover > 0) {
+    if (!refund.orNo || refund.orNo.length > 50) {
+      return { code: 400, message: `${pesoText(balance.leftover)} of your cash advance is left. Hand it back to the cashier and enter the official receipt (OR) number, up to 50 characters.` };
+    }
+    const usedOn = orNumberInUse(refund.orNo, reportId);
+    if (usedOn) {
+      return { code: 400, message: `OR ${refund.orNo} is already recorded on ${usedOn}. Each official receipt is used once: check the number on yours.` };
+    }
+    if (!isCalendarDate(refund.orDate) || refund.orDate > manilaToday()) {
+      return { code: 400, message: "Enter the date on the OR as YYYY-MM-DD, no later than today." };
+    }
+    // Money can't come back before it went out.
+    if (isCalendarDate(advance.dvDate) && refund.orDate < advance.dvDate) {
+      return { code: 400, message: `The OR date can't be before the advance was released (DV dated ${advance.dvDate}).` };
+    }
+  }
+  return null;
+}
+
+// "balanced" or "PHP 500.00 to hand back (OR 123)", for audit entries and notices.
+function balanceText(released: number, spent: number, orNo?: string): string {
+  const { leftover } = liquidationBalance(released, spent);
+  return leftover > 0 ? `${pesoText(leftover)} of the advance handed back${orNo ? ` (OR ${orNo})` : ""}` : "balanced, the advance fully used";
+}
+
+app.post("/api/liquidation-submissions", authenticateToken, transactional((req: any, res: any) => {
   const { employeeId, fullName } = req.user;
   const {
     activityId, totalReleased, totalSpent, remarks, supportingDocs, particulars,
@@ -4306,13 +4394,17 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
       });
     }
   }
-  if (!isClaimType(claimType)) {
+  // A seminar report settles the cash advance its attendee asked for and Finance released
+  // (the seminar budget flow, 2026-10-19), so its claim type is always Liquidation and
+  // nothing typed for an advance counts. A general activity's claimant still chooses.
+  const withinAdvance = !!seminarEnrolment;
+  if (!withinAdvance && !isClaimType(claimType)) {
     return res.status(400).json({ status: "error", message: CHOOSE_CLAIM_TYPE_MESSAGE });
   }
   // The cash advance as typed. It may be left out (a Reimbursement has none, and Finance's
   // record supplies a recorded one); anything sent must still be an amount of zero or
   // more. Whether it fits the claim type is checked below, once the record is looked up.
-  const releasedGiven = !(totalReleased === undefined || totalReleased === null || totalReleased === "");
+  const releasedGiven = !withinAdvance && !(totalReleased === undefined || totalReleased === null || totalReleased === "");
   const typedReleased = releasedGiven ? parsePeso(totalReleased) : 0;
   if (typedReleased === null) {
     return res.status(400).json({ status: "error", message: ADVANCE_AMOUNT_MESSAGE });
@@ -4326,8 +4418,9 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   if (lines && lines.error) {
     return res.status(400).json({ status: "error", message: lines.error });
   }
-  // Without particulars a single typed total is accepted, read strictly.
-  const typedSpent = lines ? null : parsePeso(totalSpent);
+  // Without particulars a single typed total is accepted, read strictly, except on a seminar
+  // report, which lists its items.
+  const typedSpent = lines || withinAdvance ? null : parsePeso(totalSpent);
   if (!lines && !(typedSpent !== null && typedSpent > 0)) {
     return res.status(400).json({ status: "error", message: "Add at least one particular describing what was spent." });
   }
@@ -4384,19 +4477,30 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   // flags a suspicious claim.
   const advance = releasedAdvanceForAssignment(activityId);
   const typedDvNo = String(cashAdvanceDvNo || "").trim();
-  const claimProblem = claimTypeProblem(claimType, advance, { released: typedReleased, dvNo: typedDvNo });
-  if (claimProblem) {
-    return res.status(400).json({ status: "error", message: claimProblem });
-  }
-  // A Reimbursement has no advance, so nothing typed into its boxes is kept.
-  const isReimbursement = claimType === "Reimbursement";
-  const released = advance ? round2(Number(advance.amount)) : (isReimbursement ? 0 : typedReleased);
   // When the report is itemised, the total is the sum of the lines — never a separately
   // typed figure that could disagree with them.
   const spent = lines ? lines.total : (typedSpent ?? 0);
+  // A seminar report: it needs Finance's advance, its items stay within it, and a leftover
+  // is handed back with an OR. A general activity: the claim type must fit the advance.
+  // (Cleaned like a name: invisible and control characters can't make it read differently.)
+  const refund = { orNo: signatoryText(refundOrNo), orDate: refundOrDate };
+  const moneyProblem = withinAdvance
+    ? withinAdvanceProblem(activityId, advance, spent, refund)
+    : (() => {
+        const message = claimTypeProblem(claimType, advance, { released: typedReleased, dvNo: typedDvNo });
+        return message ? { code: 400, message } : null;
+      })();
+  if (moneyProblem) {
+    return res.status(moneyProblem.code).json({ status: "error", message: moneyProblem.message });
+  }
+  const claim: ClaimType = withinAdvance ? "Liquidation" : claimType;
+  // A Reimbursement has no advance, so nothing typed into its boxes is kept.
+  const isReimbursement = claim === "Reimbursement";
+  const released = advance ? round2(Number(advance.amount)) : (isReimbursement ? 0 : typedReleased);
   if (isReimbursement && !(spent > 0)) {
     return res.status(400).json({ status: "error", message: NOTHING_TO_REIMBURSE_MESSAGE });
   }
+  const balance = liquidationBalance(released, spent);
   // Box A prints the claimant's official name from their staff record, falling back to
   // the account name; never a name typed in the form.
   const staffRecord = employeeId ? (db.employees || []).find((e: any) => employeeIdForms(employeeId).includes(e.id)) : null;
@@ -4407,10 +4511,12 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     activityId,
     employeeId,
     employeeName: officialName,
-    claimType,
+    claimType: claim,
+    // Set only on a seminar report kept within its advance (see withinAdvanceProblem).
+    ...(withinAdvance ? { withinAdvance: true } : {}),
     totalReleased: released,
     totalSpent: spent,
-    remainingBalance: round2(released - spent),
+    remainingBalance: pesos(centavos(released) - centavos(spent)),
     remarks: remarks || "",
     supportingDocs: claimantDocuments(supportingDocs || []),
 
@@ -4428,9 +4534,10 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     cashAdvanceId: advance ? advance.id : undefined,
     cashAdvanceDvNo: advance ? advance.dvNo : (isReimbursement ? "" : typedDvNo),
     cashAdvanceDvDate: advance ? advance.dvDate : (isReimbursement ? "" : (cashAdvanceDvDate || "")),
-    // Only money advanced can be refunded, so a Reimbursement has no OR.
-    refundOrNo: isReimbursement ? "" : (refundOrNo || ""),
-    refundOrDate: isReimbursement ? "" : (refundOrDate || ""),
+    // Only money advanced can be refunded, so a Reimbursement has no OR, and neither has a
+    // seminar report that used up its advance exactly.
+    refundOrNo: isReimbursement ? "" : withinAdvance ? (balance.leftover > 0 ? refund.orNo : "") : (refundOrNo || ""),
+    refundOrDate: isReimbursement ? "" : withinAdvance ? (balance.leftover > 0 ? refund.orDate : "") : (refundOrDate || ""),
     jevNo: "",
 
     // Box B as chosen at filing (copied from the signatory list; see above).
@@ -4438,10 +4545,11 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     representativeName: representative.fullName,
     representativePosition: representative.position,
 
-    // Spending more than was received makes this a claim for the difference. Derived, so
-    // it can never disagree with the figures above.
-    reimbursementAmount: round2(Math.max(0, spent - released)),
-    reimbursementStatus: spent > released ? "Awaiting Reimbursement" : "Not Required",
+    // Spending more than was received makes this a claim for the difference (never on a
+    // seminar report, whose items stay within its advance). Derived, so it can never disagree
+    // with the figures above.
+    reimbursementAmount: balance.over,
+    reimbursementStatus: balance.over > 0 ? "Awaiting Reimbursement" : "Not Required",
     reimbursementDvNo: "",
     reimbursementDate: "",
     reimbursedBy: "",
@@ -4476,10 +4584,11 @@ app.post("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
     link: { tab: "requests", record: { kind: "liquidationReport", id: newSub.id } }
   });
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Liquidation", `Submitted liquidation report: ${subNo} (${claimType})`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Liquidation",
+    `Submitted liquidation report: ${subNo} (${claim}${withinAdvance ? `; ${balanceText(released, spent, newSub.refundOrNo)}` : ""})`);
   saveDB();
   res.json({ status: "success", data: newSub });
-});
+}));
 
 app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
   const { id } = req.params;
@@ -4527,7 +4636,7 @@ app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
   res.json({ status: "success", data: request });
 });
 
-app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: any, res) => {
+app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transactional((req: any, res: any) => {
   const { id } = req.params;
   const sub = db.liquidationSubmissions.find(l => l.id === id);
   if (!sub) {
@@ -4566,8 +4675,15 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   if (!may("cashAdvance") && !may("claimType")) {
     delete body.totalReleased; delete body.cashAdvanceDvNo; delete body.cashAdvanceDvDate;
   }
-  if (!may("refundOr") && !may("claimType")) { delete body.refundOrNo; delete body.refundOrDate; }
+  // On a seminar report kept within its advance, new items can change what is left to hand
+  // back, so reopened particulars reopen the refund OR as well.
+  if (!may("refundOr") && !may("claimType") && !(sub.withinAdvance && may("particulars"))) { delete body.refundOrNo; delete body.refundOrDate; }
   if (!may("claimType")) delete body.claimType;
+  // Such a report always settles Finance's advance: its claim type and advance aren't the
+  // claimant's to change.
+  if (sub.withinAdvance) {
+    delete body.claimType; delete body.totalReleased; delete body.cashAdvanceDvNo; delete body.cashAdvanceDvDate;
+  }
   // A report filed before Box B existed must name one now, ticked or not.
   if (!may("representative") && sub.representativeId) delete body.representativeId;
   if (!may("remarks")) delete body.remarks;
@@ -4652,6 +4768,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   const hadRepresentative = !!sub.representativeId;
   const claimantCouldChange = (f: CorrectionField) => may(f)
     || ((f === "cashAdvance" || f === "refundOr") && may("claimType"))
+    || (f === "refundOr" && !!sub.withinAdvance && may("particulars"))
     || (f === "representative" && !hadRepresentative);
 
   const lines = normalizeParticulars(particulars);
@@ -4724,6 +4841,14 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   if (claimType === "Reimbursement" && !(newSpent > 0)) {
     return res.status(400).json({ status: "error", message: NOTHING_TO_REIMBURSE_MESSAGE });
   }
+  // A seminar report kept within its advance: corrected or not, its items still can't go past
+  // the advance, and a leftover needs its OR, as at filing.
+  const refundNoNow = typeof refundOrNo === "string" ? signatoryText(refundOrNo) : String(sub.refundOrNo || "").trim();
+  const refundDateNow = typeof refundOrDate === "string" ? refundOrDate : String(sub.refundOrDate || "");
+  if (sub.withinAdvance) {
+    const problem = withinAdvanceProblem(sub.activityId, recordedAdvance, newSpent, { orNo: refundNoNow, orDate: refundDateNow }, sub.id);
+    if (problem) return res.status(problem.code).json({ status: "error", message: problem.message });
+  }
 
   // Update details. An itemised correction recomputes the total from its lines; a
   // submission that was never itemised keeps accepting a plain typed figure.
@@ -4772,7 +4897,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   }
   if (lines) sub.particulars = lines.particulars;
   sub.totalSpent = newSpent;
-  sub.remainingBalance = round2(sub.totalReleased - sub.totalSpent);
+  sub.remainingBalance = pesos(centavos(sub.totalReleased) - centavos(sub.totalSpent));
   // Sent only when open for correction, so clearing the notes really clears them.
   if (typeof remarks === "string") sub.remarks = remarks.trim();
 
@@ -4791,6 +4916,11 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   if (claimType === "Reimbursement") {
     sub.refundOrNo = "";
     sub.refundOrDate = "";
+  } else if (sub.withinAdvance) {
+    // Checked above. A report that now uses up its advance exactly has nothing to hand back.
+    const handsBack = liquidationBalance(sub.totalReleased, sub.totalSpent).leftover > 0;
+    sub.refundOrNo = handsBack ? refundNoNow : "";
+    sub.refundOrDate = handsBack ? refundDateNow : "";
   } else {
     if (typeof refundOrNo === "string") sub.refundOrNo = refundOrNo;
     if (typeof refundOrDate === "string") sub.refundOrDate = refundOrDate;
@@ -4855,12 +4985,12 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, (req: an
   }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Resubmit Liquidation",
-    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}`);
+    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}${sub.withinAdvance ? `; ${balanceText(sub.totalReleased, sub.totalSpent, sub.refundOrNo)}` : ""}`);
   saveDB();
   res.json({ status: "success", data: sub });
-});
+}));
 
-app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, (req: any, res) => {
+app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, transactional((req: any, res: any) => {
   if ((req as any).user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Access Restricted to HR Officer verification" });
   }
@@ -4892,6 +5022,9 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, (req: a
       type: "success",
       link: { tab: "finance", subTab: "liquidation", record: { kind: "liquidationReport", id: sub.id } }
     });
+    if (isOwnRecord(req.user, sub.employeeId)) {
+      flagSelfApproval(req.user, `verified their own liquidation report ${sub.submissionNo} (${pesoText(Number(sub.totalSpent || 0))} spent)`);
+    }
   } else {
     // A Return carries the checklist of what to correct; the corrected report comes back to HR.
     const parsed = correctionRequestFrom(req.body, sub, req.user, "Pending HR Review");
@@ -4907,9 +5040,9 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, (req: a
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "HR Verify Liquidation", `HR evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
   saveDB();
   res.json({ status: "success", data: sub });
-});
+}));
 
-app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (req: any, res) => {
+app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, transactional((req: any, res: any) => {
   if ((req as any).user.role !== UserRole.FINANCE_OFFICER) {
     return res.status(403).json({ status: "error", message: "Access restricted to Financial Officer validations" });
   }
@@ -4951,6 +5084,21 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
     if (mismatch) {
       return res.status(409).json({ status: "error", message: `${mismatch} Return it so the employee can correct it.` });
     }
+    // A seminar report kept within its advance still has to be: its items within the advance,
+    // and an OR for the leftover, or the return recorded below couldn't be traced.
+    const handedBack = sub.withinAdvance ? liquidationBalance(sub.totalReleased, sub.totalSpent) : null;
+    if (handedBack && (!advanceOnFileFor(sub) || handedBack.status === "Over"
+        || (handedBack.leftover > 0 && !(String(sub.refundOrNo || "").trim() && isCalendarDate(sub.refundOrDate))))) {
+      return res.status(409).json({
+        status: "error",
+        message: `${sub.submissionNo} doesn't settle its cash advance as a seminar report must (items within the advance, and an OR for what is left). Return it so the employee can correct it.`
+      });
+    }
+    // What the seminar holds in the training budget before this validation, to report what
+    // returns to Unallocated (src/trainingBudget.ts).
+    const seminarPart = (db.trainingParticipants || []).find((p: any) => p.id === sub.activityId);
+    const seminar = seminarPart ? (db.trainingPrograms || []).find((p: any) => p.id === seminarPart.trainingProgramId) : null;
+    const heldBefore = seminar ? seminarBudget(seminar, participantsForBudget()).committed : 0;
     // A copy, so appointing a new Accountant later never rewrites this report.
     sub.accountantSignatoryId = accountant.id;
     sub.accountantName = accountant.fullName;
@@ -5031,18 +5179,15 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
 
     const act = db.activities.find(a => a.id === sub.activityId);
 
-    // Automatic categorised deduction on completion. Wrapped so a budget problem
-    // can never block the validation response; manual "Establish Integration
-    // Link" remains available as a fallback for anything skipped here.
-    try {
-      autoDeductLiquidation(sub, {
-        id: (req as any).user.id,
-        username: (req as any).user.username,
-        role: (req as any).user.role
-      });
-    } catch (error) {
-      console.error("Auto budget deduction failed for", sub.submissionNo, error);
-    }
+    // Automatic categorised deduction on completion. A missing bucket is skipped with a notice
+    // (manual "Establish Integration Link" is the fallback). It is part of this validation's
+    // transaction: if it fails part-way, the whole validation is undone rather than saved with a
+    // bucket deducted and no link to show for it.
+    autoDeductLiquidation(sub, {
+      id: (req as any).user.id,
+      username: (req as any).user.username,
+      role: (req as any).user.role
+    });
 
     db.financialTransactions.push({
       id: `tx-${Date.now()}`,
@@ -5078,7 +5223,11 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
       title: "Liquidation APPROVED & FINALIZED",
       message: claimPending
         ? `Your liquidation report ${sub.submissionNo} has been validated. You spent ₱${owed.toFixed(2)} of your own money — Finance will reimburse you.`
-        : `Your liquidation report ${sub.submissionNo} has been validated and finalized by Finance.`,
+        : handedBack
+          ? `Your liquidation report ${sub.submissionNo} has been validated and finalized by Finance: ${handedBack.leftover > 0
+              ? `the ${pesoText(handedBack.leftover)} you handed back (OR ${sub.refundOrNo}) went back to the training budget.`
+              : "balanced, your cash advance fully used."}`
+          : `Your liquidation report ${sub.submissionNo} has been validated and finalized by Finance.`,
       type: "success",
       link: { tab: "employee_portal", record: { kind: "liquidationReport", id: sub.id } }
     });
@@ -5093,6 +5242,37 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
       settledAdvance.status = "Liquidated";
       settledAdvance.liquidationId = sub.id;
       settledAdvance.liquidatedAt = new Date().toISOString();
+    }
+
+    // The seminar budget flow (decision 2, 2026-10-19): what the attendee didn't spend of their
+    // advance goes back to the training budget now, recorded once with the person, seminar,
+    // amount, OR and date. The budget rule counts their spending instead of their share from
+    // here on, so the same amount returns to Unallocated (more, if the seminar now closes and
+    // seats nobody used are released too).
+    if (handedBack && handedBack.leftover > 0 && !sub.fundReturn) {
+      sub.fundReturn = {
+        amount: handedBack.leftover,
+        orNo: String(sub.refundOrNo).trim(),
+        orDate: String(sub.refundOrDate),
+        recordedAt: sub.financeValidatedAt,
+        recordedBy: (req as any).user.fullName
+      };
+    }
+    if (seminar) {
+      const after = seminarBudget(seminar, participantsForBudget());
+      const freed = round2(heldBefore - after.committed);
+      if (sub.fundReturn || freed !== 0) {
+        logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Return to Training Budget",
+          `${sub.submissionNo}: ${sub.employeeName}, ${sub.activityTitle || "a seminar"}${sub.fundReturn
+            ? `, handed back ${pesoText(sub.fundReturn.amount)} of ${sub.cashAdvanceDvNo ? `the advance on DV ${sub.cashAdvanceDvNo}` : "their advance"} (OR ${sub.fundReturn.orNo}, ${sub.fundReturn.orDate})`
+            : handedBack ? ", balanced: the advance fully used" : `, spent ${pesoText(sub.totalSpent)}`}; ${freed > 0
+            ? `${pesoText(freed)} returns to the training budget's Unallocated${after.stage === "settled" ? " (the seminar is now settled)" : ""}`
+            : freed < 0 ? `the seminar now holds ${pesoText(-freed)} more` : "Unallocated is unchanged"}.`);
+      }
+    }
+    if (isOwnRecord(req.user, sub.employeeId)) {
+      flagSelfApproval(req.user, `validated their own liquidation report ${sub.submissionNo} (${pesoText(Number(sub.totalSpent || 0))} spent${
+        sub.fundReturn ? `; ${pesoText(sub.fundReturn.amount)} recorded as handed back, OR ${sub.fundReturn.orNo}` : ""})`);
     }
 
     // The claimant is out of pocket until someone actually releases the money, so put it
@@ -5121,13 +5301,13 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, (r
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
   saveDB();
   res.json({ status: "success", data: sub });
-});
+}));
 
 // Closes the loop on an out-of-pocket claim: the employee fronted the money, and this
 // records the disbursement voucher that paid them back. Until this runs, the claimant is
 // still owed — which is why finance-action leaves the report "Awaiting Reimbursement"
 // instead of treating validation as the end of the story.
-app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateToken, (req: any, res) => {
+app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateToken, transactional((req: any, res: any) => {
   if ((req as any).user.role !== UserRole.FINANCE_OFFICER && (req as any).user.role !== UserRole.SUPER_ADMIN) {
     return res.status(403).json({ status: "error", message: "Only the Financial Officer can record a reimbursement." });
   }
@@ -5175,9 +5355,12 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Record Reimbursement",
     `Reimbursed PHP ${owed.toFixed(2)} to ${sub.employeeName} for ${sub.submissionNo} via DV ${sub.reimbursementDvNo}`);
+  if (isOwnRecord(req.user, sub.employeeId)) {
+    flagSelfApproval(req.user, `recorded the reimbursement of their own claim ${sub.submissionNo}: ${pesoText(owed)} on DV ${sub.reimbursementDvNo}`);
+  }
   saveDB();
   res.json({ status: "success", data: sub });
-});
+}));
 // Serial for the Vehicle Reservation Slip, e.g. "VRS-2026-09-014". Numbering restarts
 // each month, matching the liquidation serial's shape.
 function nextVrsNo(when: Date): string {
@@ -5195,6 +5378,46 @@ function isCashAdvanceRole(role: UserRole) {
   return role === UserRole.FINANCE_OFFICER || role === UserRole.SUPER_ADMIN;
 }
 
+// Whether the signed-in user is the person a record is about (their own staff record), for
+// segregation of duties:
+// - Releasing money to yourself is refused: a Financial Officer or the Administrator can't
+//   release, decline or refund a cash advance meant for them. Another one does it.
+// - The checks along the way are allowed but flagged (the user's decision, 2026-10-20): an
+//   officer recording their own attendance, verifying or validating their own report, or
+//   recording their own reimbursement is warned on screen and gets a "Self-Approval" audit
+//   entry (flagSelfApproval).
+function isOwnRecord(user: any, employeeKey: unknown): boolean {
+  return !!user?.employeeId && typeof employeeKey === "string" && employeeKey !== ""
+    && employeeIdForms(employeeKey).includes(user.employeeId);
+}
+
+// The "Self-Approval" audit entry: who acted on their own record, and what they did. Callers save.
+function flagSelfApproval(user: any, what: string) {
+  logEvent(user.id, user.username, user.role, "Self-Approval",
+    `${user.fullName} (${user.role}) ${what}. Allowed, and flagged for review: they acted on their own record.`);
+}
+
+// Whether the person an advance is for still works here: their staff record is active and
+// their login (if any) isn't archived. Money isn't released to someone who has left.
+function payeeIsActive(employeeKey: string): boolean {
+  const emp = (db.employees || []).find((e: any) => employeeIdForms(employeeKey).includes(e.id));
+  if (!emp || emp.isActive === false) return false;
+  const login = (db.users || []).find((u: any) => u.employeeId && employeeIdForms(u.employeeId).includes(emp.id));
+  return !(login && (login.status === "Archived" || login.status === "Deactivated"));
+}
+
+// An OR number already on another report or refund: each official receipt records one payment.
+// The report or advance it is on, or null. Compared without case.
+function orNumberInUse(orNo: string, exceptReportId?: string): string | null {
+  const key = orNo.trim().toLowerCase();
+  if (!key) return null;
+  const report = (db.liquidationSubmissions || []).find((s: any) =>
+    s && s.id !== exceptReportId && String(s.refundOrNo || "").trim().toLowerCase() === key);
+  if (report) return report.submissionNo;
+  const advance = (db.cashAdvances || []).find((a: any) => a && String(a.refundOrNo || "").trim().toLowerCase() === key);
+  return advance ? advance.advanceNo : null;
+}
+
 // "CA-2026-09-001". Numbering restarts each month, like the liquidation serial.
 function nextCashAdvanceNo(when: Date): string {
   const scope = `CA-${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-`;
@@ -5210,6 +5433,39 @@ function nextCashAdvanceNo(when: Date): string {
 function openAdvanceFor(activityId: string, employeeForms: string[]) {
   return (db.cashAdvances || []).find((a: any) =>
     a.activityId === activityId && employeeForms.includes(a.employeeId) && a.status === "Released");
+}
+
+// An employee's request for a seminar's cash advance still waiting for Finance (at most one).
+function pendingRequestFor(activityId: string): CashAdvance | null {
+  return (db.cashAdvances || []).find((a: any) => a && a.activityId === activityId && a.status === "Requested") || null;
+}
+
+// The cash-advance record that stands for an assignment now: a request waiting for Finance,
+// the advance released, or else the latest one (settled, refunded, declined). At most one is
+// ever Requested or Released at a time.
+function currentAdvanceFor(activityId: string): CashAdvance | null {
+  const list = (db.cashAdvances || []).filter((a: any) => a && a.activityId === activityId);
+  // Its latest event: a refund or settlement comes after the release.
+  const when = (a: any) => String(a.refundedAt || a.liquidatedAt || a.decidedAt || a.issuedAt || a.requestedAt || "");
+  return list.find((a: any) => a.status === "Requested") || list.find((a: any) => a.status === "Released")
+    || [...list].sort((a: any, b: any) => when(b).localeCompare(when(a)))[0] || null;
+}
+
+// Whether the enrolment's employee may ask Finance for their cash advance, and why not. The
+// seminar card shows the reason; POST /api/cash-advances/request enforces it.
+function advanceRequestEligibility(p: any): { canRequest: boolean; reason?: string } {
+  if (p.status === "Cancelled" || p.status === "Archived") return { canRequest: false, reason: "This enrolment was cancelled." };
+  if (p.status === "Liquidated") return { canRequest: false, reason: "This seminar is already liquidated." };
+  if (p.attendance === "Did not attend") return { canRequest: false, reason: "HR recorded that you did not attend, so no cash advance can be released." };
+  const report = (db.liquidationSubmissions || []).find((s: any) => s.activityId === p.id);
+  if (report) return { canRequest: false, reason: `Report ${report.submissionNo} has already been filed for this seminar.` };
+  const current = currentAdvanceFor(p.id);
+  if (current?.status === "Requested") return { canRequest: false, reason: "Your request is waiting for Finance." };
+  if (current?.status === "Released") return { canRequest: false, reason: `Finance released ${current.advanceNo} (DV ${current.dvNo}).` };
+  // (One refunded in full was given back, so asking again is fine.)
+  if (current?.status === "Liquidated") return { canRequest: false, reason: `${current.advanceNo} is already liquidated.` };
+  if (!(round2(Number(p.allowanceAllocated || 0)) > 0)) return { canRequest: false, reason: "HR hasn't set an allowance for you on this seminar yet." };
+  return { canRequest: true };
 }
 
 app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
@@ -5256,11 +5512,16 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
     // refund; a refunded one is listed as such.
     const didNotAttend = p.attendance === "Did not attend";
     if (didNotAttend && !(advance && (advance.status === "Released" || advance.status === "Refunded"))) continue;
+    // The employee's own request, while it waits: Finance releases or declines it from the
+    // request list rather than releasing the row directly.
+    const request = pendingRequestFor(p.id);
     rows.push({
       didNotAttend,
       advanceId: advance ? advance.id : null,
       refundOrNo: advance?.status === "Refunded" ? advance.refundOrNo : null,
       refundOrDate: advance?.status === "Refunded" ? advance.refundOrDate : null,
+      pendingRequestId: request ? request.id : null,
+      requestedAt: request ? request.requestedAt : null,
       activityId: p.id,
       activityTitle: facts ? facts.title : "Seminar",
       employeeId: emp.employeeId,
@@ -5305,7 +5566,7 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
   res.json({ status: "success", data: rows });
 });
 
-app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
+app.post("/api/cash-advances", authenticateToken, transactional((req: any, res: any) => {
   if (!isCashAdvanceRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Only the Financial Officer can release a cash advance." });
   }
@@ -5317,13 +5578,18 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
 
   const emp = (db.employees || []).find((e: any) => e.id === employeeId || e.employeeId === employeeId);
   if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
+  if (isOwnRecord(req.user, emp.employeeId || emp.id)) {
+    return res.status(403).json({ status: "error", message: "You can't release a cash advance to yourself: another Financial Officer or the Administrator has to." });
+  }
 
   const released = round2(Number(amount));
   if (!isFinite(released) || released <= 0) {
     return res.status(400).json({ status: "error", message: "Enter the amount released, greater than zero." });
   }
-  if (!String(dvNo || "").trim() || !isIsoDate(dvDate)) {
-    return res.status(400).json({ status: "error", message: "A disbursement voucher number and date are required." });
+  // The same voucher checks as releasing an employee's request.
+  const voucherNo = signatoryText(dvNo);
+  if (!voucherNo || voucherNo.length > 50 || !isCalendarDate(dvDate) || dvDate > manilaToday()) {
+    return res.status(400).json({ status: "error", message: "A disbursement voucher number (up to 50 characters) and its date (YYYY-MM-DD, no later than today) are required." });
   }
 
   const facts = liquidationActivityFacts(activityId);
@@ -5331,11 +5597,28 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     return res.status(404).json({ status: "error", message: "That assignment no longer exists." });
   }
   const enrolment = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
+  // The money goes to the person on the assignment (known issue 12c): the enrolled employee,
+  // or the activity's assignee.
+  const assignee = enrolment
+    ? employeeIdForms(enrolment.employeeId).includes(emp.id)
+    : liquidationActivityOwnedByUser(activityId, { employeeId: emp.employeeId, fullName: emp.fullName }) !== false;
+  if (!assignee) {
+    return res.status(400).json({ status: "error", message: `${emp.fullName} isn't the person on this assignment.` });
+  }
+  if (enrolment && (enrolment.status === "Cancelled" || enrolment.status === "Archived" || enrolment.status === "Liquidated")) {
+    return res.status(409).json({ status: "error", message: `This enrolment is ${String(enrolment.status).toLowerCase()}, so no cash advance can be released for it.` });
+  }
   if (enrolment?.attendance === "Did not attend") {
     return res.status(400).json({ status: "error", message: "HR recorded that this participant did not attend the seminar, so no cash advance can be released." });
   }
+  if (!payeeIsActive(emp.employeeId || emp.id)) {
+    return res.status(409).json({ status: "error", message: `${emp.fullName} is no longer active, so no cash advance can be released.` });
+  }
   // HR's allocation is a ceiling. Releasing more than was set aside has to go back to HR
-  // rather than be quietly absorbed here.
+  // rather than be quietly absorbed here. A seminar participant with no allowance gets none.
+  if (enrolment && !(facts.allocated > 0)) {
+    return res.status(409).json({ status: "error", message: "HR has set no allowance for this participant, so no cash advance can be released. Ask HR to set one." });
+  }
   if (facts.allocated > 0 && released > facts.allocated) {
     return res.status(400).json({
       status: "error",
@@ -5343,12 +5626,21 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     });
   }
 
-  const forms = employeeIdForms(emp.employeeId);
-  const existing = openAdvanceFor(activityId, forms);
+  // One advance out per assignment, whoever it was released to.
+  const existing = releasedAdvanceForAssignment(activityId);
   if (existing) {
     return res.status(400).json({
       status: "error",
-      message: `${emp.fullName} already has an open advance for this assignment (${existing.advanceNo}, DV ${existing.dvNo}).`
+      message: `${existing.employeeName} already has an open advance for this assignment (${existing.advanceNo}, DV ${existing.dvNo}).`
+    });
+  }
+  // The employee asked for it themself: that request is released (or declined) instead, so
+  // the assignment keeps one record.
+  const asked = pendingRequestFor(activityId);
+  if (asked) {
+    return res.status(409).json({
+      status: "error",
+      message: `${asked.employeeName} asked for this advance on ${manilaLongDate(asked.requestedAt)}. Release or decline their request under Cash Advance Requests instead.`
     });
   }
   // Once a report has been filed for the assignment, a new advance could never be settled
@@ -5371,7 +5663,7 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     activityId,
     activityTitle: facts.title,
     amount: released,
-    dvNo: String(dvNo).trim(),
+    dvNo: voucherNo,
     dvDate,
     purpose: purpose || facts.title,
     issuedBy: (req as any).user.fullName,
@@ -5393,19 +5685,194 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res) => {
     `Released PHP ${released.toFixed(2)} to ${emp.fullName} for ${facts.title} via DV ${advance.dvNo} (${advance.advanceNo})`);
   saveDB();
   res.json({ status: "success", data: advance });
-});
+}));
+
+// An attendee asks Finance for their seminar's cash advance (the seminar budget flow). The
+// amount is their allowance (allocation ÷ seats, HR's ceiling), set here and never typed.
+// Only for seminars: Finance releases a general activity's advance directly, as before.
+app.post("/api/cash-advances/request", authenticateToken, transactional((req: any, res: any) => {
+  const activityId = typeof req.body?.activityId === "string" ? req.body.activityId : "";
+  const enrolment = activityId ? (db.trainingParticipants || []).find((p: any) => p && p.id === activityId) : null;
+  if (!enrolment) {
+    return res.status(404).json({ status: "error", message: "That seminar enrolment was not found. Cash advances for other activities are released by Finance." });
+  }
+  // Only the person enrolled, as with their liquidation report.
+  if (!req.user.employeeId || !employeeIdForms(enrolment.employeeId).includes(req.user.employeeId)) {
+    return res.status(403).json({ status: "error", message: "You can only request a cash advance for a seminar you are enrolled in." });
+  }
+  const eligibility = advanceRequestEligibility(enrolment);
+  if (!eligibility.canRequest) return res.status(409).json({ status: "error", message: eligibility.reason });
+  const facts = liquidationActivityFacts(enrolment.id);
+  const emp = (db.employees || []).find((e: any) => e.id === enrolment.employeeId || e.employeeId === enrolment.employeeId);
+  if (!facts || !emp) return res.status(404).json({ status: "error", message: "Your staff record or the seminar was not found." });
+
+  const request: CashAdvance = {
+    id: `ca-${crypto.randomUUID()}`,
+    advanceNo: "",            // numbered when released
+    employeeId: emp.employeeId,
+    employeeName: emp.fullName,
+    activityId: enrolment.id,
+    activityTitle: facts.title,
+    amount: facts.allocated,
+    dvNo: "",
+    dvDate: "",
+    purpose: facts.title,
+    issuedBy: "",
+    issuedAt: "",
+    status: "Requested",
+    requestedAt: new Date().toISOString(),
+    requestedBy: req.user.fullName
+  };
+  db.cashAdvances.push(request);
+  notify({ role: UserRole.FINANCE_OFFICER }, {
+    title: "Cash advance requested",
+    message: `${emp.fullName} asked for their ${pesoText(request.amount)} cash advance for ${facts.title}. Release it with a DV, or decline it.`,
+    type: "info",
+    link: { tab: "finance", subTab: "liquidation", record: { kind: "cashAdvance", id: request.id } }
+  });
+  logEvent(req.user.id, req.user.username, req.user.role, "Request Cash Advance",
+    `${emp.fullName} asked for ${pesoText(request.amount)} for ${facts.title}`);
+  saveDB();
+  res.json({ status: "success", message: `Your request for ${pesoText(request.amount)} was sent to Finance.`, data: request });
+}));
+
+// Why Finance can't release an employee's request now, or null. Checked again at release,
+// since the seminar may have changed since the request (attendance, a report, HR's allowance).
+function requestReleaseProblem(request: CashAdvance): string | null {
+  const enrolment = (db.trainingParticipants || []).find((p: any) => p && p.id === request.activityId);
+  const facts = enrolment ? liquidationActivityFacts(enrolment.id) : null;
+  if (!enrolment || !facts) return "The seminar enrolment no longer exists, so nothing can be released. Decline the request.";
+  if (enrolment.status === "Cancelled" || enrolment.status === "Archived") return "This enrolment was cancelled, so nothing can be released. Decline the request.";
+  if (enrolment.status === "Liquidated") return "This seminar is already liquidated, so nothing can be released. Decline the request.";
+  if (enrolment.attendance === "Did not attend") return `HR recorded that ${request.employeeName} did not attend, so nothing can be released. Decline the request.`;
+  const filed = (db.liquidationSubmissions || []).find((l: any) => l.activityId === request.activityId);
+  if (filed) return `${filed.submissionNo} has already been filed for this seminar, so no advance can be released for it. Decline the request.`;
+  const open = (db.cashAdvances || []).find((a: any) => a && a.activityId === request.activityId && a.status === "Released");
+  if (open) return `${open.advanceNo} (DV ${open.dvNo}) is already out for this seminar. Decline the request.`;
+  if (!payeeIsActive(request.employeeId)) return `${request.employeeName} is no longer active, so nothing can be released. Decline the request.`;
+  // HR may have re-priced the seminar since: the release is the allowance as it is now.
+  if (!(centavos(facts.allocated) > 0)) return `HR has set no allowance for ${request.employeeName} on this seminar, so nothing can be released. Decline the request, or ask HR to set one.`;
+  return null;
+}
+
+// The calendar date in the Philippines (UTC+8) of a stored timestamp, as YYYY-MM-DD, or "".
+function manilaDateOf(iso: string | undefined): string {
+  const ms = Date.parse(String(iso || ""));
+  return isNaN(ms) ? "" : new Date(ms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+// Finance releases an employee's request: the voucher number and date, and the advance is out.
+app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req: any, res: any) => {
+  if (!isCashAdvanceRole(req.user.role)) {
+    return res.status(403).json({ status: "error", message: "Only the Financial Officer can release a cash advance." });
+  }
+  const request = (db.cashAdvances || []).find((a: any) => a && a.id === req.params.id);
+  if (!request) return res.status(404).json({ status: "error", message: "Cash advance request not found." });
+  if (isOwnRecord(req.user, request.employeeId)) {
+    return res.status(403).json({ status: "error", message: "You can't release your own cash advance: another Financial Officer or the Administrator has to." });
+  }
+  if (request.status !== "Requested") {
+    return res.status(409).json({
+      status: "error",
+      message: request.status === "Released" ? `This request was already released (${request.advanceNo}, DV ${request.dvNo}).` : `This request was already ${String(request.status).toLowerCase()}.`
+    });
+  }
+  const dvNo = signatoryText(req.body?.dvNo);
+  const dvDate = req.body?.dvDate;
+  if (!dvNo || dvNo.length > 50) {
+    return res.status(400).json({ status: "error", message: "Enter the disbursement voucher (DV) number, up to 50 characters." });
+  }
+  if (!isCalendarDate(dvDate) || dvDate > manilaToday()) {
+    return res.status(400).json({ status: "error", message: "Enter the DV date as YYYY-MM-DD, no later than today." });
+  }
+  const asked = manilaDateOf(request.requestedAt);
+  if (asked && dvDate < asked) {
+    return res.status(400).json({ status: "error", message: `The DV can't be dated before the request (${formatLongDate(asked)}).` });
+  }
+  const problem = requestReleaseProblem(request);
+  if (problem) return res.status(409).json({ status: "error", message: problem });
+
+  // The allowance as it is now: HR may have changed it since the request.
+  const askedFor = round2(Number(request.amount));
+  const allowance = liquidationActivityFacts(request.activityId)!.allocated;
+  const changed = centavos(allowance) !== centavos(askedFor)
+    ? ` HR changed the allowance from ${pesoText(askedFor)} since the request.` : "";
+  const now = new Date();
+  request.status = "Released";
+  request.amount = allowance;
+  request.advanceNo = nextCashAdvanceNo(now);
+  request.dvNo = dvNo;
+  request.dvDate = dvDate;
+  request.issuedBy = req.user.fullName;
+  request.issuedAt = now.toISOString();
+  request.decidedBy = req.user.fullName;
+  request.decidedAt = now.toISOString();
+
+  notifyEmployee(request.employeeId, {
+    title: "Cash advance released",
+    message: `${pesoText(request.amount)} was released to you on DV ${dvNo} dated ${formatLongDate(dvDate)} for ${request.activityTitle}.${changed} Your liquidation report can't go past it; hand back what you don't spend.`,
+    type: "success",
+    link: { tab: "employee_portal", record: { kind: "assignment", id: request.activityId } },
+    dedupeKey: `ca-released:${request.id}`
+  });
+  logEvent(req.user.id, req.user.username, req.user.role, "Release Cash Advance",
+    `Released ${pesoText(request.amount)} to ${request.employeeName} for ${request.activityTitle} via DV ${dvNo} (${request.advanceNo}), as they requested on ${manilaLongDate(request.requestedAt)}.${changed}`);
+  saveDB();
+  res.json({ status: "success", message: `${request.advanceNo}: ${pesoText(request.amount)} released to ${request.employeeName} on DV ${dvNo}.${changed}`, data: request });
+}));
+
+// Finance declines an employee's request, saying why. The employee may ask again.
+app.post("/api/cash-advances/:id/decline", authenticateToken, transactional((req: any, res: any) => {
+  if (!isCashAdvanceRole(req.user.role)) {
+    return res.status(403).json({ status: "error", message: "Only the Financial Officer can decline a cash advance request." });
+  }
+  const request = (db.cashAdvances || []).find((a: any) => a && a.id === req.params.id);
+  if (!request) return res.status(404).json({ status: "error", message: "Cash advance request not found." });
+  if (isOwnRecord(req.user, request.employeeId)) {
+    return res.status(403).json({ status: "error", message: "You can't decide your own cash advance request: another Financial Officer or the Administrator has to." });
+  }
+  if (request.status !== "Requested") {
+    return res.status(409).json({ status: "error", message: `This request was already ${String(request.status).toLowerCase()}.` });
+  }
+  const reason = signatoryText(req.body?.reason);
+  if (!reason || reason.length > 500) {
+    return res.status(400).json({ status: "error", message: "Say why the request is declined, up to 500 characters." });
+  }
+  declineAdvanceRequest(request, reason, req.user.fullName);
+  logEvent(req.user.id, req.user.username, req.user.role, "Decline Cash Advance Request",
+    `Declined ${request.employeeName}'s ${pesoText(request.amount)} request for ${request.activityTitle}: ${reason}`);
+  saveDB();
+  res.json({ status: "success", message: `${request.employeeName}'s request was declined.`, data: request });
+}));
+
+// Closes a request without releasing it, and tells the employee why. Callers save and log.
+function declineAdvanceRequest(request: CashAdvance, reason: string, by: string) {
+  request.status = "Declined";
+  request.declineReason = reason;
+  request.decidedBy = by;
+  request.decidedAt = new Date().toISOString();
+  notifyEmployee(request.employeeId, {
+    title: "Cash advance request declined",
+    message: `Your ${pesoText(request.amount)} cash advance request for ${request.activityTitle} was declined: ${reason}`,
+    type: "warning",
+    link: { tab: "employee_portal", record: { kind: "assignment", id: request.activityId } }
+  });
+}
 
 // Recording a refund (requirement 6; the user's decision of 2026-10-10): someone HR marked
 // "Did not attend" gives their whole cash advance back. Until it is recorded their share
 // stays held in the seminar's budget, so the same money can't fund another seminar while it
 // is still out; once recorded, it returns to Unallocated. An attendee's advance is settled
 // by their liquidation report instead, which carries its own refund OR.
-app.post("/api/cash-advances/:id/refund", authenticateToken, (req: any, res) => {
+app.post("/api/cash-advances/:id/refund", authenticateToken, transactional((req: any, res: any) => {
   if (!isCashAdvanceRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Only the Financial Officer can record a refund." });
   }
   const advance = (db.cashAdvances || []).find((a: any) => a && a.id === req.params.id);
   if (!advance) return res.status(404).json({ status: "error", message: "Cash advance not found." });
+  if (isOwnRecord((req as any).user, advance.employeeId)) {
+    return res.status(403).json({ status: "error", message: "You can't record the refund of your own cash advance: another Financial Officer or the Administrator has to." });
+  }
   if (advance.status !== "Released") {
     return res.status(409).json({ status: "error", message: `${advance.advanceNo} is ${String(advance.status).toLowerCase()}, so there is no refund to record.` });
   }
@@ -5413,10 +5880,14 @@ app.post("/api/cash-advances/:id/refund", authenticateToken, (req: any, res) => 
   if (!enrolment || enrolment.attendance !== "Did not attend") {
     return res.status(409).json({ status: "error", message: `${advance.advanceNo} is settled by the employee's liquidation report. Only an advance to someone who did not attend is refunded in full here.` });
   }
-  const orNo = typeof req.body?.orNo === "string" ? req.body.orNo.trim() : "";
+  const orNo = signatoryText(req.body?.orNo);
   const orDate = req.body?.orDate;
   if (!orNo || orNo.length > 50) {
     return res.status(400).json({ status: "error", message: "Enter the official receipt (OR) number of the refund, up to 50 characters." });
+  }
+  const orUsedOn = orNumberInUse(orNo);
+  if (orUsedOn) {
+    return res.status(400).json({ status: "error", message: `OR ${orNo} is already recorded on ${orUsedOn}. Each official receipt is used once: check the number.` });
   }
   if (!isCalendarDate(orDate) || orDate > manilaToday()) {
     return res.status(400).json({ status: "error", message: "Enter the OR date as YYYY-MM-DD, no later than today." });
@@ -5446,7 +5917,7 @@ app.post("/api/cash-advances/:id/refund", authenticateToken, (req: any, res) => 
     `${advance.advanceNo}: ${advance.employeeName} refunded ${pesoText(advance.amount)} (OR ${orNo}, ${orDate}) for ${advance.activityTitle || "a seminar"}, which they did not attend.${note}`);
   saveDB();
   res.json({ status: "success", message: `Refund of ${pesoText(advance.amount)} from ${advance.employeeName} recorded (OR ${orNo}).${note}`, data: advance });
-});
+}));
 
 app.put("/api/liquidation-submissions/:id/chief-action", authenticateToken, (req: any, res) => {
   if ((req as any).user.role !== UserRole.SUPER_ADMIN) {
@@ -5542,6 +6013,13 @@ function employeeNeedMatches(employeeId: string, program: SeminarRef): string[] 
 // at local midnight instead of 8 AM.
 function manilaToday(): string {
   return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+// The calendar date in the Philippines of a stored timestamp (ISO, in UTC), as "October 20,
+// 2026". Slicing the timestamp instead gives the UTC date: a day early before 8 AM.
+function manilaLongDate(iso: string | undefined): string {
+  const date = manilaDateOf(iso);
+  return date ? formatLongDate(date) : "an earlier date";
 }
 
 function isIsoDate(value: string | undefined): value is string {
@@ -5902,12 +6380,15 @@ function sendEmployeeEmail(emp: Employee, subject: string, text: string) {
   const account = (db.users || []).find(u => u.employeeId === emp.id || u.employeeId === emp.employeeId);
   const to = account?.email || emp.email;
   if (!to) return;
-  transporter.sendMail({
-    from: '"IntegraSync HR" <' + process.env.SMTP_USER + '>',
-    to,
-    subject,
-    text
-  }).catch(err => console.error(`Failed to send notice email to ${to}:`, err));
+  // Sent once the change it reports is saved, so an undone change emails nobody.
+  afterCommit(() => {
+    transporter.sendMail({
+      from: '"IntegraSync HR" <' + process.env.SMTP_USER + '>',
+      to,
+      subject,
+      text
+    }).catch(err => console.error(`Failed to send notice email to ${to}:`, err));
+  });
 }
 
 // Bell notice (plus email) for one employee. Returns false when a notice with the
@@ -6204,22 +6685,35 @@ function autoAssignEmployeeToTraining(employee: Employee) {
 // money (HR can't enter spending for someone marked "Did not attend"). A report or a refund
 // settles the advance. HR's planner reads this list too, so it prices seminars exactly as the
 // server does. `changed` prices an attendance change before it is saved.
+// A validated ("Liquidated") enrolment carries what it spent (settledSpent), so its unspent share
+// returns to Unallocated at once (the seminar budget flow, 2026-10-19): its rows in the training
+// ledger (validation writes them from the report) or, when it has none, its validated report.
+// Older code liquidated some enrolments with neither (ledger rows without the enrolment's id
+// before 2026-09-20, or the retired approve_liquidation); those keep their share held.
 function participantsForBudget(changed?: { id: string; attendance: string }): any[] {
   const out = new Map<string, number>();
   for (const a of db.cashAdvances || []) {
-    if (a && a.status === "Released" && a.activityId) out.set(a.activityId, round2((out.get(a.activityId) || 0) + Number(a.amount || 0)));
+    if (a && a.status === "Released" && a.activityId) out.set(a.activityId, (out.get(a.activityId) || 0) + centavos(a.amount));
   }
-  // HR's hand entries per enrolment: the rows a validated report replaces.
+  // Per enrolment: HR's hand entries (the rows a validated report replaces), and every row.
   const hand = new Map<string, number>();
+  const spentBy = new Map<string, number>();
   for (const r of db.trainingLiquidations || []) {
-    if (r && r.trainingParticipantId && r.source !== "report") {
-      hand.set(r.trainingParticipantId, round2((hand.get(r.trainingParticipantId) || 0) + Number(r.amount || 0)));
-    }
+    if (!r || !r.trainingParticipantId) continue;
+    spentBy.set(r.trainingParticipantId, (spentBy.get(r.trainingParticipantId) || 0) + centavos(r.amount));
+    if (r.source !== "report") hand.set(r.trainingParticipantId, (hand.get(r.trainingParticipantId) || 0) + centavos(r.amount));
   }
   return (db.trainingParticipants || []).map((p: any) => {
-    const q = p && changed && p.id === changed.id ? { ...p, attendance: changed.attendance } : p;
-    if (!q || !out.has(q.id)) return q;
-    return { ...q, advanceOutstanding: Math.max(0, round2(out.get(q.id)! - (hand.get(q.id) || 0))) };
+    let q = p && changed && p.id === changed.id ? { ...p, attendance: changed.attendance } : p;
+    if (!q) return q;
+    if (q.status === "Liquidated") {
+      const report = spentBy.has(q.id) ? null
+        : (db.liquidationSubmissions || []).find((s: any) => s && s.activityId === q.id && s.financeValidatedAt);
+      if (spentBy.has(q.id)) q = { ...q, settledSpent: pesos(spentBy.get(q.id)!) };
+      else if (report) q = { ...q, settledSpent: pesos(centavos(report.totalSpent)) };
+    }
+    if (!out.has(q.id)) return q;
+    return { ...q, advanceOutstanding: pesos(Math.max(0, out.get(q.id)! - (hand.get(q.id) || 0))) };
   });
 }
 
@@ -7121,9 +7615,10 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
     && body.participantIds.some((raw: string) => !employeeIdForms(raw).some(f => enrolledForms.has(f)));
   const seatsChange = newSeats !== undefined && newSeats !== Number(existingProgram.maxParticipants || 1);
   // Enrolments with a cash advance on file (money Finance released for this seminar, held in
-  // its budget until liquidated or refunded) or a training evaluation are history: a roster
-  // edit keeps them, as it keeps those with attendance or a liquidation under way.
-  const withAdvance = new Set((db.cashAdvances || []).filter((a: any) => a && a.activityId).map((a: any) => a.activityId));
+  // its budget until liquidated or refunded), a request for one still waiting, or a training
+  // evaluation are history: a roster edit keeps them, as it keeps those with attendance or a
+  // liquidation under way. (A declined request doesn't keep one.)
+  const withAdvance = new Set((db.cashAdvances || []).filter((a: any) => a && a.activityId && a.status !== "Declined").map((a: any) => a.activityId));
   const evaluated = new Set((db.trainingEvaluations || []).filter((e: any) => e && e.trainingParticipantId).map((e: any) => e.trainingParticipantId));
   const requested = Array.isArray(body.participantIds) ? new Set<string>(body.participantIds.map((raw: string) => employeeIdForms(raw)[0])) : null;
   // Seats can't go below the participants the seminar keeps after this save (not counting
@@ -7220,7 +7715,7 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
           : p.attendance
             ? `${name} was kept: their attendance is already recorded.`
             : withAdvance.has(p.id)
-              ? `${name} was kept: Finance has released a cash advance to them for this seminar.`
+              ? `${name} was kept: ${pendingRequestFor(p.id) ? "they have asked Finance for a cash advance for this seminar" : "Finance has released a cash advance to them for this seminar"}.`
               : `${name} was kept: their training evaluation is on record.`);
       }
       forms.forEach(f => keptForms.add(f));
@@ -7257,7 +7752,10 @@ app.delete("/api/training/programs/:id", authenticateToken, (req: any, res: any)
   const history = enrolments.some((p: any) => p.attendance) ? "attendance has been recorded for it"
     : Number(prog.usedBudget || 0) > 0 ? `${pesoText(Number(prog.usedBudget))} has been spent on it`
     : (db.liquidationSubmissions || []).some((s: any) => ids.has(s.activityId)) ? "a liquidation report has been filed for it"
-    : (db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId)) ? "Finance has released a cash advance for it"
+    : (db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId) && a.status !== "Requested" && a.status !== "Declined") ? "Finance has released a cash advance for it"
+    // A request still waiting would be left with nobody to release it to (Finance can decline
+    // it first). A declined one moved no money, as on a roster edit, and stays in the audit log.
+    : (db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId) && a.status === "Requested") ? "a cash advance request for it is waiting for Finance"
     : (db.trainingEvaluations || []).some((e: any) => e && (e.trainingProgramId === prog.id || ids.has(e.trainingParticipantId))) ? "a training evaluation has been recorded for it"
     : (db.trainingLiquidations || []).some((l: any) => l.trainingProgramId === prog.id) ? "expenses have been recorded for it"
     : "";
@@ -7290,7 +7788,7 @@ app.get("/api/training/participants", authenticateToken, (req: any, res: any) =>
 // Attendance: HR records it per participant once the seminar has started. It is stored
 // apart from the liquidation status, and only "Attended" opens the liquidation form
 // (seminarFormEligibility). Marking someone Attended tells them their form is ready.
-app.put("/api/training/participants/:id/attendance", authenticateToken, (req: any, res: any) => {
+app.put("/api/training/participants/:id/attendance", authenticateToken, transactional((req: any, res: any) => {
   if (req.user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Only HR records seminar attendance." });
   }
@@ -7355,14 +7853,18 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, (req: an
   participant.attendance = attendance;
   participant.attendanceBy = actor.fullName;
   participant.attendanceAt = new Date().toISOString();
+  // A cash advance request still waiting can't be released to someone who didn't attend, so
+  // it is closed now rather than left in Finance's list. They may ask again if HR corrects it.
+  const closedRequest = attendance === "Did not attend" ? pendingRequestFor(participant.id) : null;
+  if (closedRequest) declineAdvanceRequest(closedRequest, "HR recorded that you did not attend the seminar.", actor.fullName);
   const budgetNote = freed > 0
     ? after.stage === "nobodyAttended"
       ? ` Nobody attended, so the seminar now counts only what it spent: ${pesoText(freed)} returns to Unallocated.`
       : ` ${pesoText(freed)} of the seminar's allocation returns to Unallocated.`
     : freed < 0 && attendance === "Attended" ? ` ${pesoText(-freed)} is held for the seminar again.` : "";
-  const heldNote = attendance === "Did not attend" && outstanding > 0
+  const heldNote = (attendance === "Did not attend" && outstanding > 0
     ? ` Their ${pesoText(outstanding)} cash advance is still out, and stays held for the seminar until Finance records the refund.`
-    : "";
+    : "") + (closedRequest ? ` Their ${pesoText(closedRequest.amount)} cash advance request was closed, and they were told why.` : "");
 
   const emp = (db.employees || []).find((e: any) => e.id === participant.employeeId || e.employeeId === participant.employeeId);
   // The form opens in the Employee Portal, which needs a Personnel login. Only then is
@@ -7381,6 +7883,8 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, (req: an
   }
   logEvent(actor.id, actor.username, actor.role, "Record Attendance",
     `${name} at "${String(prog.title).trim()}": ${previous} → ${attendance}${budgetNote || heldNote ? `;${budgetNote}${heldNote}` : ""}`);
+  const ownAttendance = isOwnRecord(actor, participant.employeeId);
+  if (ownAttendance) flagSelfApproval(actor, `recorded their own attendance at "${String(prog.title).trim()}": ${previous} → ${attendance}`);
   saveDB();
   res.json({
     status: "success",
@@ -7388,10 +7892,11 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, (req: an
       ? `${name} is marked as not attending, so no liquidation form will open for them.`
       : personnelLogin
         ? `${name} is marked as attended. Their liquidation form is open, and they have been notified.`
-        : `${name} is marked as attended. They have no Personnel login, so they can't open the form in the Employee Portal yet.`) + budgetNote + heldNote,
+        : `${name} is marked as attended. They have no Personnel login, so they can't open the form in the Employee Portal yet.`) + budgetNote + heldNote
+      + (ownAttendance ? " This was your own attendance, so it is flagged as self-approved in the audit log." : ""),
     data: participant
   });
-});
+}));
 
 app.post("/api/training/participants", authenticateToken, (req: any, res: any) => {
   if (!isTrainingRecordsRole((req as any).user.role)) {
