@@ -272,8 +272,9 @@ export default function LiquidationSheetForm({
                     className={`w-full resize-none font-bold ${rowError ? INVALID : lineOpen(p.id) ? open : LOCKED}`}
                   />
                   {rowError && <p className="text-[11px] font-bold text-rose-700">{rowError}</p>}
-                  {/* Screen-only bookkeeping: which budget line the expense is charged to. */}
-                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-600">
+                  {/* Screen-only bookkeeping: which budget line the expense is charged to, and
+                      its amount. The AMOUNT column shows that amount as it prints. */}
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
                     <label className="flex items-center gap-1">
                       Charged to
                       <select
@@ -288,6 +289,24 @@ export default function LiquidationSheetForm({
                         ))}
                       </select>
                     </label>
+                    <label className="flex items-center gap-1">
+                      Amount ₱
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        inputMode="decimal"
+                        value={amountValue(p)}
+                        disabled={disabled}
+                        readOnly={!lineOpen(p.id)}
+                        onChange={(e) => onAmountInput(p.id, e.target.value)}
+                        onBlur={() => onAmountBlur(p.id)}
+                        placeholder="0.00"
+                        aria-label={`Particular ${idx + 1} amount in pesos`}
+                        aria-describedby={lineOpen(p.id) ? noteId("particulars") : undefined}
+                        className={`${lineOpen(p.id) ? open : LOCKED} w-28 text-right text-[12px] font-bold tabular-nums`}
+                      />
+                    </label>
                     {linesFree && (
                       <button
                         type="button"
@@ -301,21 +320,9 @@ export default function LiquidationSheetForm({
                     )}
                   </div>
                 </td>
+                {/* View only: the amount typed beside "Charged to", shown as it prints. */}
                 <td className="px-2 pt-2">
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={amountValue(p)}
-                    disabled={disabled}
-                    readOnly={!lineOpen(p.id)}
-                    onChange={(e) => onAmountInput(p.id, e.target.value)}
-                    onBlur={() => onAmountBlur(p.id)}
-                    placeholder="0.00"
-                    aria-label={`Particular ${idx + 1} amount in pesos`}
-                    aria-describedby={lineOpen(p.id) ? noteId("particulars") : undefined}
-                    className={`${lineOpen(p.id) ? open : LOCKED} w-full text-right font-bold tabular-nums`}
-                  />
+                  <p className="px-1 py-0.5 text-right font-bold tabular-nums">{amountText(Number(p.amount) || 0)}</p>
                 </td>
               </tr>
             );
