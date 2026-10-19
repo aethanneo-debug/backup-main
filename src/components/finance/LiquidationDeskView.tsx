@@ -286,7 +286,8 @@ export default function LiquidationDeskView({
                       </span>
                       <ClaimTypeBadge claimType={sub.claimType} />
                       <BalanceStatusBadge report={sub} />
-                      <span className="font-mono text-[10px] text-slate-400">{sub.createdAt?.split("T")[0]}</span>
+                      {/* The local date (slicing the stored UTC time showed yesterday before 8 AM). */}
+                      <span className="font-mono text-[10px] text-slate-400">{formatDate(sub.createdAt || sub.dateSubmitted)}</span>
                       <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-blue-700">
                         <ShieldCheck size={10} aria-hidden="true" />
                         Verified by HR
@@ -345,6 +346,12 @@ export default function LiquidationDeskView({
                         <strong className="font-mono text-xs text-slate-700">
                           {formatCurrency(Number(sub.totalReleased || 0))}
                         </strong>
+                        {/* The voucher it went out on, to check against the books. */}
+                        {sub.cashAdvanceDvNo && (
+                          <span className="mt-0.5 block font-mono text-[9px] text-slate-500">
+                            DV {sub.cashAdvanceDvNo}{sub.cashAdvanceDvDate ? ` · ${formatDate(sub.cashAdvanceDvDate)}` : ""}
+                          </span>
+                        )}
                       </div>
                       <div className="rounded border border-slate-200 bg-white p-2">
                         <span className="block font-mono text-[9px] font-semibold text-slate-400">Liquidated Spent</span>
@@ -551,7 +558,10 @@ export default function LiquidationDeskView({
                   <td className="px-4 py-3 font-mono text-slate-400">{liq.activityId}</td>
                   <td className="px-4 py-3 font-semibold text-slate-800">{liq.employeeName}</td>
                   <td className="max-w-[140px] truncate px-4 py-3 text-slate-400" title="N/A">N/A</td>
-                  <td className="px-4 py-3 text-right font-mono text-slate-600">{formatCurrency(liq.totalReleased)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">
+                    {formatCurrency(liq.totalReleased)}
+                    {liq.cashAdvanceDvNo && <span className="block text-[9px] text-slate-400">DV {liq.cashAdvanceDvNo}</span>}
+                  </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">{formatCurrency(liq.totalSpent)}</td>
                   <td className="px-4 py-3 text-right font-mono font-bold text-amber-700">
                     {formatCurrency(liq.remainingBalance)}

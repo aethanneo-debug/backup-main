@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, Banknote, Loader2, RefreshCw } from "lucide-react";
-import { apiCall, formatCurrency, formatDate } from "../../utils";
+import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
 import AdvanceRefundForm from "./AdvanceRefundForm";
 
@@ -32,9 +32,23 @@ interface FundableRow {
   /** The employee asked for this advance themself: it is released from Cash Advance Requests. */
   pendingRequestId?: string | null;
   requestedAt?: string | null;
+  /** The voucher the advance went out on. */
+  advanceDvNo?: string | null;
+  advanceDvDate?: string | null;
 }
 
-const todayIso = () => new Date().toISOString().split("T")[0];
+/** "CA-2026-10-001 · DV 2026-10-0101 (Oct 20, 2026)": an advance and the voucher it went out on. */
+function AdvanceRef({ row }: { row: FundableRow }) {
+  return (
+    <span className="font-mono text-slate-500">
+      {row.advanceNo}
+      {row.advanceDvNo && <>{" · DV "}{row.advanceDvNo}{row.advanceDvDate ? ` (${formatDate(row.advanceDvDate)})` : ""}</>}
+    </span>
+  );
+}
+
+// (Today's date on this computer. The UTC date was a day behind before 8 AM in Manila.)
+const todayIso = () => getLocalTodayString();
 
 /**
  * Releasing the cash advance — the money-out half of the liquidation cycle.
@@ -281,11 +295,15 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                             id={`dv-${row.activityId}`}
                             type="text"
                             value={dvNo}
+                            maxLength={50}
                             disabled={saving}
                             onChange={e => setDvNo(e.target.value)}
-                            placeholder="2026-08-336"
+                            placeholder="e.g. 2026-08-336"
+                            aria-describedby={`dv-hint-${row.activityId}`}
                             className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
                           />
+                          {/* The voucher is Accounting's document, so its number is typed, not made up here. */}
+                          <p id={`dv-hint-${row.activityId}`} className="text-[9px] text-slate-400 font-mono">Type the number on the voucher</p>
                         </div>
                         <div className="space-y-1">
                           <label htmlFor={`dvd-${row.activityId}`} className="text-[10px] font-bold text-slate-400 uppercase font-mono">Voucher Date</label>
@@ -293,6 +311,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                             id={`dvd-${row.activityId}`}
                             type="date"
                             value={dvDate}
+                            max={getLocalTodayString()}
                             disabled={saving}
                             onChange={e => setDvDate(e.target.value)}
                             className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
@@ -340,7 +359,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                 {open.map(row => (
                   <li key={row.activityId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
                     <span className="min-w-0">
-                      <span className="font-mono text-slate-500">{row.advanceNo}</span>{" "}
+                      <AdvanceRef row={row} />{" "}
                       <span className="text-slate-700">{row.employeeName}</span>{" "}
                       <span className="text-slate-400">· {row.activityTitle}</span>
                     </span>
@@ -396,7 +415,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                   <li key={row.activityId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
                     <span className="flex items-center gap-2 min-w-0">
                       <BadgeCheck size={13} className="text-emerald-600 shrink-0" />
-                      <span className="font-mono text-slate-500">{row.advanceNo}</span>
+                      <AdvanceRef row={row} />
                       <span className="text-slate-700 truncate">{row.employeeName}</span>
                     </span>
                     <span className="font-mono text-slate-500 shrink-0">
@@ -418,7 +437,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                   <li key={row.activityId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
                     <span className="flex items-center gap-2 min-w-0">
                       <BadgeCheck size={13} className="text-emerald-600 shrink-0" aria-hidden="true" />
-                      <span className="font-mono text-slate-500">{row.advanceNo}</span>
+                      <AdvanceRef row={row} />
                       <span className="text-slate-700 truncate">{row.employeeName}</span>
                     </span>
                     <span className="font-mono text-slate-500 shrink-0">

@@ -5531,6 +5531,9 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       funded: !!(advance && advance.status === "Released"),
       advanceNo: advance ? advance.advanceNo : null,
       advanceAmount: advance ? advance.amount : null,
+      // The voucher it went out on, so Finance can see it after the release.
+      advanceDvNo: advance ? advance.dvNo : null,
+      advanceDvDate: advance ? advance.dvDate : null,
       advanceStatus: advance ? advance.status : null,
       liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === p.id)
     });
@@ -5556,6 +5559,9 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       funded: !!(advance && advance.status === "Released"),
       advanceNo: advance ? advance.advanceNo : null,
       advanceAmount: advance ? advance.amount : null,
+      // The voucher it went out on, so Finance can see it after the release.
+      advanceDvNo: advance ? advance.dvNo : null,
+      advanceDvDate: advance ? advance.dvDate : null,
       advanceStatus: advance ? advance.status : null,
       liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === a.id)
     });

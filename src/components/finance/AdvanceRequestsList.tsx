@@ -226,7 +226,8 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                       <div className="grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="space-y-1">
                           <label htmlFor={`rq-dv-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Disbursement Voucher No.</label>
-                          <input id={`rq-dv-${r.id}`} type="text" value={dvNo} maxLength={50} disabled={saving} onChange={e => setDvNo(e.target.value)} placeholder="2026-08-336" className={INPUT} />
+                          <input id={`rq-dv-${r.id}`} type="text" value={dvNo} maxLength={50} disabled={saving} onChange={e => setDvNo(e.target.value)} placeholder="e.g. 2026-08-336" aria-describedby={`rq-dv-hint-${r.id}`} className={INPUT} />
+                          <p id={`rq-dv-hint-${r.id}`} className="font-mono text-[9px] text-slate-400">Type the number on the voucher</p>
                         </div>
                         <div className="space-y-1">
                           <label htmlFor={`rq-dvd-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Voucher Date</label>
