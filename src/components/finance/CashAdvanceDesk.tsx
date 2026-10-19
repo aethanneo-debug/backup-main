@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, Banknote, Loader2, RefreshCw } from "lucide-react";
-import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
+import { apiCall, firstTimestamp, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
 import AdvanceRefundForm from "./AdvanceRefundForm";
 
@@ -35,7 +35,17 @@ interface FundableRow {
   /** The voucher the advance went out on. */
   advanceDvNo?: string | null;
   advanceDvDate?: string | null;
+  /** When the assignment was made, and the advance released, settled or refunded (for LIFO). */
+  assignedAt?: string | null;
+  advanceIssuedAt?: string | null;
+  advanceSettledAt?: string | null;
+  advanceRefundedAt?: string | null;
 }
+
+// Newest first (LIFO, the instructor's rule for the office's lists), by the given dates in
+// order of preference. firstTimestamp is NaN-safe: a row with no date sorts last.
+const newestFirst = (when: (r: FundableRow) => Array<string | null | undefined>) =>
+  (a: FundableRow, b: FundableRow) => firstTimestamp(...when(b)) - firstTimestamp(...when(a));
 
 /** "CA-2026-10-001 · DV 2026-10-0101 (Oct 20, 2026)": an advance and the voucher it went out on. */
 function AdvanceRef({ row }: { row: FundableRow }) {
@@ -92,11 +102,16 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
   // Only assignments that can still receive an advance: once a report is filed the server
   // refuses one (it could never be settled). Those are counted separately below.
   // (Someone who did not attend is never funded; their refunded advance is listed apart.)
-  const unfunded = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled), [rows]);
+  // Each list newest first, by its own event: the assignment, the release, the settlement,
+  // the refund. So the five settled ones shown are the latest five.
+  const unfunded = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled)
+    .sort(newestFirst(r => [r.assignedAt])), [rows]);
   const filedWithoutAdvance = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && r.liquidationFiled), [rows]);
-  const open = useMemo(() => rows.filter(r => r.funded), [rows]);
-  const settled = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus === "Liquidated"), [rows]);
-  const refunded = useMemo(() => rows.filter(r => r.didNotAttend && r.advanceStatus === "Refunded"), [rows]);
+  const open = useMemo(() => rows.filter(r => r.funded).sort(newestFirst(r => [r.advanceIssuedAt, r.assignedAt])), [rows]);
+  const settled = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus === "Liquidated")
+    .sort(newestFirst(r => [r.advanceSettledAt, r.advanceIssuedAt])), [rows]);
+  const refunded = useMemo(() => rows.filter(r => r.didNotAttend && r.advanceStatus === "Refunded")
+    .sort(newestFirst(r => [r.advanceRefundedAt, r.advanceIssuedAt])), [rows]);
   const outstanding = useMemo(
     () => open.reduce((sum, r) => sum + Number(r.advanceAmount || 0), 0),
     [open]
@@ -408,7 +423,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
           {settled.length > 0 && (
             <div className="border-t border-slate-200 pt-3">
               <h3 className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider mb-2">
-                Settled ({settled.length})
+                Settled ({settled.length}{settled.length > 5 ? ", latest 5 shown" : ""})
               </h3>
               <ul className="divide-y divide-slate-100">
                 {settled.slice(0, 5).map(row => (

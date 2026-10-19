@@ -5480,6 +5480,14 @@ app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
   res.json({ status: "success", data: all.filter((a: any) => forms.includes(a.employeeId)) });
 });
 
+// When an assignment was made. Enrolments and activities have no date of their own, but their
+// ids carry the moment they were created (`part-<ms>-…`, `act-<ms>`). "" when an id doesn't.
+function createdAtFromId(id: unknown): string {
+  const m = /^(?:part|act)-(\d{12,14})(?:-|$)/.exec(String(id ?? ""));
+  const ms = m ? Number(m[1]) : NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : "";
+}
+
 // Who Finance may release money to, and who has already been funded.
 //
 // Finance cannot read the HR training tables (isTrainingRecordsRole excludes them), but
@@ -5534,6 +5542,11 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       // The voucher it went out on, so Finance can see it after the release.
       advanceDvNo: advance ? advance.dvNo : null,
       advanceDvDate: advance ? advance.dvDate : null,
+      // For the desk's newest-first order (LIFO).
+      assignedAt: createdAtFromId(p.id),
+      advanceIssuedAt: advance ? advance.issuedAt || null : null,
+      advanceSettledAt: advance ? advance.liquidatedAt || null : null,
+      advanceRefundedAt: advance ? advance.refundedAt || null : null,
       advanceStatus: advance ? advance.status : null,
       liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === p.id)
     });
@@ -5562,13 +5575,20 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       // The voucher it went out on, so Finance can see it after the release.
       advanceDvNo: advance ? advance.dvNo : null,
       advanceDvDate: advance ? advance.dvDate : null,
+      assignedAt: createdAtFromId(a.id),
+      advanceIssuedAt: advance ? advance.issuedAt || null : null,
+      advanceSettledAt: advance ? advance.liquidatedAt || null : null,
+      advanceRefundedAt: advance ? advance.refundedAt || null : null,
       advanceStatus: advance ? advance.status : null,
       liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === a.id)
     });
   }
 
-  // Unfunded first - that is the work queue.
-  rows.sort((x, y) => Number(x.funded) - Number(y.funded) || String(x.employeeName).localeCompare(String(y.employeeName)));
+  // Newest first (LIFO, like the office's request lists): by each row's latest event, its
+  // assignment, release, settlement or refund. The desk orders each of its lists by its own.
+  const latest = (r: any) => Math.max(0, ...[r.assignedAt, r.advanceIssuedAt, r.advanceSettledAt, r.advanceRefundedAt]
+    .map((t: any) => Date.parse(t || "") || 0));
+  rows.sort((x, y) => latest(y) - latest(x));
   res.json({ status: "success", data: rows });
 });
 
