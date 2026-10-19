@@ -557,11 +557,14 @@ function getInitialData(): DBStructure {
       }
 
       if (changed) {
-        fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(loaded, null, 2), "utf8");
+        writeDataFile(loaded);
       }
       return loaded;
     } catch (e) {
-      console.error("Error reading data_store.json, re-initializing", e);
+      // A database that can't be read or migrated is never replaced with the seed data below:
+      // that erased every record. Stop instead, so it can be restored (it is in git).
+      console.error("data_store.json could not be read or migrated. The server will not start, so the file is left untouched. If data_store.json.tmp exists, it may hold the latest complete save: check it first, then data_store.backup.json. Otherwise restore the file (e.g. `git restore data_store.json`, which loses everything since the last commit) or fix the migration, then start again.", e);
+      throw e;
     }
   }
 
@@ -1039,15 +1042,16 @@ function getInitialData(): DBStructure {
     signatories: []
   };
 
-  // Write initial setup
-  fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(seedDB, null, 2), "utf8");
+  // Write initial setup. "wx" fails if the file exists after all (existsSync also answers false
+  // when it can't check), so the seed data can never replace a real database.
+  fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(seedDB, null, 2), { encoding: "utf8", flag: "wx" });
   return seedDB;
 }
 
 const db = getInitialData();
 
 function saveDB() {
-  fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(db, null, 2), "utf8");
+  writeDataFile(db);
 }
 
 // RESTful API Routes
@@ -1057,6 +1061,30 @@ function logEvent(userId: string, username: string, role: string, action: string
   const newLog: AuditLog = {
     id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     timestamp: new Date().toISOString(),
+// Writes the database so a crash can never leave it half-written: the new content goes to a
+// temporary file, which then replaces the old one in one step (a rename). OneDrive or an
+// antivirus can hold the file for a moment on Windows, so a refused rename is retried briefly;
+// as a last resort the file is written directly rather than losing the save.
+function writeDataFile(data: unknown) {
+  const json = JSON.stringify(data, null, 2);
+  const tmp = `${DATA_FILE_PATH}.tmp`;
+  fs.writeFileSync(tmp, json, "utf8");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(tmp, DATA_FILE_PATH);
+      return;
+    } catch (err: any) {
+      if (attempt >= 5 || !["EPERM", "EBUSY", "EACCES"].includes(err?.code)) {
+        console.error("data_store.json could not be replaced in one step; writing it directly.", err);
+        fs.writeFileSync(DATA_FILE_PATH, json, "utf8");
+        try { fs.unlinkSync(tmp); } catch { /* already gone */ }
+        return;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * attempt);
+    }
+  }
+}
+
     userId,
     username,
     role,

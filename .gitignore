@@ -7,3 +7,6 @@ coverage/
 .env*
 !.env.example
 backend_fastapi/generated_employee_credentials.csv
+
+# The database is saved through a temporary copy (server.ts, writeDataFile)
+data_store.json.tmp
