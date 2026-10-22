@@ -8,6 +8,8 @@ interface SeminarAmounts {
   allocatedBudget?: number | string;
   usedBudget?: number | string;
   maxParticipants?: number | string;
+  /** Archived (2026-10-23): closed, whatever its participants' state, so it counts only what it spent. */
+  archivedAt?: string | null;
 }
 
 interface SeminarEnrolment {
@@ -81,6 +83,11 @@ export interface SeminarBudget {
  *   applies to those still to report, as if the validated attendees' seats were taken out.
  *   Only when what they spent is known (`settledSpent`): an enrolment liquidated by older code
  *   without a record of its own spending keeps its share held, as it always did.
+ * - Archived (the user, 2026-10-23, instead of deleting): closed, so it counts only what it
+ *   spent plus any cash still out. The server archives only a seminar nothing has happened to
+ *   (₱0, so its whole allocation returns, as deleting it did) or a finished one with no cash out
+ *   (it already counted only its spending). Restoring an unused one holds its allocation again;
+ *   a finished one restored still counts only what it spent.
  *
  * `allocatedOverride` lets the HR planner price an unsaved edit. Rounded to centavos here,
  * at the boundary, so every figure built from it adds up.
@@ -107,7 +114,7 @@ export function seminarBudget(program: SeminarAmounts, participants: SeminarEnro
     : attending.length === 0 ? "nobodyAttended"
     : attending.every((p) => p.status === "Liquidated") ? "settled"
     : "open";
-  const closed = stage === "settled" || stage === "nobodyAttended";
+  const closed = !!program.archivedAt || stage === "settled" || stage === "nobodyAttended";
   // Not closed: the attendees' part, plus the cash still out with non-attendees on top. The
   // attendees' part is the larger of:
   // - their shares: the allocation less the non-attendees' shares (which never come out of the
@@ -147,8 +154,8 @@ export function seminarBudget(program: SeminarAmounts, participants: SeminarEnro
     spent,
     share,
     absent,
-    settled: stage === "open" ? settledAttendees.length : 0,
-    released: stage === "open" ? round2(Math.max(0, allocated - openCommitted)) : 0,
+    settled: !closed && stage === "open" ? settledAttendees.length : 0,
+    released: !closed && stage === "open" ? round2(Math.max(0, allocated - openCommitted)) : 0,
     held,
     heldCount: absentees.filter((p) => Number(p.advanceOutstanding) > 0).length,
     outstanding,
@@ -159,12 +166,13 @@ export function seminarBudget(program: SeminarAmounts, participants: SeminarEnro
 
 /**
  * Closed: no participant can report more spending against the seminar, because everyone
- * who attended has been liquidated, or attendance is recorded and nobody came. An empty
- * seminar is still being planned, so it is not closed. Enrolling someone new reopens it.
+ * who attended has been liquidated, or attendance is recorded and nobody came, or it is
+ * archived. An empty seminar is still being planned, so it is not closed. Enrolling someone
+ * new reopens it.
  */
 export function isSeminarSettled(program: SeminarAmounts, participants: SeminarEnrolment[]): boolean {
   const { stage } = seminarBudget(program, participants);
-  return stage === "settled" || stage === "nobodyAttended";
+  return !!program.archivedAt || stage === "settled" || stage === "nobodyAttended";
 }
 
 /** What the seminar takes out of the year's training budget (see seminarBudget). */

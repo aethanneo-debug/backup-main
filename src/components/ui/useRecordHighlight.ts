@@ -12,7 +12,10 @@ export function useRecordHighlight(id: string | null | undefined, key?: number) 
     let shown: HTMLElement | null = null;
     let tries = 0;
     const find = () => {
-      const el = document.querySelector<HTMLElement>(`[data-record-id="${CSS.escape(id)}"]`);
+      // The first one actually on screen: a record can also sit in a closed list (Programs &
+      // Budget's Archived Seminars), which opens a moment later, and outlining it there shows nothing.
+      const el = [...document.querySelectorAll<HTMLElement>(`[data-record-id="${CSS.escape(id)}"]`)]
+        .find(e => e.getClientRects().length > 0);
       if (el) {
         shown = el;
         el.scrollIntoView({ behavior: "smooth", block: "center" });

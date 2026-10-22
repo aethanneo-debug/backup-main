@@ -14,6 +14,7 @@ import { centavos, pesos, sumPesos, liquidationBalance } from "./src/liquidation
 import { createTransactions } from "./src/server/jsonTransaction";
 import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
 import { cleanFileName, liquidationDocumentRows } from "./src/server/liquidationDocuments";
+import { trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -3567,8 +3568,11 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
     const altId = empRecord ? empRecord.id : null;
     const list = db.activities.filter((a) => a.assignedEmployeeId === employeeId || a.assignedEmployeeId === altId);
     
-    // Inject assigned training programs
-    const trainings = db.trainingParticipants.filter((p) => p.employeeId === altId || p.employeeId === employeeId);
+    // Inject assigned training programs. An enrolment archived with an unused seminar (or left off
+    // when it was restored) is gone from the employee's list, as a deleted seminar's was; a
+    // finished seminar stays as history.
+    const trainings = db.trainingParticipants.filter((p) =>
+      (p.employeeId === altId || p.employeeId === employeeId) && p.status !== "Archived" && p.status !== "Cancelled");
     for (const t of trainings) {
       const prog = db.trainingPrograms.find((p) => p.id === t.trainingProgramId);
       if (prog) {
@@ -3576,7 +3580,10 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
           id: t.id,
           activityNo: `TRN-2026-${prog.id.replace('tp-','')}`,
           title: `Seminar/Training: ${prog.title}`,
-          description: prog.description || "Assigned training program",
+          // The plan the seminar belongs to. HR no longer writes seminar descriptions (the
+          // Description column was removed on 2026-10-23), so the card names the plan instead of
+          // "Assigned training program".
+          description: `FY ${prog.fiscalYear} Training and Development Plan`,
           dateScheduled: prog.startDate,
           endDate: prog.endDate,
           liquidationDueDate: liquidationDueDateFor(prog),
@@ -3872,6 +3879,21 @@ function claimTypeProblem(
 // the Administrator files on their behalf.
 function releasedAdvanceForAssignment(activityId: string): CashAdvance | null {
   return (db.cashAdvances || []).find((a: any) => a && a.activityId === activityId && a.status === "Released") || null;
+}
+
+// No new cash advance while the employee still has another one out (COA Circular No. 97-002,
+// sec. 4.1.2; the user's decision, 2026-10-23). An advance is out while it is "Released": it
+// settles when Finance validates its report ("Liquidated") or records its refund ("Refunded").
+// It matters since an employee may join several seminars a year (12s); before, one seminar a
+// year made two advances at once rare. Advances store the staff code, so both id forms match.
+function openAdvanceElsewhere(employeeId: string, activityId: string): CashAdvance | null {
+  const forms = employeeIdForms(employeeId);
+  return (db.cashAdvances || []).find((a: any) =>
+    a && a.status === "Released" && a.activityId !== activityId && forms.includes(a.employeeId)) || null;
+}
+
+function openAdvanceText(a: CashAdvance): string {
+  return `${a.advanceNo} (DV ${a.dvNo}) for "${a.activityTitle || "another assignment"}"`;
 }
 
 // The cash advance Finance has on file for a report: the one it is linked to, whatever its
@@ -5174,6 +5196,10 @@ function advanceRequestEligibility(p: any): { canRequest: boolean; reason?: stri
   if (current?.status === "Released") return { canRequest: false, reason: `Finance released ${current.advanceNo} (DV ${current.dvNo}).` };
   // (One refunded in full was given back, so asking again is fine.)
   if (current?.status === "Liquidated") return { canRequest: false, reason: `${current.advanceNo} is already liquidated.` };
+  const elsewhere = openAdvanceElsewhere(p.employeeId, p.id);
+  if (elsewhere) {
+    return { canRequest: false, reason: `Your cash advance ${openAdvanceText(elsewhere)} isn't liquidated or refunded yet. COA rules allow a new cash advance only after the previous one is settled.` };
+  }
   if (!(round2(Number(p.allowanceAllocated || 0)) > 0)) return { canRequest: false, reason: "HR hasn't set an allowance for you on this seminar yet." };
   return { canRequest: true };
 }
@@ -5370,6 +5396,14 @@ app.post("/api/cash-advances", authenticateToken, transactional((req: any, res: 
       message: `${existing.employeeName} already has an open advance for this assignment (${existing.advanceNo}, DV ${existing.dvNo}).`
     });
   }
+  // No second advance while the employee has another one out (COA Circular No. 97-002).
+  const elsewhere = openAdvanceElsewhere(emp.employeeId || emp.id, activityId);
+  if (elsewhere) {
+    return res.status(409).json({
+      status: "error",
+      message: `${emp.fullName} still has cash advance ${openAdvanceText(elsewhere)} not liquidated or refunded. COA rules allow no new cash advance until it is settled.`
+    });
+  }
   // The employee asked for it themself: that request is released (or declined) instead, so
   // the assignment keeps one record.
   const asked = pendingRequestFor(activityId);
@@ -5486,6 +5520,11 @@ function requestReleaseProblem(request: CashAdvance): string | null {
   const open = (db.cashAdvances || []).find((a: any) => a && a.activityId === request.activityId && a.status === "Released");
   if (open) return `${open.advanceNo} (DV ${open.dvNo}) is already out for this seminar. Decline the request.`;
   if (!payeeIsActive(request.employeeId)) return `${request.employeeName} is no longer active, so nothing can be released. Decline the request.`;
+  // The request can wait: it can be released once the other advance is settled.
+  const elsewhere = openAdvanceElsewhere(request.employeeId, request.activityId);
+  if (elsewhere) {
+    return `${request.employeeName} still has cash advance ${openAdvanceText(elsewhere)} not liquidated or refunded. COA rules allow no new cash advance until it is settled, so release this one after that, or decline it.`;
+  }
   // HR may have re-priced the seminar since: the release is the allowance as it is now.
   if (!(centavos(facts.allocated) > 0)) return `HR has set no allowance for ${request.employeeName} on this seminar, so nothing can be released. Decline the request, or ask HR to set one.`;
   return null;
@@ -5685,16 +5724,16 @@ function employeeIdForms(employeeId: string): string[] {
   return emp ? [emp.id, emp.employeeId].filter(Boolean) : [employeeId];
 }
 
-function employeeAlreadyHasTrainingThisYear(employeeId: string, fiscalYear: string): boolean {
-  if (!db.trainingParticipants) return false;
-  const forms = employeeIdForms(employeeId);
-  return db.trainingParticipants.some(p => {
-    if (!forms.includes(p.employeeId)) return false;
-    if (p.status === "Cancelled") return false;
+// At least one training per year per employee (the user's rule, 2026-10-23; it replaced "at most
+// one seminar per fiscal year"). What counts toward a year is decided in src/trainingCoverage.ts,
+// shared by the participant picker's ranking, auto-enrolment and the coverage panel.
+function trainingCoverageData() {
+  return { enrolments: db.trainingParticipants || [], programs: db.trainingPrograms || [], records: db.trainings || [] };
+}
 
-    const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
-    return prog && prog.fiscalYear === fiscalYear;
-  });
+function coverageFiscalYear(label: string) {
+  const fy: any = (db.fiscalYears || []).find((f: any) => String(f.label) === String(label));
+  return { label: String(label), start_date: fy?.start_date, end_date: fy?.end_date };
 }
 
 // --- TDP PARTICIPANT ELIGIBILITY, RECOMMENDER & LIQUIDATION DEADLINES ---
@@ -5806,7 +5845,8 @@ function sameSeminar(a: SeminarRef, b: SeminarRef): boolean {
 function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef): string | null {
   const forms = employeeIdForms(employeeId);
   for (const p of db.trainingParticipants || []) {
-    if (!forms.includes(p.employeeId) || p.status === "Cancelled") continue;
+    // An enrolment archived with an unused seminar never happened either.
+    if (!forms.includes(p.employeeId) || p.status === "Cancelled" || p.status === "Archived") continue;
     // HR recorded that they did not attend: no reason to keep them from enrolling again.
     if (p.attendance === "Did not attend") continue;
     if (program.id && p.trainingProgramId === program.id) continue;
@@ -5826,26 +5866,13 @@ function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef):
   return null;
 }
 
-function otherTrainingThisYear(employeeId: string, fiscalYear: string, excludeProgramId?: string): TrainingProgram | null {
-  const forms = employeeIdForms(employeeId);
-  for (const p of db.trainingParticipants || []) {
-    if (!forms.includes(p.employeeId) || p.status === "Cancelled") continue;
-    if (excludeProgramId && p.trainingProgramId === excludeProgramId) continue;
-    const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
-    if (prog && prog.fiscalYear === fiscalYear) return prog;
-  }
-  return null;
-}
-
 // Why this employee cannot be enrolled in the program, or null when they can.
 // The recommender and every enrolment route share this, so the UI can never offer
-// someone the server would refuse.
-function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { rule: "attended" | "annual"; reason: string } | null {
+// someone the server would refuse. Only the same seminar twice is refused: since 2026-10-23
+// an employee may join several seminars in a fiscal year (at least one, no longer at most one).
+function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { reason: string } | null {
   const attended = employeeAttendedSeminarBefore(employeeId, program);
-  if (attended) return { rule: "attended", reason: attended };
-  const other = otherTrainingThisYear(employeeId, program.fiscalYear, program.id);
-  if (other) return { rule: "annual", reason: `Already assigned to "${other.title}" for FY ${program.fiscalYear}` };
-  return null;
+  return attended ? { reason: attended } : null;
 }
 
 function monthsSinceHire(emp: Employee, today: string): number | null {
@@ -5855,30 +5882,27 @@ function monthsSinceHire(emp: Employee, today: string): number | null {
   return (ty - hy) * 12 + (tm - hm) - (td < hd ? 1 : 0);
 }
 
-function hasTdpHistory(employeeId: string, excludeProgramId?: string): boolean {
-  const forms = employeeIdForms(employeeId);
-  return (db.trainingParticipants || []).some(p =>
-    forms.includes(p.employeeId) && p.status !== "Cancelled" && p.trainingProgramId !== excludeProgramId);
-}
-
 function matchesSeminarTarget(emp: Employee, program: SeminarRef): boolean {
   if (program.targetDivision && emp.division === program.targetDivision) return true;
   const spec = normalizeTitle(program.targetSpecialization);
   return spec !== "" && normalizeTitle(emp.fieldOfSpecialization).includes(spec);
 }
 
-// Scores every employee for a seminar. Priority 1 = new hires, 2 = never attended a
-// TDP seminar, 3 = everyone else; ineligible employees sort last with their reason.
+// Scores every employee for a seminar. Priority 1 = new hires, 2 = no training yet in the
+// seminar's fiscal year, 3 = everyone else; ineligible employees sort last with their reason.
 function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCandidate[]; recommendedIds: string[] } {
   const today = manilaToday();
+  // Their other trainings in the seminar's fiscal year (this seminar left out).
+  const yearTrainings = yearTrainingCounter(trainingCoverageData(), coverageFiscalYear(program.fiscalYear), program.id);
   const candidates: TrainingCandidate[] = (db.employees || [])
     .filter(emp => emp.isActive !== false)
     .map(emp => {
       const block = trainingEnrollmentBlock(emp.id, program);
       const months = monthsSinceHire(emp, today);
       const newHire = months !== null && months >= 0 && months < NEW_HIRE_MONTHS;
-      const history = hasTdpHistory(emp.id, program.id);
-      const priority: 1 | 2 | 3 = newHire ? 1 : !history ? 2 : 3;
+      const thisYear = yearTrainings(emp);
+      const trainingsThisYear = [...thisYear.seminars, ...thisYear.records];
+      const priority: 1 | 2 | 3 = newHire ? 1 : trainingsThisYear.length === 0 ? 2 : 3;
       const needMatches = employeeNeedMatches(emp.id, program);
       return {
         needsThis: needMatches.length > 0,
@@ -5889,19 +5913,23 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
         division: emp.division || "",
         dateHired: emp.dateHired || "",
         priority,
-        priorityLabel: priority === 1 ? "New hire" : priority === 2 ? "No TDP history yet" : "Attended other TDP seminars",
+        priorityLabel: priority === 1 ? "New hire"
+          : priority === 2 ? `No training yet in FY ${program.fiscalYear}`
+          : `Already has a training in FY ${program.fiscalYear}`,
         monthsSinceHire: months,
-        hasTdpHistory: history,
         matchesTarget: matchesSeminarTarget(emp, program),
+        trainingsThisYear,
         eligible: !block,
         ineligibleReason: block?.reason
       };
     });
 
-  // The plan listing this training is the strongest reason for a seat, so it
-  // outranks the new-hire preference — which still decides among those who need it.
+  // Everyone should have at least one training a year, so those with none yet in the seminar's
+  // fiscal year come first. Among them, and among the rest, the plan listing this training is the
+  // strongest reason for a seat, then the new-hire preference.
   candidates.sort((a, b) =>
     Number(b.eligible) - Number(a.eligible) ||
+    Number(a.trainingsThisYear.length > 0) - Number(b.trainingsThisYear.length > 0) ||
     Number(b.needsThis) - Number(a.needsThis) ||
     a.priority - b.priority ||
     Number(b.matchesTarget) - Number(a.matchesTarget) ||
@@ -6185,7 +6213,7 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
       skipped.push(`${emp.fullName} skipped: ${block.reason}.`);
       logEvent(
         actor.id, actor.username, actor.role,
-        block.rule === "attended" ? "Training Enrollment Blocked - Previously Attended" : "Training Enrollment Blocked - Annual Limit",
+        "Training Enrollment Blocked - Previously Attended",
         `${emp.fullName} was not enrolled in "${program.title}": ${block.reason}.`
       );
       continue;
@@ -6327,21 +6355,19 @@ function autoAssignEmployeeToTraining(employee: Employee) {
   try {
     const activeFy = db.fiscalYears.find(f => f.status === "Active");
     if (!activeFy) return null;
+    // Only active staff, as the picker and the coverage panel count them.
+    if (employee.isActive === false) return null;
 
-    // Rule B check — already has a training this fiscal year?
-    const alreadyAssigned = employeeAlreadyHasTrainingThisYear(employee.id, activeFy.label);
-
-    if (alreadyAssigned) {
-      logEvent(
-        "system", "System", "System",
-        "Training Enrollment Blocked - Annual Limit",
-        `Employee ${employee.fullName} was not auto-enrolled because they already have a training program for ${activeFy.label}.`
-      );
-      return null;
-    }
+    // At least one training per year: auto-enrolment gives a first one to someone who has none
+    // this fiscal year (a seminar, or a training HR recorded). Someone who has one needs nothing
+    // here; HR can still add them to more seminars. (This used to log "Annual Limit" on every
+    // profile edit, when an employee could have only one seminar a year.)
+    const thisYear = yearTrainingCounter(trainingCoverageData(), coverageFiscalYear(activeFy.label))(employee);
+    if (thisYear.seminars.length + thisYear.records.length > 0) return null;
 
     const candidates = (db.trainingPrograms || []).filter(p =>
       p.fiscalYear === activeFy.label &&
+      !p.archivedAt &&
       ((p.targetDivision && p.targetDivision === employee.division) ||
        (p.targetSpecialization && p.targetSpecialization === employee.fieldOfSpecialization)) &&
       !employeeAttendedSeminarBefore(employee.id, p)
@@ -6457,7 +6483,9 @@ function computeTrainingUsage(fiscalYearId: string) {
   const fy = (db.fiscalYears || []).find((f: any) => f.id === fiscalYearId);
   const tb = (db.trainingBudgets || []).find((b: any) => b.fiscalYearId === fiscalYearId);
   const totalBudget = Number(tb?.totalBudget || 0);
-  const programs = (db.trainingPrograms || []).filter((p: any) => fy && p.fiscalYear === fy.label);
+  // A seminar archived before anything happened to it is left out, as a deleted one was; one
+  // archived after it finished still counts what it spent (src/trainingBudget.ts).
+  const programs = (db.trainingPrograms || []).filter((p: any) => fy && p.fiscalYear === fy.label && !p.archivedBeforeUse);
   const allocated = programs.reduce((s: number, p: any) => s + Number(p.allocatedBudget || 0), 0);
   const spent = programs.reduce((s: number, p: any) => s + Number(p.usedBudget || 0), 0);
   // What the seminars take out of the budget: actual spending once a seminar is closed,
@@ -6621,6 +6649,23 @@ app.get("/api/training/recommendations", authenticateToken, (req: any, res: any)
   res.json({ status: "success", data: rankTrainingCandidates(program) });
 });
 
+// Programs & Budget's coverage panel: at least one training per year per employee. How many
+// active employees have one in the fiscal year (the active one unless ?fiscalYear= names
+// another), and who doesn't yet. HR and the Administrator, like the rest of the plan.
+app.get("/api/training/coverage", authenticateToken, (req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Training coverage is restricted to HR." });
+  }
+  const asked = typeof req.query.fiscalYear === "string" ? req.query.fiscalYear.trim() : "";
+  const activeFy = (db.fiscalYears || []).find((f: any) => f.status === "Active");
+  const label = asked || activeFy?.label;
+  if (!label) return res.status(400).json({ status: "error", message: "No fiscal year is active." });
+  if (!(db.fiscalYears || []).some((f: any) => String(f.label) === String(label))) {
+    return res.status(404).json({ status: "error", message: `There is no fiscal year ${label}.` });
+  }
+  res.json({ status: "success", data: trainingCoverage(db.employees || [], trainingCoverageData(), coverageFiscalYear(label)) });
+});
+
 // --- OFFICIAL TDP PLAN A / PLAN D ---
 // HR owns these records, so the whole group is HR + Admin only.
 function requireTrainingPlanRole(req: any, res: any): boolean {
@@ -6741,6 +6786,10 @@ app.post("/api/training/evaluations", authenticateToken, (req: any, res: any) =>
   const participant = (db.trainingParticipants || []).find((p: any) => p.id === trainingParticipantId);
   if (!participant) {
     return res.status(404).json({ status: "error", message: "That seminar participant no longer exists." });
+  }
+  // Taken off an archived seminar, or left off when it was restored: they never took part.
+  if (participant.status === "Archived" || participant.status === "Cancelled") {
+    return res.status(400).json({ status: "error", message: "This enrolment was cancelled, so there is nothing to evaluate." });
   }
 
   const prog = (db.trainingPrograms || []).find((tp: any) => tp.id === participant.trainingProgramId);
@@ -7335,6 +7384,9 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
 
   const body = req.body;
   const existingProgram = db.trainingPrograms[programIndex];
+  if (existingProgram.archivedAt) {
+    return res.status(409).json({ status: "error", message: `"${existingProgram.title}" is archived. Restore it before editing it.` });
+  }
   const allocation = body.allocatedBudget !== undefined ? readAllocation(body.allocatedBudget) : Number(existingProgram.allocatedBudget || 0);
   if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
   const newSeats = readSeats(body.maxParticipants);
@@ -7467,45 +7519,168 @@ app.put("/api/training/programs/:id", authenticateToken, (req: any, res: any) =>
   res.json({ status: "success", data: db.trainingPrograms[programIndex], message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
 });
 
-// Deleting a seminar: only one that nothing has happened to yet. Once attendance, spending,
-// a report, a cash advance, an evaluation or an expense is on record, the seminar is history.
-// Deleting it would orphan those records and hand what it spent, or holds for an advance
-// still out, back to the year's Unallocated (known issue 12b). A closed year's seminars stay
-// as they were when its unallocated money was carried over.
+// A saved seminar is archived, never deleted (the user, 2026-10-23: "the only ones that can be
+// deleted is the ones that has not been saved yet"). A row that was never saved exists only on
+// HR's screen, where it is discarded.
 app.delete("/api/training/programs/:id", authenticateToken, (req: any, res: any) => {
   if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Only HR or the Administrator can delete a seminar." });
   }
   const prog = (db.trainingPrograms || []).find((p: any) => p.id === req.params.id);
   if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
-  const title = String(prog.title || "").trim();
-  const fy = (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear);
-  if (fy && fy.status !== "Active") {
-    return res.status(409).json({ status: "error", message: `"${title}" can't be deleted: FY ${fy.label} is closed, and its seminars stay as they were when its unallocated money was carried over.` });
-  }
+  return res.status(409).json({
+    status: "error",
+    message: `Saved seminars are archived, not deleted: archive "${String(prog.title || "").trim()}" instead. Only a new row that hasn't been saved can be discarded.`
+  });
+});
+
+// What has happened to a seminar that has to stay on record, or "" when nothing has (what
+// deleting one used to check, 12b).
+function seminarHistory(prog: TrainingProgram): string {
   const enrolments = (db.trainingParticipants || []).filter((p: any) => p.trainingProgramId === prog.id);
   const ids = new Set(enrolments.map((p: any) => p.id));
-  const history = enrolments.some((p: any) => p.attendance) ? "attendance has been recorded for it"
+  return enrolments.some((p: any) => p.attendance) ? "attendance has been recorded for it"
     : Number(prog.usedBudget || 0) > 0 ? `${pesoText(Number(prog.usedBudget))} has been spent on it`
     : (db.liquidationSubmissions || []).some((s: any) => ids.has(s.activityId)) ? "a liquidation report has been filed for it"
     : (db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId) && a.status !== "Requested" && a.status !== "Declined") ? "Finance has released a cash advance for it"
-    // A request still waiting would be left with nobody to release it to (Finance can decline
-    // it first). A declined one moved no money, as on a roster edit, and stays in the audit log.
     : (db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId) && a.status === "Requested") ? "a cash advance request for it is waiting for Finance"
     : (db.trainingEvaluations || []).some((e: any) => e && (e.trainingProgramId === prog.id || ids.has(e.trainingParticipantId))) ? "a training evaluation has been recorded for it"
     : (db.trainingLiquidations || []).some((l: any) => l.trainingProgramId === prog.id) ? "expenses have been recorded for it"
     : "";
-  if (history) {
-    return res.status(409).json({ status: "error", message: `"${title}" can't be deleted: ${history}, and that record has to be kept.` });
+}
+
+// Archiving a seminar (Programs & Budget → Archived Seminars). Nothing is erased. Two kinds:
+// - Nothing has happened to it yet (what deleting used to allow): its participants are taken
+//   off it (archived with it), and its whole allocation returns to Unallocated; the year's
+//   figures leave it out, as a deleted seminar.
+// - Finished (everyone who attended is liquidated, or nobody came: attendance shows nobody, or
+//   nobody is enrolled though something was spent, as on a called-off seminar) with no cash
+//   advance out and no request waiting: every record stays as it is, and it counts only what it
+//   spent, as a closed seminar already does.
+// Anything in between is refused, so no work in progress is hidden. So is a closed year, whose
+// seminars stay as they were when its unallocated money was carried over.
+app.post("/api/training/programs/:id/archive", authenticateToken, transactional((req: any, res: any) => {
+  if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER) {
+    return res.status(403).json({ status: "error", message: "Only HR or the Administrator can archive a seminar." });
+  }
+  const prog: TrainingProgram | undefined = (db.trainingPrograms || []).find((p: any) => p.id === req.params.id);
+  if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  const title = String(prog.title || "").trim();
+  if (prog.archivedAt) return res.status(409).json({ status: "error", message: `"${title}" is already archived.` });
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear);
+  // (Restore needs the year to be active, so a seminar with no year could never come back.)
+  if (!fy) return res.status(409).json({ status: "error", message: `"${title}" can't be archived: there is no fiscal year ${prog.fiscalYear}.` });
+  if (fy.status !== "Active") {
+    return res.status(409).json({ status: "error", message: `"${title}" can't be archived: FY ${fy.label} is closed, and its seminars stay as they were when its unallocated money was carried over.` });
   }
 
-  db.trainingPrograms = db.trainingPrograms.filter(p => p.id !== prog.id);
-  db.trainingParticipants = (db.trainingParticipants || []).filter(p => p.trainingProgramId !== prog.id);
-  logEvent(req.user.id, req.user.username, req.user.role, "Delete Training Program",
-    `Deleted "${title}" (FY ${prog.fiscalYear}, allocated ${pesoText(Number(prog.allocatedBudget || 0))})${enrolments.length ? `, unenrolling ${enrolments.length} participant${enrolments.length === 1 ? "" : "s"}` : ""}.`);
+  const history = seminarHistory(prog);
+  if (history) {
+    const ids = new Set((db.trainingParticipants || []).filter((p: any) => p.trainingProgramId === prog.id).map((p: any) => p.id));
+    if ((db.cashAdvances || []).some((a: any) => a && ids.has(a.activityId) && a.status === "Requested")) {
+      return res.status(409).json({ status: "error", message: `"${title}" can't be archived yet: a cash advance request for it is waiting for Finance to release or decline it.` });
+    }
+    // The advance records themselves: the budget nets an advance against HR's hand entries for
+    // that person, so an advance still "Released" can show as nothing out.
+    const openAdvance = (db.cashAdvances || []).find((a: any) => a && ids.has(a.activityId) && a.status === "Released");
+    if (openAdvance) {
+      return res.status(409).json({ status: "error", message: `"${title}" can't be archived yet: cash advance ${openAdvance.advanceNo} (DV ${openAdvance.dvNo}) is still out for it. Finance has to record its liquidation or refund first.` });
+    }
+    const budget = seminarBudget(prog, participantsForBudget());
+    if (budget.outstanding > 0) {
+      return res.status(409).json({ status: "error", message: `"${title}" can't be archived yet: ${pesoText(budget.outstanding)} in cash advances is still out for it. Finance has to record its liquidation or refund first.` });
+    }
+    // "planning" with history: nobody is enrolled, but something was spent (a called-off seminar).
+    if (budget.stage === "open") {
+      return res.status(409).json({ status: "error", message: `"${title}" can't be archived yet: it isn't finished. Archive it once everyone who attended has been liquidated, or attendance shows nobody came.` });
+    }
+  }
+
+  const now = new Date().toISOString();
+  let takenOff = 0;
+  if (!history) {
+    for (const p of db.trainingParticipants || []) {
+      if (p.trainingProgramId !== prog.id || p.status === "Cancelled" || p.status === "Archived") continue;
+      p.status = "Archived";
+      p.archivedWithSeminarAt = now;
+      takenOff++;
+    }
+  }
+  prog.archivedAt = now;
+  prog.archivedBy = req.user.fullName || req.user.username;
+  if (!history) prog.archivedBeforeUse = true;
+  const allocation = pesoText(Number(prog.allocatedBudget || 0));
+  const details = history
+    ? `Archived "${title}" (FY ${prog.fiscalYear}), finished: ${pesoText(Number(prog.usedBudget || 0))} spent; no figure changes.`
+    : `Archived "${title}" (FY ${prog.fiscalYear}) before it was used: ${allocation} back to Unallocated${takenOff ? `, ${takenOff} participant${takenOff === 1 ? "" : "s"} taken off it` : ""}.`;
+  logEvent(req.user.id, req.user.username, req.user.role, "Archive Training Program", details);
   saveDB();
-  res.json({ status: "success", message: `"${title}" was deleted.` });
-});
+  res.json({ status: "success", data: prog, message: details });
+}));
+
+// Restoring an archived seminar puts it back on Programs & Budget in the active fiscal year. One
+// archived before use holds its allocation again, with the participants archived with it, so
+// that needs room in Unallocated; a finished one counts only what it spent, as before.
+app.post("/api/training/programs/:id/restore", authenticateToken, transactional((req: any, res: any) => {
+  if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER) {
+    return res.status(403).json({ status: "error", message: "Only HR or the Administrator can restore a seminar." });
+  }
+  const prog: TrainingProgram | undefined = (db.trainingPrograms || []).find((p: any) => p.id === req.params.id);
+  if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  const title = String(prog.title || "").trim();
+  if (!prog.archivedAt) return res.status(409).json({ status: "error", message: `"${title}" isn't archived.` });
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear);
+  if (!fy || fy.status !== "Active") {
+    return res.status(409).json({ status: "error", message: `"${title}" can't be restored: FY ${prog.fiscalYear} is closed.` });
+  }
+
+  // The participants archived with it come back, unless they now can't take it: archived, they
+  // no longer blocked a seminar with the same title, so they may be on one now (or have attended
+  // it), or they may no longer be active. Those are left off (their enrolment is cancelled, and
+  // kept on record) and named in the reply.
+  const archivedWith = (db.trainingParticipants || []).filter((p: any) =>
+    p.trainingProgramId === prog.id && p.status === "Archived" && p.archivedWithSeminarAt);
+  const leftOff: string[] = [];
+  const back = archivedWith.filter((p: any) => {
+    const emp = (db.employees || []).find((e: any) => employeeIdForms(p.employeeId).includes(e.id));
+    const reason = !emp ? "no staff record"
+      : emp.isActive === false ? "no longer active"
+      : trainingEnrollmentBlock(p.employeeId, prog)?.reason;
+    if (reason) leftOff.push(`${emp?.fullName || p.employeeId} (${reason})`);
+    return !reason;
+  });
+  const backIds = new Set(back.map((p: any) => p.id));
+  const enrolments = participantsForBudget();
+  // What the year's seminars take now (one archived before use takes nothing; a finished one
+  // its spending), and what this one takes once restored with its participants.
+  const before = prog.archivedBeforeUse ? 0 : seminarBudget(prog, enrolments).committed;
+  const after = seminarBudget({ ...prog, archivedAt: undefined },
+    enrolments.map((p: any) => backIds.has(p.id) ? { ...p, status: "Assigned" } : p)).committed;
+  const increase = round2(Math.max(0, after - before));
+  if (increase > 0) {
+    const usage = computeTrainingUsage(fy.id);
+    if (round2(usage.committed + increase) > round2(usage.totalBudget)) {
+      return res.status(409).json({
+        status: "error",
+        message: `Restoring "${title}" holds ${pesoText(increase)} again, but only ${pesoText(Math.max(0, usage.remaining))} of the FY ${fy.label} training budget is Unallocated. Lower another seminar's allocation first.`
+      });
+    }
+  }
+
+  for (const p of archivedWith) {
+    p.status = backIds.has(p.id) ? "Assigned" : "Cancelled";
+    delete p.archivedWithSeminarAt;
+  }
+  delete prog.archivedAt;
+  delete prog.archivedBy;
+  delete prog.archivedBeforeUse;
+  const details = `Restored "${title}" (FY ${prog.fiscalYear})${increase > 0 ? `: it holds ${pesoText(increase)} again` : ""}`
+    + `${back.length ? `, with ${back.length} participant${back.length === 1 ? "" : "s"} back on it` : ""}`
+    + `${leftOff.length ? `; left off: ${leftOff.join("; ")}` : ""}.`;
+  logEvent(req.user.id, req.user.username, req.user.role, "Restore Training Program", details);
+  saveDB();
+  res.json({ status: "success", data: prog, message: details });
+}));
 
 // POST /api/training/participants/:id/approve_liquidation was retired: it marked any
 // enrolment Liquidated with no report and no attendance, and charged the allowance (not
@@ -7539,6 +7714,9 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   }
   const prog = (db.trainingPrograms || []).find((p: any) => p.id === participant.trainingProgramId);
   if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  if (prog.archivedAt) {
+    return res.status(409).json({ status: "error", message: `"${prog.title}" is archived. Restore it before changing attendance.` });
+  }
   const start = isIsoDate(prog.startDate) ? String(prog.startDate).slice(0, 10) : "";
   if (!start || start > manilaToday()) {
     return res.status(400).json({ status: "error", message: `Attendance can be recorded once the seminar starts${start ? ` on ${start}` : ""}.` });
@@ -7756,6 +7934,9 @@ app.post("/api/training/liquidations", authenticateToken, (req: any, res: any) =
 
   const prog = db.trainingPrograms.find(p => p.id === trainingProgramId);
   if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
+  if (prog.archivedAt) {
+    return res.status(409).json({ status: "error", message: `"${prog.title}" is archived. Restore it before recording an expense.` });
+  }
 
   if (!isFinite(amt) || amt <= 0) {
     return res.status(400).json({ status: "error", message: "Please enter a valid expense amount greater than zero." });

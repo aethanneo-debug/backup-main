@@ -25,10 +25,24 @@ interface Props {
 
 const BADGE = "px-1.5 py-0.5 rounded border text-[10px] font-semibold whitespace-nowrap";
 
-function CandidateBadges({ c }: { c: TrainingCandidate }) {
+// `selected`: they are already on this seminar's list, and the server counts only their other
+// trainings, so this seminar would be their first of the year, or one more.
+function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; selected?: boolean }) {
+  // Their other trainings this fiscal year: at least one each year, so none yet is worth seeing.
+  const thisYear = c.trainingsThisYear ?? [];
   return (
     <span className="flex flex-wrap gap-1">
       {!c.eligible && <span className={`${BADGE} bg-rose-50 text-rose-700 border-rose-200`}>{c.ineligibleReason}</span>}
+      {c.eligible && thisYear.length === 0 && (
+        <span className={`${BADGE} bg-blue-50 text-blue-700 border-blue-200`}>{selected ? "First training this FY" : "No training yet this FY"}</span>
+      )}
+      {thisYear.length > 0 && (
+        <span className={`${BADGE} bg-slate-50 text-slate-700 border-slate-200`} title={`This fiscal year: ${thisYear.join("; ")}`}>
+          {thisYear.length} {selected ? "other " : ""}training{thisYear.length === 1 ? "" : "s"} this FY
+          {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
+          <span className="sr-only">: {thisYear.join("; ")}</span>
+        </span>
+      )}
       {c.needsThis && (
         <span className={`${BADGE} bg-emerald-50 text-emerald-800 border-emerald-300`} title={`Listed in their plan: ${c.needMatches.join("; ")}`}>
           Needs this
@@ -39,7 +53,6 @@ function CandidateBadges({ c }: { c: TrainingCandidate }) {
           New hire{c.monthsSinceHire !== null ? ` · ${c.monthsSinceHire < 1 ? "<1" : c.monthsSinceHire} mo` : ""}
         </span>
       )}
-      {c.priority === 2 && <span className={`${BADGE} bg-blue-50 text-blue-700 border-blue-200`}>No TDP history yet</span>}
       {c.matchesTarget && <span className={`${BADGE} bg-slate-50 text-slate-700 border-slate-200`}>Target match</span>}
     </span>
   );
@@ -49,6 +62,8 @@ function optionLabel(c: TrainingCandidate) {
   const extras = [c.division || "No division"];
   if (c.needsThis) extras.push("listed in their plan");
   if (c.priority === 1 && c.monthsSinceHire !== null) extras.push(`hired ${c.monthsSinceHire < 1 ? "this month" : `${c.monthsSinceHire} mo ago`}`);
+  const trained = (c.trainingsThisYear ?? []).length;
+  extras.push(trained === 0 ? "no training yet this FY" : `${trained} training${trained === 1 ? "" : "s"} this FY`);
   if (c.matchesTarget) extras.push("target match");
   return `${c.fullName} — ${extras.join(" · ")}`;
 }
@@ -94,11 +109,12 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
   const byId = useMemo(() => new Map((candidates ?? []).map(c => [c.employeeId, c])), [candidates]);
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId));
   const recommended = available.slice(0, freeSlots);
+  // At least one training per year per employee: those with none yet in the seminar's fiscal year
+  // come first. Each group keeps the server's order (Plan A listers, then new hires, first).
+  const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
   const groups: { label: string; items: TrainingCandidate[] }[] = [
-    { label: "Listed in their plan (Plan A)", items: available.filter(c => c.needsThis) },
-    { label: "Priority 1 — New hires", items: available.filter(c => !c.needsThis && c.priority === 1) },
-    { label: "Priority 2 — Never attended a TDP seminar", items: available.filter(c => !c.needsThis && c.priority === 2) },
-    { label: "Other eligible employees", items: available.filter(c => !c.needsThis && c.priority === 3) },
+    { label: `No training yet in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length === 0) },
+    { label: `Already has a training in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length > 0) },
     { label: "Not eligible", items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId)) }
   ];
 
@@ -129,8 +145,10 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
           <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-3 rounded-lg flex gap-2">
             <Sparkles size={16} className="shrink-0 mt-0.5" />
             <p>
-              Employees whose <strong>Plan A</strong> lists this training come first, then <strong>new hires</strong>, then those who have <strong>never attended a TDP seminar</strong>.
-              Employees who already attended this seminar, or already have a seminar this fiscal year, can't be selected.
+              Every employee should have <strong>at least one training a year</strong>, so those with <strong>no training yet in {fyText}</strong> come first
+              (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t). Within each group, employees whose <strong>Plan A</strong> lists
+              this training come first, then <strong>new hires</strong>. Employees may join more than one seminar a year; only those who already
+              attended this seminar can&rsquo;t be selected.
             </p>
           </div>
 
@@ -228,7 +246,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
                     <li key={id} className="flex items-center justify-between gap-3 p-2 rounded-lg border border-blue-200 bg-blue-50/60">
                       <div className="min-w-0 space-y-1">
                         <p className="text-sm font-medium text-slate-800 truncate">{c ? c.fullName : id}</p>
-                        {c && <CandidateBadges c={c} />}
+                        {c && <CandidateBadges c={c} selected />}
                       </div>
                       <button onClick={() => remove(id)} aria-label={`Remove ${c ? c.fullName : id}`} className="shrink-0 text-slate-400 hover:text-rose-600">
                         <X size={16} />

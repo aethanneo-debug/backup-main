@@ -3,7 +3,7 @@ import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpe
 import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, formatCurrency } from "../utils";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
-import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck } from "lucide-react";
+import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck, Archive } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import AttendanceModal from "./training/AttendanceModal";
 import NeedCoverageModal from "./training/NeedCoverageModal";
@@ -11,6 +11,12 @@ import PlanNeedPicker, { PlanFill, PlanFillNote, eligibleListers } from "./train
 import TrainingNeedsPlanA from "./training/TrainingNeedsPlanA";
 import TrainingMonitoringPlanD from "./training/TrainingMonitoringPlanD";
 import TrainingEvaluationsDesk from "./training/evaluation/TrainingEvaluationsDesk";
+import TrainingCoveragePanel from "./training/TrainingCoveragePanel";
+import ArchivedSeminars from "./training/ArchivedSeminars";
+
+// Whether an enrolment is on a seminar's roster: not one archived with it (an unused seminar
+// archived) or cancelled (left off when one was restored). Those stay on record but take no seat.
+const onRoster = (part: { status?: string }) => part.status !== "Cancelled" && part.status !== "Archived";
 
 // The four steps of the cycle, in the order the office works through them.
 const TAB_BLURB: Record<string, string> = {
@@ -157,10 +163,17 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   const activeCarryOver = activeTb?.carryOverBudget || 0;
   const activeNewAnnual = activeTb?.newAnnualBudget !== undefined ? activeTb.newAnnualBudget : (activeBudget - activeCarryOver);
 
-  const activePrograms = programs.filter(p => p.fiscalYear === (activeFy?.label || "2026"));
-  
+  // The fiscal year's seminars: the ones in the table, and the archived ones (the user,
+  // 2026-10-23: archive instead of delete), listed under Archived Seminars. A finished one
+  // archived still counts what it spent; one archived before use counts nothing, as the server
+  // reckons them (computeTrainingUsage).
+  const fyPrograms = programs.filter(p => p.fiscalYear === (activeFy?.label || "2026"));
+  const activePrograms = fyPrograms.filter(p => !p.archivedAt);
+  const archivedPrograms = fyPrograms.filter(p => p.archivedAt);
+  const archivedCounted = archivedPrograms.filter(p => !p.archivedBeforeUse);
+
   // Calculate total allocated
-  const existingAllocated = activePrograms.reduce((sum, p) => sum + Number(p.allocatedBudget), 0);
+  const existingAllocated = [...activePrograms, ...archivedCounted].reduce((sum, p) => sum + Number(p.allocatedBudget), 0);
   
   // Add new rows allocated budget + editing rows changes
   let draftTotalAllocated = existingAllocated;
@@ -186,12 +199,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   };
   // The seats a draft will save, as the server reads them (a share is allocation ÷ seats).
   const draftSeats = (row: any) => parseInt(String(row?.maxParticipants)) || 1;
-  const savedCommitted = activePrograms.reduce((sum, p) => sum + seminarCommitment(p, participants), 0);
+  const archivedCommitted = archivedCounted.reduce((sum, p) => sum + seminarCommitment(p, participants), 0);
+  const savedCommitted = activePrograms.reduce((sum, p) => sum + seminarCommitment(p, participants), 0) + archivedCommitted;
   const draftCommitted =
     activePrograms.reduce((sum, p) => sum + (editingRows[p.id]
       ? commitmentAfterEdit(p, participants, Number(editingRows[p.id].allocatedBudget || 0), draftAddsParticipants(p.id), draftSeats(editingRows[p.id]))
       : seminarCommitment(p, participants)
     ), 0) +
+    archivedCommitted +
     newRows.reduce((sum, nr) => sum + Number(nr.allocatedBudget || 0), 0);
   const remainingAnnualBudget = Math.round((activeBudget - draftCommitted) * 100) / 100;
 
@@ -339,24 +354,55 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     }
   };
 
-  const handleDeleteProgram = async (id: string, isNew: boolean) => {
-    if (isNew) {
-      setNewRows(prev => prev.filter(r => r.id !== id));
-      return;
-    }
-    if (!confirm("Are you sure you want to delete this training program?")) return;
+  // Only a row that was never saved can be deleted: it exists only on this screen. A saved
+  // seminar is archived instead (the user, 2026-10-23), and the server refuses to delete one.
+  const handleDiscardRow = (id: string) => {
+    setNewRows(prev => prev.filter(r => r.id !== id));
+  };
 
+  // Archive and Restore. The server decides what is allowed and says why when it isn't (work in
+  // progress, a closed year, no room to restore); apiCall throws with that reason.
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
+  const handleArchiveProgram = async (p: TrainingProgram) => {
+    const title = String(p.title || "").trim() || "this seminar";
+    if (!confirm(
+      `Archive "${title}"?\n\nIt moves to Archived Seminars below, where you can restore it. Nothing is erased.\n\n` +
+      `• If nothing has happened to it yet, its participants are taken off it and its allocation returns to Unallocated.\n` +
+      `• If it is finished, its records and figures stay as they are.`
+    )) return;
+    setArchiveBusyId(p.id);
     try {
-      const res = await apiCall(`/api/training/programs/${id}`, { method: "DELETE" });
-      if (res.status === "success") {
-        fetchData();
-        triggerRefresh();
-      } else {
-        alert("Error: " + res.message);
-      }
+      await apiCall(`/api/training/programs/${encodeURIComponent(p.id)}/archive`, { method: "POST" });
+      triggerRefresh();
+      // Show where it went once the fresh list is in (before it, the row is still in the table):
+      // Archived Seminars opens on it, outlined.
+      await fetchData().catch(() => undefined);
+      setShownSeminar({ id: p.id, key: Date.now() });
     } catch (err: any) {
-      // apiCall throws on a refusal with the server's reason, e.g. a seminar with history.
-      alert(err?.message || "The seminar could not be deleted.");
+      alert(err?.message || "The seminar could not be archived.");
+    } finally {
+      setArchiveBusyId(null);
+    }
+  };
+  const handleRestoreProgram = async (p: TrainingProgram) => {
+    const title = String(p.title || "").trim() || "this seminar";
+    // Only one archived before use takes money back; a finished one counts only what it spent.
+    const effect = p.archivedBeforeUse
+      ? `It holds its allocation (${formatCurrency(Number(p.allocatedBudget || 0))}) again, and the participants taken off it are back on it (unless they now can't take it).`
+      : "Its records and figures stay as they are: it still counts only what it spent.";
+    if (!confirm(`Restore "${title}" to Training Programs?\n\n${effect}`)) return;
+    setArchiveBusyId(p.id);
+    try {
+      const res = await apiCall(`/api/training/programs/${encodeURIComponent(p.id)}/restore`, { method: "POST" });
+      triggerRefresh();
+      await fetchData().catch(() => undefined);
+      setShownSeminar({ id: p.id, key: Date.now() });
+      // Anyone left off (now on a seminar with the same title, or no longer active) is named.
+      if (typeof res?.message === "string" && res.message.includes("left off:")) alert(res.message);
+    } catch (err: any) {
+      alert(err?.message || "The seminar could not be restored.");
+    } finally {
+      setArchiveBusyId(null);
     }
   };
 
@@ -365,7 +411,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       ...editingRows,
       [p.id]: {
         ...p,
-        participantIds: participants.filter(part => part.trainingProgramId === p.id).map(part => part.employeeId)
+        participantIds: participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).map(part => part.employeeId)
       }
     });
   };
@@ -560,7 +606,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     const row = isEditing ? (isNew ? p : editingRows[p.id]) : p;
     
     // For participants, if viewing, we show count. If editing, we show a button.
-    const partsCount = isEditing ? (row.participantIds ? row.participantIds.length : 0) : participants.filter(part => part.trainingProgramId === p.id).length;
+    const partsCount = isEditing ? (row.participantIds ? row.participantIds.length : 0) : participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).length;
     // A row added from the plan while its participants are being looked up (handleAddFromPlan).
     const filling = isNew && row.planFill === "loading";
 
@@ -628,8 +674,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           )}
         </td>
 
-        {/* 3. Who attends, ranked by the plan needs. The target division and specialization
-            steer the recommendations and auto-enrolment, so they sit with the participants. */}
+        {/* 3. Who attends, ranked by the plan needs. The target division and specialization are
+            no longer edited here (the user, 2026-10-23); a seminar's stored ones still steer the
+            recommendations and auto-enrolment, and a save sends them back unchanged. */}
         <td className="p-2 border-r border-slate-100 min-w-[180px]">
            {isEditing ? (
              <div className="flex flex-col gap-1.5 items-start">
@@ -642,16 +689,6 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                  <Users size={12} /> {partsCount} Selected
                </button>
                <PlanFillNote status={isNew ? row.planFill : undefined} selected={partsCount} />
-               <div className="w-full space-y-1 border-t border-slate-200 pt-2">
-                 <select value={row.targetDivision || ""} onChange={e => updateRow(p.id, "targetDivision", e.target.value, isNew)} className={`${CELL_INPUT} text-slate-600`} aria-label="Target division">
-                   <option value="">-- No Target Division --</option>
-                   <option value="Administrative and Finance Division">Administrative and Finance Division</option>
-                   <option value="Legal Division">Legal Division</option>
-                   <option value="Adjudication Division">Adjudication Division</option>
-                   <option value="Technical Division">Technical Division</option>
-                 </select>
-                 <input type="text" value={row.targetSpecialization || ""} onChange={e => updateRow(p.id, "targetSpecialization", e.target.value, isNew)} className={`${CELL_INPUT} text-slate-600`} placeholder="Target Specialization..." aria-label="Target specialization" />
-               </div>
              </div>
            ) : (
              <div className="text-slate-600">
@@ -663,9 +700,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                    </span>
                  )}
                </div>
-               {participants.filter(part => part.trainingProgramId === p.id).length > 0 && (
+               {participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).length > 0 && (
                  <div className="flex flex-wrap gap-1 mt-1">
-                   {participants.filter(part => part.trainingProgramId === p.id).map(part => {
+                   {participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).map(part => {
                      const emp = employees.find(e => e.id === part.employeeId);
                      // Colour shows attendance: emerald attended, rose did not, blue not yet recorded.
                      const chip = part.attendance === "Attended" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
@@ -679,28 +716,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                    })}
                  </div>
                )}
-               {(p.targetDivision || p.targetSpecialization) && (
-                 <div className="mt-1.5 flex flex-col gap-1">
-                   {p.targetDivision && (
-                     <span className="text-[10px] text-slate-500 font-medium">Div: {p.targetDivision}</span>
-                   )}
-                   {p.targetSpecialization && (
-                     <span className="text-[10px] text-slate-500 font-medium">Spec: {p.targetSpecialization}</span>
-                   )}
-                 </div>
-               )}
              </div>
            )}
         </td>
 
-        {/* 4. Description, 5. Allocated Budget, 6. Facilitator, 7. Actions. */}
-        <td className="p-2 border-r border-slate-100 min-w-[180px]">
-          {isEditing ? (
-            <input type="text" value={row.description} onChange={e => updateRow(p.id, "description", e.target.value, isNew)} className={CELL_INPUT} placeholder="Description" aria-label="Description" />
-          ) : (
-            <div className="text-slate-600 truncate max-w-[200px]">{p.description}</div>
-          )}
-        </td>
+        {/* 4. Allocated Budget, 5. Facilitator, 6. Actions. (The Description column was removed on
+            2026-10-23; a save still sends a seminar's stored description back unchanged.) */}
         <td className="p-2 border-r border-slate-100">
           {isEditing ? (
             <input type="number" value={row.allocatedBudget} onChange={e => updateRow(p.id, "allocatedBudget", e.target.value, isNew)} className={CELL_INPUT} placeholder="0.00" aria-label="Allocated budget" />
@@ -768,9 +789,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
               <button onClick={() => handleSaveRow(p.id, isNew)} disabled={filling} className="p-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50" title="Save">
                 <Save size={14} />
               </button>
-              <button onClick={() => handleDeleteProgram(p.id, isNew)} className="p-1.5 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100" title={isNew ? "Discard" : "Delete"}>
-                <Trash2 size={14} />
-              </button>
+              {/* Only a row that was never saved can be deleted (discarded). */}
+              {isNew && (
+                <button onClick={() => handleDiscardRow(p.id)} className="p-1.5 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100" title="Discard" aria-label="Discard this unsaved row">
+                  <Trash2 size={14} />
+                </button>
+              )}
               {!isNew && (
                 <button onClick={() => {
                   const updated = { ...editingRows };
@@ -795,8 +819,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
               <button onClick={() => openBreakdownModal(p)} className="p-1.5 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100" title="Liquidation Breakdown">
                 <PieChart size={16} />
               </button>
-              <button onClick={() => handleDeleteProgram(p.id, false)} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100" title="Delete">
-                <Trash2 size={16} />
+              <button
+                onClick={() => handleArchiveProgram(p)}
+                disabled={archiveBusyId === p.id}
+                className="p-1.5 text-slate-700 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 disabled:cursor-wait disabled:opacity-50"
+                title="Archive"
+                aria-label={`Archive ${String(p.title || "").trim()}`}
+              >
+                <Archive size={14} />
               </button>
             </div>
           )}
@@ -923,6 +953,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         </div>
       </div>
 
+      {/* At least one training per year per employee: who has one this fiscal year, and who
+          still needs a seat. HR and the Administrator only (server-side, like the plan). */}
+      {[UserRole.SUPER_ADMIN, UserRole.HR_OFFICER].includes(user.role) && (
+        <TrainingCoveragePanel fiscalYear={activeFy?.label || ""} reloadToken={participants} />
+      )}
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <div className="flex flex-wrap justify-between items-center gap-3 pb-3 mb-3 border-b border-slate-200">
           <div>
@@ -939,7 +975,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         {[UserRole.SUPER_ADMIN, UserRole.HR_OFFICER].includes(user.role) && (
           <PlanNeedPicker
             fiscalYear={fyLabel}
-            seminars={activePrograms}
+            // A finished seminar still covered its need this year, archived or not; one archived
+            // before use never ran.
+            seminars={fyPrograms.filter(p => !p.archivedBeforeUse)}
             onPick={handleAddFromPlan}
             onOpenPlan={() => setActiveTab("plan-a")}
           />
@@ -953,7 +991,6 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                 <th scope="col" className="p-2 border-r border-slate-700">Plan Title</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Date &amp; Time</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Participants</th>
-                <th scope="col" className="p-2 border-r border-slate-700">Description</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Allocated Budget</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Facilitator</th>
                 <th scope="col" className="p-2 w-24">Actions</th>
@@ -963,7 +1000,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
               {newRows.map(nr => renderRow(nr, true))}
               {activePrograms.length === 0 && newRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                  <td colSpan={6} className="p-8 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <BookOpen size={48} className="text-slate-300 mb-4" />
                       <p>No training programs found for this fiscal year.</p>
@@ -977,6 +1014,19 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           </table>
         </div>
       </div>
+      {/* Seminars archived instead of deleted (2026-10-23), with Restore. Shown only when there are some. */}
+      <ArchivedSeminars
+        fiscalYear={fyLabel}
+        seminars={archivedPrograms}
+        participants={participants}
+        canRestore={[UserRole.SUPER_ADMIN, UserRole.HR_OFFICER].includes(user.role)}
+        busyId={archiveBusyId}
+        onRestore={handleRestoreProgram}
+        // A seminar just archived, or one a notice points at, opens the list on it (its row is
+        // then outlined by useRecordHighlight).
+        revealId={shownSeminar?.id}
+        revealKey={shownSeminar?.key}
+      />
       <div className="flex justify-end">
         <button onClick={() => setActiveTab("plan-d")} className="text-xs font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1.5">
           Next: see what has been accomplished <ChevronRight size={14} />
@@ -987,7 +1037,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       {attendanceProgram && (
         <AttendanceModal
           program={attendanceProgram}
-          participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id)}
+          participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id && onRoster(part))}
           employees={employees}
           canRecord={user.role === UserRole.HR_OFFICER}
           currentEmployeeId={user.employeeId}

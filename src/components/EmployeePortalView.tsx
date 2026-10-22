@@ -1558,7 +1558,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                       ) : (
                         <h3 className="text-xs font-bold text-slate-800">{act.title}</h3>
                       )}
-                      <p className="text-[11px] text-slate-500 mt-1">"{act.description}"</p>
+                      <p className="text-[11px] text-slate-500 mt-1">{act.description}</p>
                       {act.type === "training" && !act.canLiquidate && act.liquidationBlockedReason && act.participantStatus !== "Liquidated" && (
                         <p className="text-[10px] text-slate-500 italic mt-1">{act.liquidationBlockedReason}</p>
                       )}

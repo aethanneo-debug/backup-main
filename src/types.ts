@@ -965,6 +965,14 @@ export interface TrainingProgram {
   // same need later is still recognised.
   fulfillsNeedTitles?: string[];
   createdAt: string;
+  // Archived instead of deleted (the user, 2026-10-23: only an unsaved draft can be deleted).
+  // It leaves Programs & Budget for its Archived Seminars list and counts only what it spent
+  // (src/trainingBudget.ts). Restoring clears all three.
+  archivedAt?: string;
+  archivedBy?: string;
+  // Archived with nothing on record: its allocation went back to Unallocated in full, its
+  // participants were taken off it, and the year's figures leave it out, as a deleted one.
+  archivedBeforeUse?: boolean;
 }
 
 // One row of GET /api/training/recommendations — an employee scored for a seminar.
@@ -974,18 +982,39 @@ export interface TrainingCandidate {
   position: string;
   division: string;
   dateHired: string;
-  // 1 = new hire, 2 = never attended a TDP seminar, 3 = everyone else
+  // 1 = new hire, 2 = no training yet in the seminar's fiscal year, 3 = already has one
+  // (at least one training per year per employee, src/trainingCoverage.ts)
   priority: 1 | 2 | 3;
   priorityLabel: string;
   monthsSinceHire: number | null;
-  hasTdpHistory: boolean;
   matchesTarget: boolean;
   // This seminar covers something their Plan A actually lists — the strongest
-  // reason to give them a seat, so it outranks the new-hire preference.
+  // reason to give them a seat after having no training yet this year.
   needsThis: boolean;
   needMatches: string[];
+  /** Their other trainings that count toward the seminar's fiscal year (seminars and
+   * HR-recorded trainings), by title. Empty: none yet, so they are offered first. */
+  trainingsThisYear: string[];
   eligible: boolean;
   ineligibleReason?: string;
+}
+
+/** One active employee with no training yet in the fiscal year (Programs & Budget's coverage). */
+export interface TrainingCoverageEntry {
+  id: string;
+  employeeId: string;
+  fullName: string;
+  position: string;
+  division: string;
+}
+
+/** GET /api/training/coverage: how many active employees have at least one training in the
+ * fiscal year, and who doesn't yet (src/trainingCoverage.ts). */
+export interface TrainingCoverage {
+  fiscalYear: string;
+  total: number;
+  covered: number;
+  withoutTraining: TrainingCoverageEntry[];
 }
 
 export interface TrainingBudgetSplit {
@@ -1009,6 +1038,9 @@ export interface TrainingParticipant {
   attendance?: AttendanceStatus;
   attendanceBy?: string;   // full name of the HR officer who recorded it
   attendanceAt?: string;   // ISO timestamp
+  // Set when the enrolment was archived with its seminar (status "Archived"); restoring the
+  // seminar puts it back to "Assigned".
+  archivedWithSeminarAt?: string;
 }
 
 // --- OFFICIAL TRAINING & DEVELOPMENT PLAN (Plan A / Plan D) ---

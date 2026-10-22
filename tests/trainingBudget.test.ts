@@ -259,3 +259,34 @@ describe("per person (the seminar budget flow): a validated attendee's leftover 
     assert.ok(tried > 500000, `${tried} changes tried`);
   });
 });
+
+describe("archived seminars (the user, 2026-10-23: archive instead of delete)", () => {
+  test("an unused seminar archived holds nothing: its whole allocation returns, as deleting it did", () => {
+    const planned = { ...prog, archivedAt: "2026-10-23T01:00:00.000Z" };
+    assert.deepEqual(pick(seminarBudget(prog, [])), ["planning", 2500, 0, 0, 10000, 0], "before: still being planned, the whole allocation is held");
+    assert.deepEqual(pick(seminarBudget(planned, [])), ["planning", 2500, 0, 0, 0, 10000], "archived: ₱0 held, ₱10,000 back");
+    // Its participants are archived with it, so they drop out of the roster too.
+    const taken = [enrol("A", { status: "Archived" }), enrol("B", { status: "Archived" })];
+    assert.equal(seminarCommitment(planned, taken), 0, "with its participants archived with it");
+    assert.equal(isSeminarSettled(planned, taken), true, "an archived seminar is closed");
+  });
+
+  test("a finished seminar archived moves no figure", () => {
+    const parts = [enrol("A", { attendance: "Attended", status: "Liquidated", settledSpent: 2800 }), enrol("B", { attendance: "Did not attend" })];
+    const finished = { ...prog, usedBudget: 2800 };
+    const before = seminarBudget(finished, parts);
+    const after = seminarBudget({ ...finished, archivedAt: "2026-10-23T01:00:00.000Z" }, parts);
+    assert.deepEqual([before.stage, before.committed, before.returned], ["settled", 2800, 7200], "settled: counts its spending");
+    assert.deepEqual([after.committed, after.returned, after.released], [2800, 7200, 0], "archived: the same");
+  });
+
+  test("an archived seminar still counts cash that is out, and restoring it holds the allocation again", () => {
+    const parts = [enrol("A", { attendance: "Did not attend", advanceOutstanding: 2500 })];
+    const archived = { ...prog, archivedAt: "2026-10-23T01:00:00.000Z" };
+    assert.equal(seminarCommitment(archived, parts), 2500, "the cash still out stays held (the server refuses to archive it anyway)");
+    const restored = { ...prog };
+    const planned = [enrol("A"), enrol("B")];
+    assert.equal(round2(seminarCommitment(restored, planned) - seminarCommitment({ ...prog, archivedAt: "x" }, [])), 10000,
+      "restoring an unused seminar (its participants back) needs its whole allocation of room");
+  });
+});
