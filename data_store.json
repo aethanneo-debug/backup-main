@@ -729,6 +729,69 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1792696548320-689",
+      "timestamp": "2026-10-22T19:15:48.320Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792696539122-779",
+      "timestamp": "2026-10-22T19:15:39.122Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792696345185-380",
+      "timestamp": "2026-10-22T19:12:25.185Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792695845831-547",
+      "timestamp": "2026-10-22T19:04:05.831Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792695219699-49",
+      "timestamp": "2026-10-22T18:53:39.699Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792688946584-494",
+      "timestamp": "2026-10-22T17:09:06.584Z",
+      "userId": "u-6",
+      "username": "employee",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792688896008-520",
+      "timestamp": "2026-10-22T17:08:16.008Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
       "id": "log-1792677360340-284",
       "timestamp": "2026-10-22T13:56:00.340Z",
       "userId": "u-3",
