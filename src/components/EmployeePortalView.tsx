@@ -1525,12 +1525,12 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           <div className="space-y-6">
             <div className="border-b border-slate-100 pb-4">
               <h1 className="text-base font-bold text-slate-800">My Assigned Activities</h1>
-              <p className="text-xs text-slate-400">Review official mediation hearings and administrative trips assigned to you for execution.</p>
+              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here, then file the liquidation report once you have attended.</p>
             </div>
 
             {activities.length === 0 ? (
               <div className="p-12 text-center text-slate-400 text-xs italic">
-                No active assigned travel activities registered in the database.
+                No seminars are assigned to you yet.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

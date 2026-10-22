@@ -12,6 +12,8 @@ import { matchWorkbookName } from "./src/server/xlsx/matchEmployeeName";
 import { seminarBudget, allocationIncrease, isSeminarSettled } from "./src/trainingBudget";
 import { centavos, pesos, sumPesos, liquidationBalance } from "./src/liquidationMoney";
 import { createTransactions } from "./src/server/jsonTransaction";
+import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
+import { cleanFileName, liquidationDocumentRows } from "./src/server/liquidationDocuments";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -82,7 +84,9 @@ import {
   CorrectionField,
   CorrectionItem,
   CorrectionRequest,
-  LiquidationDocument
+  LiquidationDocument,
+  LiquidationSubmission,
+  LiquidationSubmissionView
 } from "./src/types";
 
 const app = express();
@@ -2012,180 +2016,14 @@ app.get("/api/employees/:employeeId/history", authenticateToken, (req: any, res:
 
 
 // 3. Financial Document & Receipt Tracking Module
+// The ledger's write routes went with the Transactions Journal page on 2026-10-22. Liquidation
+// validation still books its TX-LIQ entry here, and Budget Monitoring's "Export Database" reads it,
+// so only Finance, the Budget Officer and the Administrator may read it (it was open to anyone).
 app.get("/api/financial-transactions", authenticateToken, (req: any, res: any) => {
+  if (![UserRole.SUPER_ADMIN, UserRole.FINANCE_OFFICER, UserRole.BUDGET_OFFICER].includes(req.user.role)) {
+    return res.status(403).json({ status: "error", message: "The financial ledger is for Finance, the Budget Officer and the Administrator." });
+  }
   res.json({ status: "success", data: db.financialTransactions });
-});
-
-app.post("/api/financial-transactions", authenticateToken, (req: any, res) => {
-  const data = req.body;
-
-  // Enforce Roles: Admin or Finance
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.FINANCE_OFFICER) {
-    return res.status(403).json({ status: "error", message: "Unauthorized to log financial receipts" });
-  }
-
-  const txnId = `TXN-2026-${Math.floor(100 + Math.random() * 900)}`;
-  const empRef = data.employeeRef || req.user.employeeId || "EMP003";
-  const dept = data.department || req.user.division || "Administrative and Finance Division";
-  const cat = data.category || "Other";
-
-  const newTxn: FinancialTransaction = {
-    id: `tx-${Date.now()}`,
-    transactionId: txnId,
-    transactionDate: data.transactionDate || new Date().toISOString().split("T")[0],
-    supplier: data.supplier,
-    amount: Number(data.amount),
-    description: data.description,
-    receiptFilename: data.receiptFilename || "receipt.png",
-    status: TransactionStatus.PENDING_VALIDATION,
-    supportingDocuments: data.supportingDocuments || [],
-    history: [{
-      id: `th-${Date.now()}`,
-      status: TransactionStatus.PENDING_VALIDATION,
-      changedBy: (req as any).user.fullName,
-      changedAt: new Date().toISOString(),
-      remarks: "Receipt submitted to registry ledger. Awaiting Finance verification."
-    }],
-    employeeRef: empRef,
-    department: dept,
-    category: cat,
-    createdBy: (req as any).user.fullName,
-    dateCreated: new Date().toISOString().split("T")[0]
-  };
-
-  db.financialTransactions.push(newTxn);
-  
-  // Create precise finance audit log trace
-  logFinanceAudit((req as any).user.fullName, "Transaction Creation", "Financial Transactions", "None", txnId);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Register Receipt", `Logged regional financial receipt ${newTxn.transactionId} matching PHP ${newTxn.amount} from ${newTxn.supplier}`);
-  saveDB();
-  res.json({ status: "success", data: newTxn });
-});
-
-// Update financial transactions workflow status index
-app.put("/api/financial-transactions/:id/status", authenticateToken, (req: any, res) => {
-  const { id } = req.params;
-  const { status, remarks } = req.body;
-
-  // Finance Officer or Super Admin validation
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.FINANCE_OFFICER) {
-    return res.status(403).json({ status: "error", message: "Only Finance Officers can validate journals" });
-  }
-
-  const txn = db.financialTransactions.find(t => t.id === id);
-  if (!txn) {
-    return res.status(404).json({ status: "error", message: "Financial entry ledger index not found" });
-  }
-
-  const oldStatus = txn.status;
-  txn.status = status as TransactionStatus;
-
-  txn.history.push({
-    id: `th-${Date.now()}`,
-    status: txn.status,
-    changedBy: (req as any).user.fullName,
-    changedAt: new Date().toISOString(),
-    remarks: remarks || `Workflow shift to: ${status}`
-  });
-
-  // Track budget utilization dynamically upon validating transactions
-  if (status === TransactionStatus.VALIDATED || status === TransactionStatus.LIQUIDATED) {
-    if (oldStatus !== TransactionStatus.VALIDATED && oldStatus !== TransactionStatus.LIQUIDATED) {
-      const deptBudget = db.budgetAllocations.find(b => b.department === txn.department);
-      if (deptBudget) {
-        deptBudget.budgetUtilized += txn.amount;
-        deptBudget.remainingBudget = deptBudget.budgetAllocation - deptBudget.budgetUtilized;
-        deptBudget.budgetPercentageUsed = Math.round((deptBudget.budgetUtilized / deptBudget.budgetAllocation) * 100);
-        logFinanceAudit((req as any).user.fullName, "Update Budget Utilization", "Budget Monitoring", `${deptBudget.budgetUtilized - txn.amount}`, `${deptBudget.budgetUtilized}`);
-      }
-    }
-  }
-
-  logFinanceAudit((req as any).user.fullName, "Transaction Status Shift", "Financial Transactions", oldStatus, status);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Validate Financial Record", `Upgraded ledger transaction ${txn.transactionId} status from ${oldStatus} to ${status}`);
-  saveDB();
-  res.json({ status: "success", data: txn });
-});
-
-// Attach general supporting document to transaction index
-app.post("/api/financial-transactions/:id/documents", authenticateToken, (req: any, res) => {
-  const { id } = req.params;
-  const { name, type, filename } = req.body;
-
-  const txn = db.financialTransactions.find(t => t.id === id);
-  if (!txn) {
-    return res.status(404).json({ status: "error", message: "Financial entry ledger index not found" });
-  }
-
-  const scanFile = filename || "scanned_doc.pdf";
-  const newDoc = {
-    id: `doc-${Date.now()}`,
-    name,
-    type,
-    filename: scanFile,
-    uploadedAt: new Date().toISOString(),
-    uploadedBy: (req as any).user.fullName,
-    validationStatus: "Validated",
-    versions: [
-      { version: 1, filename: scanFile, uploadedAt: new Date().toISOString(), uploadedBy: (req as any).user.fullName }
-    ]
-  };
-
-  txn.supportingDocuments.push(newDoc as any);
-  
-  logFinanceAudit((req as any).user.fullName, "Receipt Upload", "Supporting Documents", "None", name);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Upload Support Doc", `Attached supporting document: "${name}" (${type}) to transaction ledger ${txn.transactionId}`);
-  saveDB();
-  res.json({ status: "success", data: txn });
-});
-
-// Replace/update version of a supporting document
-app.post("/api/financial-transactions/:id/documents/:docId/replace", authenticateToken, (req: any, res) => {
-  const { id, docId } = req.params;
-  const { filename } = req.body;
-
-  const txn = db.financialTransactions.find(t => t.id === id);
-  if (!txn) {
-    return res.status(404).json({ status: "error", message: "Financial entry ledger index not found" });
-  }
-
-  const doc = txn.supportingDocuments.find(d => d.id === docId);
-  if (!doc) {
-    return res.status(404).json({ status: "error", message: "Supporting document not found in this transaction" });
-  }
-
-  if (!doc.versions) {
-    doc.versions = [];
-  }
-  if (doc.versions.length === 0) {
-    doc.versions.push({
-      version: 1,
-      filename: doc.filename,
-      uploadedAt: doc.uploadedAt,
-      uploadedBy: doc.uploadedBy || "Staff uploader"
-    });
-  }
-
-  const nextVersionNum = doc.versions.length + 1;
-  const safeFilename = filename || `updated_v${nextVersionNum}_${doc.filename}`;
-
-  doc.versions.push({
-    version: nextVersionNum,
-    filename: safeFilename,
-    uploadedAt: new Date().toISOString(),
-    uploadedBy: (req as any).user.fullName
-  });
-
-  const oldFilename = doc.filename;
-  doc.filename = safeFilename;
-  doc.uploadedAt = new Date().toISOString();
-  doc.uploadedBy = (req as any).user.fullName;
-
-  logFinanceAudit((req as any).user.fullName, "Document Replaced", "Supporting Documents", oldFilename, safeFilename);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Replace Support Doc", `Replaced file for "${doc.name}" on ${txn.transactionId} from ${oldFilename} to ${safeFilename}`);
-  saveDB();
-
-  res.json({ status: "success", data: txn });
 });
 
 // --- NEW LIQUIDATION WORKFLOW ENDPOINTS (READ-ONLY MONITORING FOR LEGACY CONTEXT) ---
@@ -2227,9 +2065,8 @@ app.post("/api/pds", authenticateToken, (req: any, res) => {
 });
 
 // --- SHARED BUDGET DEDUCTION ---
-// Single source of truth for how a spend is applied to a budget bucket. Used by
-// both the automatic deduction on liquidation completion and the manual
-// "Establish Integration Link" fallback, so the two can never drift apart.
+// How a spend is applied to a budget bucket, by the automatic deduction when Finance validates
+// a liquidation.
 function applyBudgetDeduction(budget: any, spentAmount: number) {
   budget.budgetUtilized = Number(budget.budgetUtilized || 0) + Number(spentAmount || 0);
   const base = Number(budget.budgetAllocation || 0) + Number(budget.carryOver || 0);
@@ -2237,8 +2074,8 @@ function applyBudgetDeduction(budget: any, spentAmount: number) {
   budget.budgetPercentageUsed = base > 0 ? Math.round((budget.budgetUtilized / base) * 100) : 0;
 }
 
-// A liquidation is deducted exactly once. Both paths record an activityBudgetLink,
-// so the presence of a link is the idempotency marker regardless of which ran.
+// A liquidation is deducted exactly once. Each deduction records an activityBudgetLink, so a
+// link marks it as done; older links include the manual ones made before 2026-10-22.
 function isAlreadyDeducted(liquidationNo: string): boolean {
   return (db.activityBudgetLinks || []).some((l: any) => l.liquidationNo === liquidationNo);
 }
@@ -2280,7 +2117,7 @@ function autoDeductLiquidation(sub: any, actor: { id: string; username: string; 
   if (!bucket) {
     notify({ role: UserRole.BUDGET_OFFICER }, {
       title: "Budget Auto-Deduction Skipped",
-      message: `Liquidation ${sub.submissionNo} (${category}, ₱${spent.toLocaleString()}) has no matching ${department} budget bucket for ${activeFy.label}. Please link it manually.`,
+      message: `Liquidation ${sub.submissionNo} (${category}, ₱${spent.toLocaleString()}) has no matching ${department} budget bucket for ${activeFy.label}, so its spending was not deducted from a division budget.`,
       type: "warning",
       link: { tab: "budget" }
     });
@@ -2307,55 +2144,6 @@ function autoDeductLiquidation(sub: any, actor: { id: string; username: string; 
 
   return bucket;
 }
-
-// --- DYNAMIC PERMANENT ACTIVITY-BUDGET LINKING ENDPOINTS ---
-app.get("/api/finance/activity-budget-links", authenticateToken, (req: any, res: any) => {
-  res.json({ status: "success", data: db.activityBudgetLinks || [] });
-});
-
-app.post("/api/finance/activity-budget-links", authenticateToken, (req: any, res) => {
-  const { liquidationNo, employee, department, amount, budgetId } = req.body;
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.BUDGET_OFFICER && (req as any).user.role !== UserRole.FINANCE_OFFICER) {
-    return res.status(403).json({ status: "error", message: "Only Budget or Finance Officers can map activities to budgets." });
-  }
-
-  // A liquidation may only be deducted once, whether automatically on completion
-  // or manually here. This keeps the manual fallback available for edge cases
-  // without letting it double-count an already-deducted spend.
-  if (isAlreadyDeducted(liquidationNo)) {
-    return res.status(400).json({ status: "error", message: `Liquidation ${liquidationNo} has already been deducted from a budget bucket.` });
-  }
-
-  const sub = db.liquidationSubmissions?.find((s: any) => s.submissionNo === liquidationNo);
-
-  const newLink = {
-    id: `bl-${Date.now()}`,
-    liquidationNo,
-    employee,
-    department,
-    amount: Number(amount),
-    budgetId,
-    category: sub ? resolveSpendingCategory(sub) : undefined,
-    source: "manual",
-    timestamp: new Date().toISOString()
-  };
-
-  if (!db.activityBudgetLinks) db.activityBudgetLinks = [];
-  db.activityBudgetLinks.unshift(newLink);
-
-  // Add actual spent amount to utilized budget when Integration Link is established
-  const budget = db.budgetAllocations.find((b: any) => b.id === budgetId);
-  if (budget) {
-    const spentAmount = sub ? Number(sub.totalSpent || 0) : Number(amount || 0);
-    applyBudgetDeduction(budget, spentAmount);
-  }
-
-  logFinanceAudit((req as any).user.fullName, "Map Activity To Budget", "Budget Linking", "None", `${liquidationNo} linked to ${budgetId}`);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Map Activity Budget", `Linked activity ${liquidationNo} to budget total`);
-  saveDB();
-
-  res.json({ status: "success", data: newLink });
-});
 
 // --- NEW BUDGET MANAGEMENT ENDPOINTS ---
 app.get("/api/finance/budgets", authenticateToken, (req: any, res: any) => {
@@ -2486,137 +2274,6 @@ app.put("/api/finance/budgets/:id", authenticateToken, (req: any, res) => {
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Adjust Budget", `Adjusted budget allocation for ${budget.department} to PHP ${budgetAllocation}`);
   saveDB();
   res.json({ status: "success", data: budget });
-});
-
-app.get("/api/finance/budget-requests", authenticateToken, (req: any, res: any) => {
-  res.json({ status: "success", data: db.budgetRequests || [] });
-});
-
-app.post("/api/finance/budget-requests", authenticateToken, (req: any, res) => {
-  const { department, amountRequested, requestType, purpose } = req.body;
-  const newRequest: BudgetRequestItem = {
-    id: `br-${Date.now()}`,
-    department,
-    amountRequested: Number(amountRequested),
-    requestType,
-    purpose,
-    status: "Pending",
-    createdAt: new Date().toISOString(),
-  };
-  if (!db.budgetRequests) {
-    db.budgetRequests = [];
-  }
-  db.budgetRequests.push(newRequest);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Budget Request", `Submitted ${requestType} request for ${department} of PHP ${amountRequested}`);
-  saveDB();
-  res.json({ status: "success", data: newRequest });
-});
-
-app.post("/api/finance/budget-requests/:id/action", authenticateToken, (req: any, res) => {
-  const { id } = req.params;
-  const { action, remarks } = req.body; // Approved or Returned
-
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN) {
-    return res.status(403).json({ status: "error", message: "Only the Division Chief has concession authority to approve/return budget request adjustments." });
-  }
-
-  const reqItem = db.budgetRequests?.find(r => r.id === id);
-  if (!reqItem) {
-    return res.status(404).json({ status: "error", message: "Budget request not found" });
-  }
-
-  reqItem.status = action;
-  reqItem.remarks = remarks;
-  reqItem.approvedBy = (req as any).user.fullName;
-
-  if (action === "Approved") {
-    const budget = db.budgetAllocations.find(b => b.department === reqItem.department);
-    if (budget) {
-      const oldAllocation = budget.budgetAllocation;
-      budget.budgetAllocation += reqItem.amountRequested;
-      budget.remainingBudget = budget.budgetAllocation + (budget.carryOver || 0) - budget.budgetUtilized;
-      budget.budgetPercentageUsed = Math.round((budget.budgetUtilized / (budget.budgetAllocation + (budget.carryOver || 0))) * 100);
-      logFinanceAudit((req as any).user.fullName, `Augment Budget Allocation via request ${reqItem.id}`, "Budget Monitoring", `${oldAllocation}`, `${budget.budgetAllocation}`);
-    } else {
-      const activeFy = (db.fiscalYears || []).find((f: any) => f.status === "Active");
-      db.budgetAllocations.push({
-        id: `b-${Date.now()}`,
-        fiscalYearId: activeFy?.id || "fy-1",
-        department: reqItem.department,
-        budgetAllocation: reqItem.amountRequested,
-        budgetUtilized: 0,
-        remainingBudget: reqItem.amountRequested,
-        budgetPercentageUsed: 0,
-        allocatedPS: reqItem.amountRequested,
-        utilizedPS: 0,
-        remainingPS: reqItem.amountRequested,
-        allocatedMOOE: 0, utilizedMOOE: 0, remainingMOOE: 0,
-        allocatedCO: 0, utilizedCO: 0, remainingCO: 0
-      });
-    }
-  }
-
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, `${action} Budget Request`, `${action} budget request ${id} with remarks: ${remarks}`);
-  saveDB();
-  res.json({ status: "success", data: reqItem });
-});
-
-app.get("/api/budget-requests", authenticateToken, (req: any, res: any) => {
-  res.json({ status: "success", data: db.budgetRequests || [] });
-});
-
-app.put("/api/budget-requests/:id/approve", authenticateToken, (req: any, res) => {
-  const { id } = req.params;
-  const { status, remarks } = req.body;
-
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN) {
-    return res.status(403).json({ status: "error", message: "Only the Division Chief has concession authority to approve/return budget request adjustments." });
-  }
-
-  const reqItem = db.budgetRequests?.find(r => r.id === id);
-  if (!reqItem) {
-    return res.status(404).json({ status: "error", message: "Budget request not found" });
-  }
-
-  reqItem.status = status;
-  reqItem.remarks = remarks || "";
-  reqItem.approvedBy = (req as any).user.fullName;
-
-  if (status === "Approved") {
-    const budget = db.budgetAllocations.find(b => b.department === reqItem.department);
-    if (budget) {
-      const oldAllocation = budget.budgetAllocation;
-      budget.budgetAllocation += reqItem.amountRequested;
-      budget.remainingBudget = budget.budgetAllocation + (budget.carryOver || 0) - budget.budgetUtilized;
-      budget.budgetPercentageUsed = Math.round((budget.budgetUtilized / (budget.budgetAllocation + (budget.carryOver || 0))) * 100);
-      logFinanceAudit((req as any).user.fullName, `Augment Budget Allocation (Chief Concurrence) ${reqItem.id}`, "Budget Monitoring", `${oldAllocation}`, `${budget.budgetAllocation}`);
-    } else {
-      const activeFy = (db.fiscalYears || []).find((f: any) => f.status === "Active");
-      db.budgetAllocations.push({
-        id: `b-${Date.now()}`,
-        fiscalYearId: activeFy?.id || "fy-1",
-        department: reqItem.department,
-        budgetAllocation: reqItem.amountRequested,
-        budgetUtilized: 0,
-        remainingBudget: reqItem.amountRequested,
-        budgetPercentageUsed: 0,
-        allocatedPS: reqItem.amountRequested,
-        utilizedPS: 0,
-        remainingPS: reqItem.amountRequested,
-        allocatedMOOE: 0, utilizedMOOE: 0, remainingMOOE: 0,
-        allocatedCO: 0, utilizedCO: 0, remainingCO: 0
-      });
-    }
-  }
-
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, `Resolve Budget Request: ${status}`, `${status} budget request ${id} with comments: ${remarks}`);
-  saveDB();
-  res.json({ status: "success", data: reqItem });
-});
-
-// --- NEW FINANCE AUDIT ENDPOINT ---
-app.get("/api/finance/audit-logs", authenticateToken, (req: any, res: any) => {
-  res.json({ status: "success", data: db.financeAuditLogs || [] });
 });
 
 
@@ -2941,9 +2598,13 @@ app.put("/api/requests/:id/approve", authenticateToken, (req: any, res) => {
 app.get("/api/dashboard/summary", authenticateToken, (req: any, res) => {
   const role = (req as any).user.role;
   
-  // Total stats values (general overview)
-  const activeEmployees = db.employees.filter(e => e.isActive).length;
+  // Total stats values (general overview). Staff are active unless marked inactive, as everywhere
+  // else: the five with logins carry no isActive flag, and `filter(e => e.isActive)` left them out.
+  const activeStaff = db.employees.filter(e => e.isActive !== false);
+  const activeEmployees = activeStaff.length;
   const totalEmployees = activeEmployees;
+  // Permanent (or regular plantilla) appointments, by the employment status on each record.
+  const permanentEmployees = activeStaff.filter(e => /^(permanent|regular)$/i.test(String(e.employmentStatus || "").trim())).length;
   const listTrainings = db.trainings;
   const totalAssetsVal = db.assets.reduce((sum, a) => sum + a.cost, 0);
 
@@ -2968,6 +2629,7 @@ app.get("/api/dashboard/summary", authenticateToken, (req: any, res) => {
       stats: {
         totalEmployees,
         activeEmployees,
+        permanentEmployees,
         trainingCount: listTrainings.length,
         totalAssets,
         assignedAssets,
@@ -2986,7 +2648,16 @@ app.get("/api/dashboard/summary", authenticateToken, (req: any, res) => {
       // for SUPER_ADMIN only). Other roles get empty lists: the audit trail carries details
       // such as why a signatory was deactivated, and the others are colleagues' records.
       auditLogs: role === UserRole.SUPER_ADMIN ? db.auditLogs.slice(0, 8) : [],
-      recentRequests: role === UserRole.SUPER_ADMIN ? db.requests.slice(0, 5) : [],
+      // The five newest requests still open (not yet approved or rejected), newest first (LIFO).
+      // Requests are stored oldest first, so slice(0, 5) used to show the five oldest of any status.
+      recentRequests: role === UserRole.SUPER_ADMIN
+        ? db.requests
+            .map((r: any, i: number) => ({ r, i, t: firstTimestamp(r.dateRequested, r.createdAt) }))
+            .filter(x => x.r.status !== RequestStatus.APPROVED && x.r.status !== RequestStatus.REJECTED)
+            .sort((a, b) => b.t - a.t || b.i - a.i)
+            .slice(0, 5)
+            .map(x => x.r)
+        : [],
       recentTransactions: role === UserRole.SUPER_ADMIN ? db.financialTransactions.slice(0, 5) : [],
     }
   });
@@ -3206,8 +2877,8 @@ function documentProblem(d: any): string | null {
   }
   // The file itself, as the upload screen sends it: a base64 data URL. Reviewers open it with a
   // click, so anything else (a "javascript:" URL sent straight to the API) would run as a script
-  // in their session. Same pattern as SAFE_FILE_URL in src/utils.ts.
-  if (typeof d.content === "string" && d.content !== "" && !/^data:(?:[\w.+-]+\/[\w.+-]+)?(?:;[\w.+-]+=[^;,]*)*;base64,/i.test(d.content)) {
+  // in their session. SAFE_FILE_URL is the same check the screens and the Documents Vault use.
+  if (typeof d.content === "string" && d.content !== "" && !SAFE_FILE_URL.test(d.content)) {
     return "Each file must be uploaded from your device.";
   }
   return null;
@@ -3884,6 +3555,10 @@ app.put("/api/requests/:id/chief-decide", authenticateToken, (req: any, res) => 
 
 
 // C. ASSIGNED ACTIVITIES APIs
+// Officers no longer create general activities: the Activities & Assignments page and
+// POST /api/activities were removed on 2026-10-22 (outside the thesis scope; none had ever been
+// made). This route stays because it is what lists an employee's seminars, with their cash
+// advance and DV, under My Assigned Activities. Activities stored before (none live) still list.
 app.get("/api/activities", authenticateToken, (req: any, res) => {
   const { role, employeeId } = req.user;
   
@@ -3931,39 +3606,74 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
   res.json({ status: "success", data: db.activities });
 });
 
-app.post("/api/activities", authenticateToken, (req: any, res) => {
-  const { title, description, dateScheduled, allottedBudget, budgetId, assignedEmployeeId } = req.body;
-  if (!title || !allottedBudget || !assignedEmployeeId) {
-    return res.status(400).json({ status: "error", message: "Missing required activity definition metrics" });
-  }
-
-  const newAct = {
-    id: `act-${Date.now()}`,
-    activityNo: `ACT-2026-0${db.activities.length + 1}`,
-    title,
-    description: description || "",
-    dateScheduled: dateScheduled || new Date().toISOString().split("T")[0],
-    allottedBudget: Number(allottedBudget),
-    budgetId: budgetId || "b-2",
-    assignedEmployeeId,
-    status: "Active"
-  };
-
-  db.activities.push(newAct);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Create Activity", `Created assigned employee activity: ${title}`);
-  saveDB();
-  res.json({ status: "success", data: newAct });
-});
-
 
 // D. THREE-STAGED EXHAUSTIVE LIQUIDATION SUBMISSIONS APIs
+// Each seminar report goes out with its seminar's fiscal year, so Finance counts it in the year HR
+// planned it: a year can open before its calendar year does (FY 2027 opened in October 2026).
+// Added to the copy sent, never stored. A general activity has none; its report counts in the
+// year it was filed (src/components/finance/overviewFigures.ts).
+function withSeminarFiscalYear(list: LiquidationSubmission[]): LiquidationSubmissionView[] {
+  const programYear = new Map((db.trainingPrograms || []).map((p: any) => [p.id, p.fiscalYear]));
+  const enrolmentYear = new Map((db.trainingParticipants || []).map((p: any) => [p.id, programYear.get(p.trainingProgramId)]));
+  return list.map(s => {
+    const year = enrolmentYear.get(s.activityId);
+    return year ? { ...s, fiscalYear: String(year) } : s;
+  });
+}
+
 app.get("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   const { role, employeeId } = req.user;
   if (role === UserRole.EMPLOYEE) {
     const list = db.liquidationSubmissions.filter(l => l.employeeId === employeeId);
-    return res.json({ status: "success", data: list });
+    return res.json({ status: "success", data: withSeminarFiscalYear(list) });
   }
-  res.json({ status: "success", data: db.liquidationSubmissions });
+  res.json({ status: "success", data: withSeminarFiscalYear(db.liquidationSubmissions) });
+});
+
+// The Documents Vault (Financial Tracking → Documents Vault): every file attached to a liquidation
+// report, in one place, for Finance and the Administrator (the roles that see Financial Tracking).
+// The list carries no file contents; a file is sent only when someone downloads it, and each
+// download is recorded in the audit log, since these are employees' receipts and certificates.
+// (The same files also reach every officer through GET /api/liquidation-submissions, unlogged: 12e.)
+// Neither answer may be kept in the browser's cache.
+function canUseDocumentsVault(user: any): boolean {
+  return user?.role === UserRole.FINANCE_OFFICER || user?.role === UserRole.SUPER_ADMIN;
+}
+
+app.get("/api/liquidation-documents", authenticateToken, (req: any, res: any) => {
+  if (!canUseDocumentsVault(req.user)) {
+    return res.status(403).json({ status: "error", message: "The Documents Vault is for Finance and the Administrator." });
+  }
+  res.set("Cache-Control", "no-store");
+  res.json({ status: "success", data: liquidationDocumentRows(withSeminarFiscalYear(db.liquidationSubmissions || [])) });
+});
+
+app.get("/api/liquidation-submissions/:id/documents/:docId", authenticateToken, (req: any, res: any) => {
+  if (!canUseDocumentsVault(req.user)) {
+    return res.status(403).json({ status: "error", message: "The Documents Vault is for Finance and the Administrator." });
+  }
+  // Express answers HEAD with this handler too, which would log a download that sent nothing
+  // (and rewrite the whole database for it).
+  if (req.method !== "GET") return res.status(405).set("Allow", "GET").json({ status: "error", message: "Use GET." });
+  res.set("Cache-Control", "no-store");
+  // Ids are compared as text, as the list sends them (liquidationDocumentRows).
+  const sub = (db.liquidationSubmissions || []).find((s: any) => s && String(s.id) === req.params.id);
+  const doc = sub ? (Array.isArray(sub.supportingDocs) ? sub.supportingDocs : []).find((d: any) => d && String(d.id) === req.params.docId) : null;
+  if (!sub || !doc) return res.status(404).json({ status: "error", message: "That file was not found." });
+  // The name the list shows (cleaned of invisible and right-to-left characters), so the file saves
+  // under it too.
+  const name = cleanFileName(String(doc.name || doc.filename || "")) || "file";
+  // Only a real uploaded file (a base64 data URL) is ever sent, never other stored text (7f).
+  const content = String(doc.content || "");
+  if (!SAFE_FILE_URL.test(content)) {
+    return res.status(404).json({ status: "error", message: `"${name}" has no uploaded file that can be opened.` });
+  }
+  // The employee chose the file's name, so the log quotes it cleaned (above), shortened and
+  // escaped, with the file's id: a crafted name can't pass for a second file or another report
+  // in the same entry.
+  logEvent(req.user.id, req.user.username, req.user.role, "Open Liquidation Document",
+    `Opened ${JSON.stringify(name.slice(0, 120))} (file ${doc.id}) from ${sub.submissionNo} (${sub.employeeName || sub.employeeId}).`);
+  res.json({ status: "success", data: { name, type: doc.type || "", content } });
 });
 
 // A liquidation's `activityId` may reference either a TDP enrolment or a general
@@ -5179,8 +4889,8 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
 
     const act = db.activities.find(a => a.id === sub.activityId);
 
-    // Automatic categorised deduction on completion. A missing bucket is skipped with a notice
-    // (manual "Establish Integration Link" is the fallback). It is part of this validation's
+    // Automatic categorised deduction on completion. A missing bucket is skipped with a notice to
+    // the Budget Officer, and the spending stays undeducted. It is part of this validation's
     // transaction: if it fails part-way, the whole validation is undone rather than saved with a
     // bucket deducted and no link to show for it.
     autoDeductLiquidation(sub, {
@@ -8360,6 +8070,13 @@ function isPrivateProjectPath(urlPath: string): boolean {
   if (SERVED_ROOT_ENTRIES.has(first.toLowerCase())) return false;
   return fs.existsSync(path.join(process.cwd(), first));
 }
+
+// An /api path no route answered (including routes removed from the app) gets the API's own
+// envelope, rather than the app's page (a GET) or Express's text page. Registered after every
+// route and before the page serving below.
+app.use("/api", (req: any, res: any) => {
+  res.status(404).json({ status: "error", message: "Not found." });
+});
 
 // Handle serving the Vite client in development and compiled files in production
 if (process.env.NODE_ENV !== "production") {

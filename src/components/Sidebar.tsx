@@ -12,7 +12,6 @@ import {
   UserCheck,
   BookOpen,
   Percent,
-  History,
   ChevronDown,
   ChevronRight,
   ShieldCheck,
@@ -56,7 +55,6 @@ function navigationFor(role: UserRole) {
       visible: [UserRole.SUPER_ADMIN, UserRole.HR_OFFICER, UserRole.EMPLOYEE].includes(role),
       subItems: [
         { id: "pds", label: "Personal Data Sheet", icon: FileText, visible: true },
-        { id: "activities", label: "Activities & Assignments", icon: Briefcase, visible: [UserRole.SUPER_ADMIN, UserRole.HR_OFFICER, UserRole.FINANCE_OFFICER].includes(role) },
         { id: "trainings_seminars", label: "Trainings and Seminar", icon: BookOpen, visible: true },
         { id: "training_development", label: "Training Plan & Budget", icon: BookOpen, visible: [UserRole.SUPER_ADMIN, UserRole.HR_OFFICER, UserRole.FINANCE_OFFICER].includes(role) }
       ]
@@ -271,10 +269,8 @@ export default function Sidebar({
                   <div className="pl-6 pr-1.5 py-1.5 flex flex-col space-y-1 border-l border-slate-705 ml-5 mt-1 bg-slate-950/20 rounded-r-lg">
                     {[
                       { id: "dashboard", label: "Overview Dashboard", icon: LayoutDashboard },
-                      { id: "journal", label: "Transactions Journal", icon: FileText },
                       { id: "vault", label: "Documents Vault", icon: BookOpen },
                       { id: "liquidation", label: "Liquidation Desk", icon: Clock },
-                      { id: "auditLogs", label: "Revisions Audit", icon: History },
                     ].map((subItem) => {
                       const isSubActive = activeFinanceSubTab === subItem.id;
                       const SubIcon = subItem.icon;

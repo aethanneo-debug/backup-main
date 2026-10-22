@@ -1,12 +1,11 @@
 import React from "react";
-import { Employee, FinancialTransaction, Asset, SupplyItem, AnyRequest, User, UserRole } from "../types";
-import { 
-  FileSpreadsheet, 
-  Download, 
-  FileText, 
+import { Employee, Asset, SupplyItem, AnyRequest, User, UserRole } from "../types";
+import {
+  FileSpreadsheet,
+  Download,
+  FileText,
   Database,
   Briefcase,
-  TrendingDown,
   Package,
   FileCheck2,
   ListCollapse,
@@ -41,13 +40,12 @@ function exportCSV(headers: string[], rows: string[][], filename: string) {
 interface ReportsViewProps {
   user: User;
   employees: Employee[];
-  transactions: FinancialTransaction[];
   assets: Asset[];
   supplies: SupplyItem[];
   requests: AnyRequest[];
 }
 
-export default function ReportsView({ user, employees, transactions, assets, supplies, requests }: ReportsViewProps) {
+export default function ReportsView({ user, employees, assets, supplies, requests }: ReportsViewProps) {
 
   // Plan D is HR's record, and GET /api/training/needs answers only HR and the Admin.
   // Finance and Budget reach this page too, so they don't get a card that can only fail.
@@ -84,31 +82,6 @@ export default function ReportsView({ user, employees, transactions, assets, sup
     ]);
 
     exportCSV(headers, rows, "HSAC_RAB1_Personnel_Master_List.csv");
-  }
-
-  // Report 2: Financial Document Liquidation Audit Sheet
-  function exportFinanceCSV() {
-    const headers = [
-      "Transaction ID",
-      "Supplier",
-      "Amount (PHP)",
-      "Transaction Date",
-      "Current Status",
-      "Voucher Description",
-      "Receipt Attachment File"
-    ];
-
-    const rows = transactions.map(tx => [
-      tx.transactionId,
-      tx.supplier,
-      tx.amount.toString(),
-      formatDate(tx.transactionDate),
-      tx.status,
-      tx.description,
-      tx.receiptFilename || "None"
-    ]);
-
-    exportCSV(headers, rows, "HSAC_RAB1_Financial_Liquidation_TrackHistory.csv");
   }
 
   // Report 3: Physical Assets Accountability Registry
@@ -188,137 +161,13 @@ export default function ReportsView({ user, employees, transactions, assets, sup
     exportCSV(headers, rows, "HSAC_RAB1_Digital_Filing_Workflow_Journal.csv");
   }
 
-  // SAAODB / SAODB Statement of Allotments, Obligations, Disbursements and Balances (FAR 1 & 1A)
-  function exportSAODBCSV() {
-    const headers = [
-      "MFO/PAP Division (FAR 1/1A)",
-      "UACS Budget Allocation Code",
-      "Departmental Allotment (A)",
-      "Obligations Incurred / Spending (B)",
-      "Disbursements Paid / Validated (C)",
-      "Unpaid Obligations Outstanding (D = B - C)",
-      "Unobligated Available Balance (E = A - B)",
-      "Departmental Utilization Rate (%)"
-    ];
-
-    // Compute metrics
-    const divisions = [
-      { name: "Adjudication Division", uacs: "100010000", allotment: 500000.00 },
-      { name: "Administrative and Finance Division", uacs: "200020000", allotment: 1000000.00 },
-      { name: "Legal Division", uacs: "300030000", allotment: 400000.00 }
-    ];
-
-    const rows = divisions.map(div => {
-      const divTxns =  (transactions || []).filter(t => t.department === div.name);
-      
-      // Obligations: sum of all transactions registered
-      const obligations = divTxns.reduce((sum, t) => sum + t.amount, 0);
-      
-      // Disbursements: sum of validated or liquidated transactions
-      const disbursements = divTxns
-        .filter(t => ["Validated", "Liquidated"].includes(t.status))
-        .reduce((sum, t) => sum + t.amount, 0);
-
-      const unpaidObligations = obligations - disbursements;
-      const unobligatedBalance = div.allotment - obligations;
-      const rate = div.allotment > 0 ? ((obligations / div.allotment) * 100).toFixed(2) : "0.00";
-
-      return [
-        div.name,
-        div.uacs,
-        div.allotment.toFixed(2),
-        obligations.toFixed(2),
-        disbursements.toFixed(2),
-        unpaidObligations.toFixed(2),
-        unobligatedBalance.toFixed(2),
-        `${rate}%`
-      ];
-    });
-
-    exportCSV(headers, rows, "HSAC_RAB1_SAAODB_SAODB_FAR1_Compliance_Sheet.csv");
-  }
-
-  // Monthly Report of Disbursements (FAR 3)
-  function exportFAR3CSV() {
-    const headers = [
-      "Reporting Month (FAR 3)",
-      "UACS Program / PAP Stream",
-      "Validated Disbursements Count",
-      "Disbursed Amount (A = Cash Out)",
-      "Outstanding Pending Voucher Amount (B)",
-      "Total Monitored Ledger Obligations (A + B)"
-    ];
-
-    // Grouping by Month
-    const monthlyGroups: { [key: string]: { count: number; paid: number; pending: number } } = {};
-    
-    transactions.forEach(tx => {
-      const dateObj = new Date(tx.transactionDate);
-      const monthStr = isNaN(dateObj.getTime()) 
-        ? "FY 2026 Active" 
-        : dateObj.toLocaleString("en-US", { year: "numeric", month: "long" });
-
-      if (!monthlyGroups[monthStr]) {
-        monthlyGroups[monthStr] = { count: 0, paid: 0, pending: 0 };
-      }
-
-      if (["Validated", "Liquidated"].includes(tx.status)) {
-        monthlyGroups[monthStr].count += 1;
-        monthlyGroups[monthStr].paid += tx.amount;
-      } else {
-        monthlyGroups[monthStr].pending += tx.amount;
-      }
-    });
-
-    const rows = Object.keys(monthlyGroups).map(monthKey => {
-      const group = monthlyGroups[monthKey];
-      const total = group.paid + group.pending;
-      return [
-        monthKey,
-        "General Adjudication & Support Services",
-        group.count.toString(),
-        group.paid.toFixed(2),
-        group.pending.toFixed(2),
-        total.toFixed(2)
-      ];
-    });
-
-    // Fallback if no transactions are logged
-    if (rows.length === 0) {
-      rows.push(["FY 2026 No Records", "General Support Stream", "0", "0.00", "0.00", "0.00"]);
-    }
-
-    exportCSV(headers, rows, "HSAC_RAB1_Monthly_Disbursements_FAR3_Compliance_Sheet.csv");
-  }
-
   const reportsList = [
-    {
-      title: "Statement of Allotments, Obligations & Balances (SAAODB / FAR 1 & 1A)",
-      desc: "Comprehensive public sector finance sheet mapping national government allotments, obligations incurred, liquidated disbursements, unpaid obligs, and available balances by UACS codes.",
-      icon: FileSpreadsheet,
-      recordsCount: 3,
-      downloader: exportSAODBCSV
-    },
-    {
-      title: "FAR 3 - Monthly Report of Disbursements (E-Government Compliant)",
-      desc: "Chronological government book listing actual cash disbursements, pending vouchers, and general ledger reconciliation parameters.",
-      icon: FileSpreadsheet,
-      recordsCount: transactions.length,
-      downloader: exportFAR3CSV
-    },
     {
       title: "HSAC Personnel Master Directory Roster",
       desc: "Complete database of active personnel plantilla properties, contact vectors, emergency nodes, email indexes, and dates hired.",
       icon: Briefcase,
       recordsCount: employees.length,
       downloader: exportEmployeesCSV
-    },
-    {
-      title: "Financial Liquidation Journal & Receipts Tracking Sheet",
-      desc: "Chronological, audit-ready expense sheets showing suppliers, payment costings, transaction dates, validation progression statuses, and active attachment links.",
-      icon: TrendingDown,
-      recordsCount: transactions.length,
-      downloader: exportFinanceCSV
     },
     {
       title: "Physical Property Accounts Catalog (PAR)",

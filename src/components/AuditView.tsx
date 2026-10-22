@@ -103,6 +103,7 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Register Receipt">Expense Logs</option>
             <option value="Validate Financial Record">Ledger validations</option>
             <option value="Upload Support Doc">Doc Uploads</option>
+            <option value="Open Liquidation Document">Documents Vault downloads</option>
             <option value="Register Asset">Asset Register</option>
             <option value="Assign Accountability">Accountability (PAR)</option>
             <option value="Act on Request">Filing Actions</option>

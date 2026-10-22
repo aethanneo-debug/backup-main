@@ -811,6 +811,41 @@ export interface LiquidationSubmission {
   dateSubmitted?: string;
 }
 
+/** A report as GET /api/liquidation-submissions sends it. `fiscalYear` is the seminar's, worked
+ * out on the way out and never stored, so Finance counts the report in the year HR planned it
+ * (finance/overviewFigures.ts). A general activity's report has none and counts in the year it
+ * was filed. */
+export type LiquidationSubmissionView = LiquidationSubmission & { fiscalYear?: string };
+
+/** One file in the Documents Vault (GET /api/liquidation-documents): a file attached to a
+ * liquidation report, with the report it belongs to, but without the file itself. Its content is
+ * sent only when someone downloads it (src/server/liquidationDocuments.ts). */
+export interface LiquidationDocumentRow {
+  reportId: string;
+  submissionNo: string;
+  employeeName: string;
+  status: string;
+  claimType?: ClaimType;
+  /** What the report settles: the seminar title on the report. */
+  title: string;
+  /** The seminar's fiscal year when the server knows it; otherwise the year the report was filed. */
+  fiscalYear?: string;
+  createdAt?: string;
+  dateSubmitted?: string;
+  docId: string;
+  name: string;
+  /** The file's MIME type, e.g. "application/pdf" or "image/jpeg". */
+  type: string;
+  size?: string;
+  uploadedAt?: string;
+  /** False when nothing that can be downloaded is stored (an older record, or other text). */
+  hasFile: boolean;
+  /** Set when a correction replaced this file; the old copy is kept for the record. */
+  supersededAt?: string;
+  replacedBy?: string;
+  replaces?: string;
+}
+
 export interface Child {
   id: string;
   fullName: string;

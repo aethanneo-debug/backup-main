@@ -1,6 +1,6 @@
 # Project Map — IntegraSync (IPFMS)
 
-**What it is:** Integrated Personnel and Financial Management System for the Human Settlements Adjudication Commission, Regional Adjudication Branch No. 1 (HSAC RAB 1). Handles employee records & PDS (CSC Personal Data Sheet), trainings/seminars, activities & liquidations, finance (transactions, budgets, fiscal years, ledger), assets & supplies, multi-stage request approvals, reports, audit logs, backups, and user accounts. Originally scaffolded in Google AI Studio.
+**What it is:** Integrated Personnel and Financial Management System for the Human Settlements Adjudication Commission, Regional Adjudication Branch No. 1 (HSAC RAB 1). Handles employee records & PDS (CSC Personal Data Sheet), trainings/seminars and their cash advances & liquidations (general "activities" removed 2026-10-22), finance (the Liquidation Desk, cash advances, the documents vault, the training budget, fiscal years; the ledger is now only written by validation), assets & supplies, multi-stage request approvals, reports, audit logs, backups, and user accounts. Originally scaffolded in Google AI Studio.
 
 ## Architecture (two backends — know which one you're touching)
 
@@ -33,7 +33,7 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `src/utils.ts` | `apiCall`, `formatCurrency` (PHP), `formatDate`, `downloadCSV` |
 | `src/App.tsx` | Login, session check, password-change & PDS-upload gates, tab routing via `activeTab` state (no router), global data fetching |
 | `src/components/Sidebar.tsx` | Role-based navigation (visibility only — not security) |
-| `src/components/FinanceView.tsx` | ~3.3k lines: finance dashboard, journal, documents vault, liquidation desk, revisions audit, budgets |
+| `src/components/FinanceView.tsx` | ~830 lines: Financial Tracking (overview via `finance/FinanceOverview.tsx`, Documents Vault via `finance/DocumentsVault.tsx` — every file attached to a liquidation report, Liquidation Desk via `finance/LiquidationDeskView.tsx`) and Budget Monitoring (the annual training budget only). The Transactions Journal was removed on 2026-10-22 |
 | `src/components/EmployeePortalView.tsx`, `PersonalDataSheetForm.tsx` | Employee self-service + PDS |
 | `src/components/*Requests*.tsx`, `ApprovalManagementView.tsx` | Request workflow (Employee → HR endorse → Chief decide), liquidation workflow (HR → Finance → Chief) |
 | `backend_fastapi/{main,models,schemas,database,migrate}.py` | FastAPI app |

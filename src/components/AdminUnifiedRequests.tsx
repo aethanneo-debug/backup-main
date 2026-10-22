@@ -57,10 +57,9 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
     setLoading(true);
     setError("");
     try {
-      const [reqRes, subRes, budgetRes, empRes] = await Promise.all([
+      const [reqRes, subRes, empRes] = await Promise.all([
         apiCall("/api/requests"),
         apiCall("/api/liquidation-submissions"),
-        apiCall("/api/budget-requests"),
         apiCall("/api/employees")
       ]);
       
@@ -112,23 +111,6 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
         });
       }
 
-      if (budgetRes.status === "success") {
-        budgetRes.data.forEach((b: any) => {
-          combined.push({
-            ...b,
-            _unifiedId: `bud-${b.id}`,
-            _category: "Budget Request",
-            _date: firstTimestamp(b.createdAt),
-            _displayDate: firstDateString(b.createdAt),
-            _title: `${b.requestType} Request`,
-            _requester: b.department,
-            _division: b.department,
-            _amount: b.amountRequested,
-            _sequence: seq++
-          });
-        });
-      }
-
       // Sort LIFO (Newest First)
       // LIFO: newest first, falling back to insertion order for identical dates.
       // Number(... ) || 0 keeps a malformed date from returning NaN here, which would
@@ -154,7 +136,7 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
   const filteredItems = allItems.filter(item => {
     let catMatch = true;
     if (filterCategory !== "All") {
-      if (["Personnel Request", "Liquidation", "Budget Request"].includes(filterCategory)) {
+      if (["Personnel Request", "Liquidation"].includes(filterCategory)) {
         catMatch = item._category === filterCategory;
       } else {
         catMatch = item.requestType === filterCategory || item.leaveType === filterCategory;
@@ -253,12 +235,6 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
           await apiCall(`/api/requests/${item.id}/chief-decide`, {
             method: "PUT",
             body: JSON.stringify({ decision, remarks: remarks || `Bulk ${decision}` })
-          });
-        } else if (item._category === "Budget Request") {
-          const status = action === "approve" ? "Approved" : "Rejected";
-          await apiCall(`/api/budget-requests/${item.id}/approve`, {
-            method: "PUT",
-            body: JSON.stringify({ status, remarks: remarks || `Bulk ${status}` })
           });
         }
         successCount++;
@@ -360,7 +336,7 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
       <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between bg-slate-50 gap-4">
         <div>
           <h2 className="text-sm font-bold text-slate-800">Unified Request Management & Approvals</h2>
-          <p className="text-[10px] text-slate-500">Manage all requests, liquidations, and budget adjustments in one place.</p>
+          <p className="text-[10px] text-slate-500">Manage all requests and follow liquidations in one place.</p>
         </div>
         <div className="flex items-center space-x-3">
           <select 
@@ -377,7 +353,6 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
             <option value="Zoom Access Request">-- Zoom Access</option>
             <option value="Supply Request">-- Supply Requests</option>
             <option value="Liquidation">Liquidations</option>
-            <option value="Budget Request">Budget Requests</option>
           </select>
           
           <select 
@@ -551,12 +526,6 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
                               await apiCall(`/api/requests/${viewItem.id}/chief-decide`, {
                                 method: "PUT",
                                 body: JSON.stringify({ decision, remarks: modalRemarks || `${decision}` })
-                              });
-                            } else if (viewItem._category === "Budget Request") {
-                              const status = modalActionType === "approve" ? "Approved" : "Rejected";
-                              await apiCall(`/api/budget-requests/${viewItem.id}/approve`, {
-                                method: "PUT",
-                                body: JSON.stringify({ status, remarks: modalRemarks || `${status}` })
                               });
                             }
                             setSuccess("Action applied successfully.");

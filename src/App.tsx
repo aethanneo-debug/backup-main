@@ -4,7 +4,6 @@ import { apiCall } from "./utils";
 import Sidebar, { tabsOpenTo } from "./components/Sidebar";
 import Header from "./components/Header";
 import DashboardView from "./components/DashboardView";
-import ActivitiesView from "./components/ActivitiesView";
 import FinanceView from "./components/FinanceView";
 import AssetsView from "./components/AssetsView";
 import RequestsView from "./components/RequestsView";
@@ -18,6 +17,7 @@ import EmployeePortalView from "./components/EmployeePortalView";
 import TrainingsSeminarsView from "./components/TrainingsSeminarsView";
 import TrainingDevelopmentView from "./components/TrainingDevelopmentView";
 import { PersonalDataSheetForm } from "./components/PersonalDataSheetForm";
+import PasswordInput from "./components/ui/PasswordInput";
 import { 
   Building, 
   Lock, 
@@ -121,7 +121,10 @@ export default function App() {
   async function syncDatabase() {
     try {
       const isEmployee = user?.role === UserRole.EMPLOYEE;
-      
+      // The ledger is read only by Budget Monitoring's "Export Database", so only the roles that
+      // reach Budget Monitoring load it. (The server also lets Finance read it: validation books it.)
+      const readsLedger = !!user && [UserRole.SUPER_ADMIN, UserRole.BUDGET_OFFICER].includes(user.role);
+
       const fetchOrNull = async (url: string) => {
         try {
           return await apiCall(url);
@@ -133,7 +136,7 @@ export default function App() {
 
       const [empRes, finRes, astRes, supRes, reqRes] = await Promise.all([
         isEmployee ? fetchOrNull("/api/employees/me") : fetchOrNull("/api/employees"),
-        isEmployee ? { status: "success", data: [] } : fetchOrNull("/api/financial-transactions"),
+        readsLedger ? fetchOrNull("/api/financial-transactions") : { status: "success", data: [] },
         isEmployee ? { status: "success", data: [] } : fetchOrNull("/api/assets"),
         fetchOrNull("/api/supplies"),
         fetchOrNull("/api/requests")
@@ -279,11 +282,12 @@ export default function App() {
           );
         }
         return (
-          <DashboardView 
-            user={user} 
-            summaryData={summary} 
+          <DashboardView
+            user={user}
+            summaryData={summary}
             loading={false}
             setActiveTab={setActiveTab}
+            onOpenLink={openNotificationLink}
           />
         );
       
@@ -296,7 +300,6 @@ export default function App() {
         return <FinanceView
           user={user}
           transactions={transactions}
-          fetchSummary={fetchSummary}
           onRefresh={triggerRefresh}
           activeSubTab={activeFinanceSubTab}
           setActiveSubTab={setActiveFinanceSubTab}
@@ -306,7 +309,6 @@ export default function App() {
         return <FinanceView 
           user={user}
           transactions={transactions}
-          fetchSummary={fetchSummary}
           onRefresh={triggerRefresh}
           activeSubTab="budgets"
           setActiveSubTab={setActiveFinanceSubTab}
@@ -333,8 +335,6 @@ export default function App() {
           onRefresh={triggerRefresh}
           {...focusProps}
         />;
-      case "activities":
-        return <ActivitiesView user={user} onRefresh={triggerRefresh} />;
       case "pds":
         return <PersonalDataSheetForm employees={employees} user={user} />;
       case "employee_portal":
@@ -371,9 +371,8 @@ export default function App() {
         return (
           <ReportsView 
             user={user} 
-            employees={employees} 
-            transactions={transactions} 
-            assets={assets} 
+            employees={employees}
+            assets={assets}
             supplies={supplies} 
             requests={requests} 
           />
@@ -433,10 +432,11 @@ export default function App() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold block">Password</label>
-                <input
+                <label htmlFor="login-password" className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold block">Password</label>
+                <PasswordInput
+                  id="login-password"
                   required
-                  type="password"
+                  tone="dark"
                   placeholder="••••••••••••"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
@@ -552,11 +552,11 @@ export default function App() {
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-600 mr-2">✦</span>
-                    <span><strong>Financial Tracking & Vouchers:</strong> Log expenditure receipts, submit and audit digital liquidation scopes, and reconcile programs or financial transactions.</span>
+                    <span><strong>Financial Tracking:</strong> Validate liquidation reports, release and settle seminar cash advances, and find every report's receipts in the Documents Vault.</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-600 mr-2">✦</span>
-                    <span><strong>Treasury Budgets & FAR Compliance:</strong> Monitor budget allotments, track obligational liabilities, and export audit-ready SAAODB / FAR 1, FAR 1A and FAR 3 spreadsheet books.</span>
+                    <span><strong>Training Budget Monitoring:</strong> Set the annual training and seminar budget, and track how much of it HR has allocated and spent.</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-600 mr-2">✦</span>
