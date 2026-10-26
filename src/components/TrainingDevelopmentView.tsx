@@ -29,6 +29,26 @@ const TAB_BLURB: Record<string, string> = {
 // Shared with the Plan A / Plan D sheets so all three tabs read as one document.
 const CELL_INPUT = "w-full border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none";
 const CHIP_BTN = "text-[10px] font-semibold bg-white border border-slate-300 text-slate-700 px-2 py-1 rounded-lg hover:bg-slate-50 flex items-center gap-1.5";
+// The same box outlined rose, for a value Save refuses. The border colour is swapped, not added:
+// with two in one class list, Tailwind's own order decides, and slate would win.
+const CELL_INPUT_INVALID = CELL_INPUT.replace("border-slate-300", "border-rose-500");
+
+// Seminars run within office hours, 8:00 AM to 5:00 PM (the user, 2026-10-25), and a one-day
+// seminar ends after it starts. The server refuses anything else (seminarTimeProblem in
+// server.ts, the rule); this is the same check, so the row shows the problem before Save.
+// Times are "HH:MM" (24-hour), as the time boxes give them, so they compare as text.
+const OFFICE_START = "08:00";
+const OFFICE_END = "17:00";
+const isClockTime = (t: unknown): t is string => typeof t === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+const outsideOfficeHours = (t: unknown) => isClockTime(t) && (t < OFFICE_START || t > OFFICE_END);
+function seminarTimeProblem(row: { startDate?: string; endDate?: string; startTime?: string; endTime?: string }): string | null {
+  const { startTime: start, endTime: end } = row;
+  if (!isClockTime(start) || !isClockTime(end)) return "Enter the start and end times.";
+  if (outsideOfficeHours(start)) return "The start time must be within office hours: 8:00 AM to 5:00 PM.";
+  if (outsideOfficeHours(end)) return "The end time must be within office hours: 8:00 AM to 5:00 PM.";
+  if (row.startDate === row.endDate && end <= start) return "On a one-day seminar, the end time must be after the start time.";
+  return null;
+}
 
 // A row's title box, so a row added from the plan can take focus once it renders.
 const titleInputId = (rowId: string) => `tdp-title-${rowId}`;
@@ -298,6 +318,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
 
     if (new Date(row.endDate) < new Date(row.startDate)) {
       alert("End Date cannot be earlier than Start Date.");
+      return;
+    }
+
+    const timeProblem = seminarTimeProblem(row);
+    if (timeProblem) {
+      alert(timeProblem);
       return;
     }
 
@@ -609,6 +635,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     const partsCount = isEditing ? (row.participantIds ? row.participantIds.length : 0) : participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).length;
     // A row added from the plan while its participants are being looked up (handleAddFromPlan).
     const filling = isNew && row.planFill === "loading";
+    // Office hours, while editing (seminarTimeProblem): the box at fault turns rose, and the line
+    // under the boxes says why until it is fixed. A seminar saved before the rule opens with it.
+    const timeProblem = isEditing ? seminarTimeProblem(row) : null;
+    // The start box is at fault when it is empty or outside office hours. Otherwise the problem is
+    // the end's: empty, outside office hours, or not after the start on a one-day seminar.
+    const startTimeBad = !!timeProblem && (!isClockTime(row.startTime) || outsideOfficeHours(row.startTime));
+    const endTimeBad = !!timeProblem && (!isClockTime(row.endTime) || outsideOfficeHours(row.endTime) || !startTimeBad);
+    const hoursNoteId = `tdp-hours-${p.id}`;
 
     return (
       <tr key={p.id} data-record-id={p.id} className={`align-top hover:bg-slate-50/60 ${isEditing ? 'bg-blue-50/40' : ''}`}>
@@ -659,12 +693,15 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
                 <input type="date" value={row.startDate} min={new Date().toISOString().split('T')[0]} onChange={e => updateRow(p.id, "startDate", e.target.value, isNew)} className={`${CELL_INPUT} w-32`} aria-label="Start date" />
-                <input type="time" value={row.startTime} onChange={e => updateRow(p.id, "startTime", e.target.value, isNew)} className={`${CELL_INPUT} w-24`} aria-label="Start time" />
+                <input type="time" value={row.startTime || ""} min={OFFICE_START} max={OFFICE_END} onChange={e => updateRow(p.id, "startTime", e.target.value, isNew)} className={`${startTimeBad ? CELL_INPUT_INVALID : CELL_INPUT} w-24`} aria-label="Start time" aria-invalid={startTimeBad || undefined} aria-describedby={hoursNoteId} />
               </div>
               <div className="flex items-center gap-1">
                 <input type="date" value={row.endDate} min={row.startDate || new Date().toISOString().split('T')[0]} onChange={e => updateRow(p.id, "endDate", e.target.value, isNew)} className={`${CELL_INPUT} w-32 ${row.endDate && row.startDate && new Date(row.endDate) < new Date(row.startDate) ? 'border-rose-500' : ''}`} aria-label="End date" />
-                <input type="time" value={row.endTime} onChange={e => updateRow(p.id, "endTime", e.target.value, isNew)} className={`${CELL_INPUT} w-24`} aria-label="End time" />
+                <input type="time" value={row.endTime || ""} min={OFFICE_START} max={OFFICE_END} onChange={e => updateRow(p.id, "endTime", e.target.value, isNew)} className={`${endTimeBad ? CELL_INPUT_INVALID : CELL_INPUT} w-24`} aria-label="End time" aria-invalid={endTimeBad || undefined} aria-describedby={hoursNoteId} />
               </div>
+              <p id={hoursNoteId} className={`max-w-[14rem] whitespace-normal text-[10px] leading-snug ${timeProblem ? "font-semibold text-rose-700" : "text-slate-500"}`}>
+                {timeProblem || "Office hours: 8:00 AM to 5:00 PM."}
+              </p>
             </div>
           ) : (
             <div className="text-slate-600">

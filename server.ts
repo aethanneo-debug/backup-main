@@ -6831,6 +6831,23 @@ app.post("/api/training/evaluations", authenticateToken, (req: any, res: any) =>
 
   const record = {
     id: existing ? existing.id : `tev-${Date.now()}`,
+// Seminars run within office hours (the user, 2026-10-25): each day starts at 8:00 AM or later and
+// ends by 5:00 PM, and a one-day seminar ends after it starts. Times are "HH:MM" (24-hour), as the
+// planner's time boxes send them, so they compare as text. TrainingDevelopmentView checks the same
+// on Save (seminarTimeProblem there), and the server is the rule.
+const OFFICE_START = "08:00";
+const OFFICE_END = "17:00";
+function seminarTimeProblem(startDate: unknown, startTime: unknown, endDate: unknown, endTime: unknown): string | null {
+  const hhmm = (v: unknown) => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  if (!hhmm(startTime) || !hhmm(endTime)) return "Enter the start and end times.";
+  const start = startTime as string;
+  const end = endTime as string;
+  if (start < OFFICE_START || start > OFFICE_END) return "The start time must be within office hours: 8:00 AM to 5:00 PM.";
+  if (end < OFFICE_START || end > OFFICE_END) return "The end time must be within office hours: 8:00 AM to 5:00 PM.";
+  if (startDate === endDate && end <= start) return "On a one-day seminar, the end time must be after the start time.";
+  return null;
+}
+
     trainingParticipantId,
     trainingProgramId: prog.id,
     employeeId: participant.employeeId,
@@ -7818,6 +7835,8 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
   }
   const { trainingProgramId, employeeId } = req.body;
   const prog = db.trainingPrograms.find(p => p.id === trainingProgramId);
+  const timeProblem = seminarTimeProblem(body.startDate, body.startTime, body.endDate, body.endTime);
+  if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
   if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
   if (!employeeId) return res.status(400).json({ status: "error", message: "employeeId is required." });
 
@@ -7907,6 +7926,15 @@ app.get("/api/training/liquidations", authenticateToken, (req: any, res: any) =>
           status: p.status,
           allowanceAllocated: Number(p.allowanceAllocated || 0),
           spent
+  // The times as they will be saved (a value not sent keeps the stored one). A seminar saved before
+  // the office-hours rule with times outside it has to be corrected on its next edit.
+  const timeProblem = seminarTimeProblem(
+    body.startDate ?? existingProgram.startDate,
+    body.startTime !== undefined ? body.startTime : existingProgram.startTime,
+    body.endDate ?? existingProgram.endDate,
+    body.endTime !== undefined ? body.endTime : existingProgram.endTime
+  );
+  if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
         };
       })
       .sort((a: any, b: any) => a.name.localeCompare(b.name));
