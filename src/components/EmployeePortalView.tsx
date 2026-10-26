@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument, ScreenFocus } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, getLocalTodayString, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../utils";
+import { spendableCentavos } from "../advanceCoverage";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
 import {
   newParticular,
@@ -205,6 +206,23 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const selectedItem = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId);
   const withinAdvanceForm = resubmittingItem ? !!resubmittingItem.withinAdvance : selectedItem?.source === "seminar";
   const seminarAdvance = withinAdvanceForm ? currentAdvanceOf(myAdvances, selectedActivityId) : null;
+  // A group's report (HSAC RAB 1): the attendees its cash advance covers, offered on each line as
+  // "For" (optional). The holder's seminar card says who attended.
+  const groupAttendees = useMemo(() => {
+    const a: any = activeAdvance;
+    if (!withinAdvanceForm || !a || !Array.isArray(a.covers) || a.covers.length < 2) return undefined;
+    const holderCard = (activities ?? []).find((x: any) => x && x.id === a.activityId);
+    const members: any[] = Array.isArray(holderCard?.groupMembers) ? holderCard.groupMembers : [];
+    return members.filter(m => m && m.attendance === "Attended").map(m => ({ participantId: String(m.participantId), employeeName: String(m.employeeName) }));
+  }, [activeAdvance, withinAdvanceForm, activities]);
+  // What the group's report may spend: the shares of those who attended; an absent member's share is
+  // handed back with the rest (the server's groupSpendCap).
+  const groupSpendCap = useMemo(() => {
+    const a: any = activeAdvance;
+    if (!groupAttendees || !a) return null;
+    const attended = new Set(groupAttendees.map(m => m.participantId));
+    return spendableCentavos(a, id => attended.has(id)) / 100;
+  }, [activeAdvance, groupAttendees]);
   const balance = liquidationBalance(releasedOnSheet, effectiveSpent);
 
   // Human label for a liquidation's activity, used on the printed report header.
@@ -240,9 +258,11 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   }
 
   // Finance and the Administrator get every advance from /api/cash-advances; the form only
-  // ever measures the user's own.
+  // ever measures the user's own. A group advance a co-participant holds for them is kept for
+  // their seminar card (the form never matches it: its report is the holder's).
   function ownAdvances(list: any): any[] {
-    return (Array.isArray(list) ? list : []).filter((a: any) => a && a.employeeId === user.employeeId);
+    return (Array.isArray(list) ? list : []).filter((a: any) => a && (a.employeeId === user.employeeId
+      || (Array.isArray(a.covers) && a.covers.some((c: any) => c && c.employeeId === user.employeeId))));
   }
 
   // Re-reads the user's advances, e.g. after the server refused a claim type because
@@ -760,7 +780,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         itemsTotal: effectiveSpent,
         orEditable: access.editable("refundOr"),
         orNo: coaFields.refundOrNo,
-        orDate: coaFields.refundOrDate
+        orDate: coaFields.refundOrDate,
+        spendCap: groupSpendCap
       });
       if (problem) {
         setMoneyError(problem);
@@ -1584,6 +1605,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                         canRequest={!!act.canRequestAdvance}
                         blockedReason={act.advanceBlockedReason}
                         advance={currentAdvanceOf(myAdvances, act.id)}
+                        groupReport={act.groupReport}
                         onRequested={message => {
                           setSuccess(message);
                           fetchPortalData();
@@ -1840,9 +1862,21 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 </>
               )}
 
+              {/* A group's one report (HSAC RAB 1): for everyone its cash advance covers. */}
+              {groupAttendees && activeAdvance && (
+                <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                  This is your group&rsquo;s one report for cash advance <span className="font-mono">{activeAdvance.advanceNo}</span>, covering{" "}
+                  {((activeAdvance as any).covers ?? []).map((c: any) => c.employeeName).join(", ")}. Its items can spend the shares of
+                  those who attended{groupSpendCap !== null ? ` (${formatCurrency(groupSpendCap)})` : ""}; what the group didn&rsquo;t spend,
+                  an absent member&rsquo;s share included, is handed back with one OR. You may say whom each line was for
+                  {groupAttendees.length > 0 ? ` (${groupAttendees.map(m => m.employeeName).join(", ")} attended)` : ""}.
+                </p>
+              )}
+
               {/* The COA Liquidation Report itself, filled in on the sheet it prints as */}
               <div className="custom-scrollbar overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-3">
                 <LiquidationSheetForm
+                  groupAttendees={groupAttendees}
                   representatives={boxBChoices}
                   representativeId={representativeId}
                   onRepresentativeChange={id => {

@@ -40,6 +40,25 @@ interface FundableRow {
   advanceIssuedAt?: string | null;
   advanceSettledAt?: string | null;
   advanceRefundedAt?: string | null;
+  /** A group advance this row holds (HSAC RAB 1): everyone it covers, the holder first. The people
+   * it covers have no rows of their own. */
+  groupNames?: string[] | null;
+  /** Nobody the group covers attended: only then is its advance refunded in full. */
+  groupAllAbsent?: boolean;
+}
+
+// Whether the row's advance is collected back in full: a non-attendee's own, or a group's that
+// nobody it covers attended. (Otherwise the liquidation report settles it.)
+const refundDue = (row: FundableRow) => (row.groupNames ? !!row.groupAllAbsent : !!row.didNotAttend);
+
+/** "for a group of 3: Ana, Ben, Carla", on the holder's row. */
+function GroupLine({ row }: { row: FundableRow }) {
+  if (!row.groupNames || row.groupNames.length < 2) return null;
+  return (
+    <span className="block w-full text-[10px] text-slate-500">
+      One advance for a group of {row.groupNames.length}: {row.groupNames.join(", ")}
+    </span>
+  );
 }
 
 // Newest first (LIFO, the instructor's rule for the office's lists), by the given dates in
@@ -275,7 +294,8 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                         list above, so the assignment keeps one record; the server agrees. */}
                     {row.pendingRequestId ? (
                       <p className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
-                        Requested{row.requestedAt ? ` on ${formatDate(row.requestedAt)}` : ""}: see Cash Advance Requests
+                        {row.groupNames && row.groupNames.length > 1 ? `Requested for a group of ${row.groupNames.length}` : "Requested"}
+                        {row.requestedAt ? ` on ${formatDate(row.requestedAt)}` : ""}: see Cash Advance Requests
                       </p>
                     ) : !isOpen && (
                       <button
@@ -380,14 +400,23 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                     </span>
                     <span className="font-mono text-slate-600 shrink-0">
                       {formatCurrency(Number(row.advanceAmount || 0))}
-                      {row.didNotAttend ? "" : row.liquidationFiled ? " · liquidation filed" : " · not yet liquidated"}
+                      {refundDue(row) ? "" : row.liquidationFiled ? " · liquidation filed" : " · not yet liquidated"}
                     </span>
+                    <GroupLine row={row} />
+                    {/* A holder who didn't attend still files the group's report when others did
+                        (the user's decision, 2026-10-26): the cash was released to them. */}
+                    {row.groupNames && row.didNotAttend && !row.groupAllAbsent && (
+                      <span className="block w-full text-[10px] italic text-slate-500">
+                        {row.employeeName} did not attend, but holds the cash and files the group&rsquo;s report.
+                      </span>
+                    )}
                     {/* No liquidation form opens for a non-attendee, so the advance is
                         collected back in full rather than liquidated. Their share of the
-                        seminar stays held in the training budget until the refund is recorded. */}
-                    {row.didNotAttend && (
+                        seminar stays held in the training budget until the refund is recorded.
+                        A group's comes back in full only when nobody it covers attended. */}
+                    {refundDue(row) && (
                       <span className="w-full flex flex-wrap items-center justify-between gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-                        Did not attend: collect the full refund
+                        {row.groupNames ? "Nobody in the group attended: collect the full refund" : "Did not attend: collect the full refund"}
                         {row.advanceId && refundingId !== row.advanceId && (
                           <button
                             type="button"
@@ -399,12 +428,13 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                         )}
                       </span>
                     )}
-                    {row.didNotAttend && row.advanceId && refundingId === row.advanceId && (
+                    {refundDue(row) && row.advanceId && refundingId === row.advanceId && (
                       <AdvanceRefundForm
                         advanceId={row.advanceId}
                         advanceNo={row.advanceNo}
                         employeeName={row.employeeName}
                         amount={Number(row.advanceAmount || 0)}
+                        groupNames={row.groupNames && row.groupNames.length > 1 ? row.groupNames : undefined}
                         onCancel={() => setRefundingId(null)}
                         onRecorded={async message => {
                           setRefundingId(null);
@@ -436,6 +466,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                     <span className="font-mono text-slate-500 shrink-0">
                       {formatCurrency(Number(row.advanceAmount || 0))} · liquidated
                     </span>
+                    <GroupLine row={row} />
                   </li>
                 ))}
               </ul>

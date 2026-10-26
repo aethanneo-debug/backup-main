@@ -1,6 +1,6 @@
 import { CashAdvance } from "../../types";
 import { formatCurrency } from "../../utils";
-import { LiquidationBalance } from "../../liquidationMoney";
+import { LiquidationBalance, centavos } from "../../liquidationMoney";
 
 /**
  * Why a seminar's liquidation report can't be submitted yet (the seminar budget flow), in the
@@ -23,6 +23,8 @@ export function withinAdvanceSubmitProblem(form: {
   orEditable: boolean;
   orNo: string;
   orDate: string;
+  /** A group's report: what it may spend, the shares of those who attended (HSAC RAB 1). */
+  spendCap?: number | null;
 }): string {
   if (!form.advance) {
     if (form.advancesFailed) return "Your cash advance record couldn't be loaded, so this report can't be checked. Reload the page and try again.";
@@ -33,6 +35,9 @@ export function withinAdvanceSubmitProblem(form: {
   if (!form.hasItems && form.itemsEditable) return "Add at least one particular describing what the cash advance was spent on.";
   if (form.balance.status === "Over") {
     return `Your items come to ${formatCurrency(form.itemsTotal)}, ${formatCurrency(form.balance.over)} more than your cash advance. A seminar report can't go past its advance: lower or remove an item.`;
+  }
+  if (form.spendCap !== undefined && form.spendCap !== null && centavos(form.itemsTotal) > centavos(form.spendCap)) {
+    return `Your group's items come to ${formatCurrency(form.itemsTotal)}, but only the shares of those who attended (${formatCurrency(form.spendCap)}) can be spent: an absent member's share is handed back with the rest. Lower or remove an item.`;
   }
   if (form.balance.leftover > 0 && form.orEditable && (!form.orNo.trim() || !form.orDate)) {
     return `${formatCurrency(form.balance.leftover)} of your cash advance is left. Hand it back to the cashier and enter the OR number and date on the sheet.`;

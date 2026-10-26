@@ -45,6 +45,21 @@ test("open items count every year, as the Liquidation Desk's lists do", () => {
   assert.deepEqual(figures.advancesOut, { count: 2, amount: 2500.3 }); // in centavos: not 2500.2999999999997
 });
 
+test("a group cash advance counts once, for its whole amount (HSAC RAB 1: one advance for the group)", () => {
+  const covers = [
+    { participantId: "A", employeeId: "EMP008", employeeName: "A", amount: 2500 },
+    { participantId: "B", employeeId: "EMP009", employeeName: "B", amount: 2500 },
+    { participantId: "C", employeeId: "EMP010", employeeName: "C", amount: 2500 }
+  ];
+  const figures = overviewFigures([], [
+    { status: "Requested", amount: 5000, covers: covers.slice(0, 2) },
+    { status: "Released", amount: 7500, covers },
+    { status: "Released", amount: 2500 }
+  ] as any[], "2027");
+  assert.equal(figures.advanceRequests, 1, "one request, though it covers two people");
+  assert.deepEqual(figures.advancesOut, { count: 2, amount: 10000 }, "two advances out: the group's ₱7,500 and one person's ₱2,500");
+});
+
 test("reimbursements to pay are the Reimbursement Queue's: validated, awaiting, above zero", () => {
   const figures = overviewFigures([
     report({ status: "Completed", reimbursementStatus: "Awaiting Reimbursement", reimbursementAmount: 0.1 }),

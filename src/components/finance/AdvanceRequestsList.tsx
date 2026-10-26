@@ -19,7 +19,8 @@ const INPUT = "w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs fon
 /**
  * Employees' requests for their seminar's cash advance (the seminar budget flow, decision 3):
  * Finance releases one with its disbursement voucher, or declines it saying why. The amount is
- * the employee's allowance, set by the server, so it is shown, not typed. Newest first.
+ * the employee's allowance, set by the server, so it is shown, not typed. A group's request is one
+ * row (HSAC RAB 1): the one who asked, everyone it covers and the total. Newest first.
  */
 export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }: Props) {
   const [requests, setRequests] = useState<CashAdvance[]>([]);
@@ -99,9 +100,12 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
     }
     setSaving(true);
     try {
+      // A group's total can change while the form is open (someone leaves): the server releases only
+      // the amount shown here, and otherwise says what it is now, so the voucher matches the record.
+      const groupTotal = (request.covers ?? []).length > 1 ? { expectedAmount: Number(request.amount) } : {};
       const res = await apiCall(`/api/cash-advances/${encodeURIComponent(request.id)}/${acting.kind}`, {
         method: "POST",
-        body: JSON.stringify(acting.kind === "release" ? { dvNo: dvNo.trim(), dvDate } : { reason: reason.trim() })
+        body: JSON.stringify(acting.kind === "release" ? { dvNo: dvNo.trim(), dvDate, ...groupTotal } : { reason: reason.trim() })
       });
       if (res?.status !== "success") throw new Error(res?.message || "That didn't go through.");
       setActing(null);
@@ -192,11 +196,18 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                   <div className="min-w-0 space-y-1">
                     <h3 className="text-xs font-bold text-slate-800">{r.employeeName}</h3>
                     <p className="truncate text-[11px] text-slate-500">{r.activityTitle}</p>
+                    {/* A group advance (HSAC RAB 1): one request, released to the one who asked. */}
+                    {(r.covers ?? []).length > 1 && (
+                      <p className="text-[11px] text-slate-600">
+                        <span className="font-semibold">One advance for {r.covers!.length}:</span>{" "}
+                        {r.covers!.map(c => `${c.employeeName} (${formatCurrency(Number(c.amount))})`).join(", ")}
+                      </p>
+                    )}
                     <p className="font-mono text-[10px] text-slate-400">Asked on {formatDate(String(r.requestedAt || ""))}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     <div className="rounded border border-slate-100 bg-white p-2 text-right">
-                      <span className="block font-mono text-[9px] font-semibold text-slate-400">Allowance asked for</span>
+                      <span className="block font-mono text-[9px] font-semibold text-slate-400">{(r.covers ?? []).length > 1 ? "Allowances asked for" : "Allowance asked for"}</span>
                       <strong className="font-mono text-xs text-slate-800">{formatCurrency(Number(r.amount))}</strong>
                     </div>
                     {!form && (
@@ -222,6 +233,12 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
 
                 {form && (
                   <div className="space-y-3 border-t border-slate-200 pt-3">
+                    {form === "release" && (r.covers ?? []).length > 1 && (
+                      <p className="max-w-xl text-[11px] text-slate-500">
+                        Each person is checked again when you release it: anyone who no longer qualifies (marked absent,
+                        no longer active, covered or reported elsewhere) is left out, and the total follows the allowances as they are now.
+                      </p>
+                    )}
                     {form === "release" ? (
                       <div className="grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="space-y-1">

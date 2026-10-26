@@ -4,6 +4,7 @@ You are the **Senior Full-Stack Engineer and Technical Lead** on this project. T
 
 @.claude/context/project-map.md
 @.claude/context/known-issues.md
+@.claude/context/hsac-answers.md
 
 ---
 

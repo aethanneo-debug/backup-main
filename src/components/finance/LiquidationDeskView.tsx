@@ -95,8 +95,11 @@ export default function LiquidationDeskView({
   const validationQueue = (submissions ?? []).filter(s => s.status === "Verified & Forwarded");
   // Bumped when a request is released or declined, so the Cash Advance Desk reloads too.
   const [deskVersion, setDeskVersion] = useState(0);
-  // The signed-in officer's own report (reports carry the claimant's staff code).
-  const isOwnReport = (sub: any) => !!user.employeeId && sub?.employeeId === user.employeeId;
+  // The signed-in officer's own report (reports carry the claimant's staff code), or a group's report
+  // that covers them (HSAC RAB 1): validating either is flagged as self-approved.
+  const coversMe = (sub: any) => !!user.employeeId && sub?.employeeId !== user.employeeId
+    && (Array.isArray(sub?.covers) ? sub.covers : []).some((c: any) => c && c.employeeId === user.employeeId);
+  const isOwnReport = (sub: any) => !!user.employeeId && (sub?.employeeId === user.employeeId || coversMe(sub));
   // Each list can be narrowed to Liquidations or Reimbursements (instructor's note 10).
   const [queueFilter, setQueueFilter] = useState<ClaimTypeFilterValue>("All");
   const [indexFilter, setIndexFilter] = useState<ClaimTypeFilterValue>("All");
@@ -300,6 +303,13 @@ export default function LiquidationDeskView({
                         <span className="font-semibold text-slate-600">For:</span>{" "}
                         {sub.activityTitle || sub.activityId}
                       </p>
+                      {/* A group's one report (HSAC RAB 1): everyone its cash advance covers. */}
+                      {Array.isArray(sub.covers) && sub.covers.length > 1 && (
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          <span className="font-semibold text-slate-600">Group of {sub.covers.length}:</span>{" "}
+                          {sub.covers.map((c: any) => c.employeeName).join(", ")}
+                        </p>
+                      )}
                       {sub.representativeName && (
                         <p className="mt-0.5 text-[11px] text-slate-500">
                           <span className="font-semibold text-slate-600">Box B:</span>{" "}
@@ -456,7 +466,7 @@ export default function LiquidationDeskView({
                         decision, 2026-10-20): they're told here, and asked again on Validate. */}
                     {isOwnReport(sub) && (
                       <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
-                        <strong>This is your own report.</strong> You can validate it, but it will be marked as
+                        <strong>{coversMe(sub) ? "This group's report covers you." : "This is your own report."}</strong> You can validate it, but it will be marked as
                         self-approved in the audit log.
                       </p>
                     )}
@@ -473,7 +483,7 @@ export default function LiquidationDeskView({
                       <button
                         type="button"
                         onClick={() => {
-                          if (isOwnReport(sub) && !window.confirm(`${sub.submissionNo} is your own report. Validating it will be marked as self-approved in the audit log. Validate it anyway?`)) return;
+                          if (isOwnReport(sub) && !window.confirm(`${sub.submissionNo} ${coversMe(sub) ? "is a group's report that covers you" : "is your own report"}. Validating it will be marked as self-approved in the audit log. Validate it anyway?`)) return;
                           onValidate(sub.id, selectedSub?.id === sub.id ? subRemarks : "");
                         }}
                         disabled={noAccountant}

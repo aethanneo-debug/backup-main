@@ -8,7 +8,7 @@
 Browser (React 19 SPA, Vite, Tailwind v4)
    │  apiCall()  → Authorization: Bearer <JWT from localStorage.ipfms_token>
    ▼
-server.ts  (Express, port 3000, ~4.5k lines, ~100 routes)      ← ACTIVE dev/runtime backend
+server.ts  (Express, port 3000, ~8.8k lines, ~115 routes)      ← ACTIVE dev/runtime backend
    │  in-memory `db` object ← getInitialData() ← data_store.json
    │  every mutation → saveDB() → fs.writeFileSync(data_store.json)
    │  also serves Vite middleware in dev, dist/ in prod
@@ -31,6 +31,10 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `server.ts` | Entire Express API: seed data, auth + `authenticateToken` middleware, all routes, Vite/static serving |
 | `src/types.ts` | Shared types & enums (`UserRole`, `RequestType`, `RequestStatus`, `TransactionStatus`, `AssetStatus`, `SPENDING_CATEGORIES`…) — imported by both frontend and `server.ts` |
 | `src/utils.ts` | `apiCall`, `formatCurrency` (PHP), `formatDate`, `downloadCSV` |
+| `src/trainingBudget.ts` | `seminarBudget`: what each seminar takes from the year's training budget (shared by server and planner, tested) |
+| `src/advanceCoverage.ts` | Which cash advance pays for an enrolment and which report settles it, including group advances (`covers`); every such lookup goes through it |
+| `src/server/budgetEnrolments.ts` | The training budget's per-enrolment inputs (cash out, split per group member; spending once settled) |
+| `.claude/context/hsac-answers.md` | HSAC RAB 1's own answers (2026-10-26) that office rules come from: group cash advances, division coverage, Plan A columns, vehicle with the CA |
 | `src/App.tsx` | Login, session check, password-change & PDS-upload gates, tab routing via `activeTab` state (no router), global data fetching |
 | `src/components/Sidebar.tsx` | Role-based navigation (visibility only — not security) |
 | `src/components/FinanceView.tsx` | ~830 lines: Financial Tracking (overview via `finance/FinanceOverview.tsx`, Documents Vault via `finance/DocumentsVault.tsx` — every file attached to a liquidation report, Liquidation Desk via `finance/LiquidationDeskView.tsx`) and Budget Monitoring (the annual training budget only). The Transactions Journal was removed on 2026-10-22 |

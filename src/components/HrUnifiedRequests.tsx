@@ -17,7 +17,11 @@ interface HrUnifiedRequestsProps {
 
 export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandled }: HrUnifiedRequestsProps) {
   // The HR officer's own liquidation report (reports carry the claimant's staff code).
-  const isOwnReport = (item: any) => item?._category === "Liquidation" && !!user.employeeId && item.employeeId === user.employeeId;
+  // A group's report that covers the officer counts as their own too (HSAC RAB 1: one report for
+  // everyone a group's cash advance covers): flagged when they endorse it, and left out of bulk Verify.
+  const coversMe = (item: any) => item?._category === "Liquidation" && !!user.employeeId && item.employeeId !== user.employeeId
+    && (Array.isArray(item.covers) ? item.covers : []).some((c: any) => c && c.employeeId === user.employeeId);
+  const isOwnReport = (item: any) => item?._category === "Liquidation" && !!user.employeeId && (item.employeeId === user.employeeId || coversMe(item));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -380,7 +384,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                       2026-10-20): they're told here, and asked again on Confirm. */}
                   {isOwnReport(viewItem) && (
                     <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
-                      <strong>This is your own report.</strong> You can endorse it, but it will be marked as
+                      <strong>{coversMe(viewItem) ? "This group's report covers you." : "This is your own report."}</strong> You can endorse it, but it will be marked as
                       self-approved in the audit log.
                     </p>
                   )}
@@ -419,7 +423,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                       <button
                         onClick={async () => {
                           if (modalActionType === "verify" && isOwnReport(viewItem)
-                            && !window.confirm(`${viewItem.submissionNo} is your own report. Endorsing it will be marked as self-approved in the audit log. Endorse it anyway?`)) return;
+                            && !window.confirm(`${viewItem.submissionNo} ${coversMe(viewItem) ? "is a group's report that covers you" : "is your own report"}. Endorsing it will be marked as self-approved in the audit log. Endorse it anyway?`)) return;
                           setLoading(true);
                           try {
                             if (viewItem._category === "Personnel Request") {

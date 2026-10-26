@@ -58,6 +58,9 @@ interface LiquidationSheetFormProps {
   accountant: ActiveSignatory | null;
   /** Correcting a returned report: which parts reopened, with the reviewer's notes. */
   correction?: Pick<CorrectionAccess, "editable" | "noteFor" | "lineIds">;
+  /** A group's report (HSAC RAB 1): the attendees its cash advance covers. Each line may name the
+   * one it was for (optional); a line naming nobody is the holder's. */
+  groupAttendees?: Array<{ participantId: string; employeeName: string }>;
 }
 
 // Fillable boxes are tinted, like a fillable PDF, so the employee sees where to type while
@@ -101,6 +104,7 @@ export default function LiquidationSheetForm({
   representativeError,
   accountant,
   correction,
+  groupAttendees,
 }: LiquidationSheetFormProps) {
   const set = (patch: Partial<CoaHeaderFields>) => onCoaChange({ ...coa, ...patch });
   const rows = particulars ?? [];
@@ -289,6 +293,23 @@ export default function LiquidationSheetForm({
                         ))}
                       </select>
                     </label>
+                    {groupAttendees && groupAttendees.length > 0 && (
+                      <label className="flex items-center gap-1">
+                        For
+                        <select
+                          value={p.participantId || ""}
+                          disabled={disabled || !lineOpen(p.id)}
+                          onChange={(e) => update(p.id, { participantId: e.target.value || undefined })}
+                          aria-label={`Particular ${idx + 1}: whom it was for`}
+                          className={`${lineOpen(p.id) ? open : LOCKED} text-[11px]`}
+                        >
+                          <option value="">The group</option>
+                          {groupAttendees.map((m) => (
+                            <option key={m.participantId} value={m.participantId}>{m.employeeName}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <label className="flex items-center gap-1">
                       Amount ₱
                       <input

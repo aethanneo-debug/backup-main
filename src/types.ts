@@ -566,6 +566,18 @@ export interface TrainingEvaluation {
   evaluatedAt: string;
 }
 
+// One seminar enrolment a group cash advance pays for (HSAC RAB 1, 2026-10-26: participants who
+// attend together may have one cash advance processed for all of them, settled by one report and
+// one refund). `amount` is that person's allowance, fixed when Finance releases the advance:
+// HR re-prices allowances whenever a seminar is edited, and the training budget has to know
+// whose share the cash stands for (src/advanceCoverage.ts).
+export interface CashAdvanceCover {
+  participantId: string;          // TrainingParticipant.id (never the staff code, which can change)
+  employeeId: string;             // business form, e.g. "EMP007", as CashAdvance.employeeId
+  employeeName: string;
+  amount: number;                 // PHP, two decimals; a group's amounts add up to its `amount`
+}
+
 // Money going OUT: the disbursement voucher Finance releases to an employee before an
 // activity. The COA Liquidation Report's "AMOUNT OF CASH ADVANCE PER DV NO. __ DTD __"
 // refers to one of these. Without the record, that DV number is only the claimant's word,
@@ -601,6 +613,10 @@ export interface CashAdvance {
   refundOrDate?: string;          // YYYY-MM-DD
   refundedBy?: string;            // the Financial Officer who recorded it
   refundedAt?: string;            // ISO timestamp
+  // A group advance: every enrolment it pays for, all in one seminar, the holder's first (the one
+  // `activityId` names; the holder is `employeeId`, who receives the cash and files the one report).
+  // Absent on an individual advance, which pays for `activityId` alone.
+  covers?: CashAdvanceCover[];
 }
 
 // The instructor's note 11: a reviewer returns a liquidation report with a checklist of what
@@ -682,6 +698,9 @@ export interface LiquidationParticular {
   // Which bucket this line is charged to. Optional so reports filed before the picker
   // existed stay valid; the server falls back to "Miscellaneous".
   category?: TrainingExpenseCategory;
+  // A group's report (HSAC RAB 1, 2026-10-26): the attendee this line was for, one of those its
+  // cash advance covers (TrainingParticipant.id). Optional; a line naming nobody is the holder's.
+  participantId?: string;
 }
 
 export interface LiquidationSubmission {
@@ -814,8 +833,11 @@ export interface LiquidationSubmission {
 /** A report as GET /api/liquidation-submissions sends it. `fiscalYear` is the seminar's, worked
  * out on the way out and never stored, so Finance counts the report in the year HR planned it
  * (finance/overviewFigures.ts). A general activity's report has none and counts in the year it
- * was filed. */
-export type LiquidationSubmissionView = LiquidationSubmission & { fiscalYear?: string };
+ * was filed. `covers`: on a group's report, everyone its cash advance covers (the holder first). */
+export type LiquidationSubmissionView = LiquidationSubmission & {
+  fiscalYear?: string;
+  covers?: Array<Pick<CashAdvanceCover, "participantId" | "employeeId" | "employeeName">>;
+};
 
 /** One file in the Documents Vault (GET /api/liquidation-documents): a file attached to a
  * liquidation report, with the report it belongs to, but without the file itself. Its content is
