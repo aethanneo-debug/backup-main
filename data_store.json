@@ -61,6 +61,29 @@
       "createdAt": "2026-10-16T06:55:18.174Z",
       "passwordHash": "885fff9ad7f97880d8261828b436be88:246dabbe3bfd3e20aeaf8aace2cf45921c7ae85f08a51f9d4dfde9e27f870439ce110957b36d9d70fdd3273622df5857b05ec704ddb24c6f125be1038358babb",
       "requirePasswordChange": false
+    },
+    {
+      "id": "u-1792718409626",
+      "username": "test 4",
+      "email": "aethanneo+7@gmail.com",
+      "fullName": "test 4",
+      "role": "Personnel",
+      "status": "Pending Password Change",
+      "employeeId": "EMP-440",
+      "createdAt": "2026-10-23T01:20:09.626Z",
+      "passwordHash": "9de68311210e5ab50f5528f11400a01a:d03658e39f89ea8468f352dc09ed473f0f5de119214932c8d0a1f25c28147245b2622ad4c60c1d869e184b0b94b8f0c181b70fb14b6cdd7a32b252de41126193"
+    },
+    {
+      "id": "u-1792718606200",
+      "username": "test 6",
+      "email": "aethanneo+8@gmail.com",
+      "fullName": "test 6",
+      "role": "Personnel",
+      "status": "Active",
+      "employeeId": "EMP-789",
+      "createdAt": "2026-10-23T01:23:26.200Z",
+      "passwordHash": "0880ba13d748a3e3ff6d88e38232a100:a266e36ddf7224aff2105a97f0b5a52544fcfbf8d448b7cc6557ba02ee98a4d7aaf99064bbb8d5c0391d1ea9776be5c14d440afe0edd2b3b91049ed7890428e1",
+      "requirePasswordChange": false
     }
   ],
   "employees": [
@@ -300,6 +323,30 @@
       "isActive": true,
       "pdsFieldName": "PDS-Saavedra-2026 (1).pdf",
       "pdsUploadedAt": "2026-10-16T06:57:02.620Z"
+    },
+    {
+      "id": "emp-1792718409622",
+      "employeeId": "EMP-440",
+      "fullName": "test 4",
+      "position": "Test 4",
+      "division": "Adjudication Division",
+      "employmentStatus": "Regular",
+      "email": "aethanneo+7@gmail.com",
+      "dateHired": "2026-10-23",
+      "isActive": true
+    },
+    {
+      "id": "emp-1792718606198",
+      "employeeId": "EMP-789",
+      "fullName": "test 6",
+      "position": "test 6",
+      "division": "Adjudication Division",
+      "employmentStatus": "Regular",
+      "email": "aethanneo+8@gmail.com",
+      "dateHired": "2026-10-23",
+      "isActive": true,
+      "pdsFieldName": "PDS-Saavedra-2026 (1).pdf",
+      "pdsUploadedAt": "2026-10-23T01:29:32.418Z"
     }
   ],
   "employmentHistory": [
@@ -728,6 +775,402 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1792940717919-790",
+      "timestamp": "2026-10-25T15:05:17.919Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792940584246-785",
+      "timestamp": "2026-10-25T15:03:04.246Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Restore Training Program",
+      "details": "Restored \"Basic Customer Service Skills Training (BCSST)\" (FY 2027): it holds PHP 3,000.00 again, with 2 participants back on it."
+    },
+    {
+      "id": "log-1792940574715-813",
+      "timestamp": "2026-10-25T15:02:54.716Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Archive Training Program",
+      "details": "Archived \"Basic Customer Service Skills Training (BCSST)\" (FY 2027) before it was used: PHP 3,000.00 back to Unallocated, 2 participants taken off it."
+    },
+    {
+      "id": "log-1792939499441-307",
+      "timestamp": "2026-10-25T14:44:59.441Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792722423063-495",
+      "timestamp": "2026-10-23T02:27:03.063Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721506690-107",
+      "timestamp": "2026-10-23T02:11:46.690Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721460542-493",
+      "timestamp": "2026-10-23T02:11:00.542Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721326002-489",
+      "timestamp": "2026-10-23T02:08:46.002Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721279207-813",
+      "timestamp": "2026-10-23T02:07:59.207Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721233050-792",
+      "timestamp": "2026-10-23T02:07:13.050Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721087995-607",
+      "timestamp": "2026-10-23T02:04:47.995Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721069442-188",
+      "timestamp": "2026-10-23T02:04:29.442Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792721014673-817",
+      "timestamp": "2026-10-23T02:03:34.673Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792720987665-404",
+      "timestamp": "2026-10-23T02:03:07.665Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792720113959-45",
+      "timestamp": "2026-10-23T01:48:33.959Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719983641-669",
+      "timestamp": "2026-10-23T01:46:23.641Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719620187-418",
+      "timestamp": "2026-10-23T01:40:20.187Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719581906-860",
+      "timestamp": "2026-10-23T01:39:41.906Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719567907-861",
+      "timestamp": "2026-10-23T01:39:27.907Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719543123-36",
+      "timestamp": "2026-10-23T01:39:03.123Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719535436-673",
+      "timestamp": "2026-10-23T01:38:55.436Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"Anti Sexual Harassment Training\" (Function) for test 4 in the 2027 Training and Development Plan."
+    },
+    {
+      "id": "log-1792719525168-299",
+      "timestamp": "2026-10-23T01:38:45.168Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719510643-987",
+      "timestamp": "2026-10-23T01:38:30.643Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719493968-995",
+      "timestamp": "2026-10-23T01:38:13.968Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792719403904-78",
+      "timestamp": "2026-10-23T01:36:43.904Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"Anti Sexual Harassment Training\" (Function) for test 6 in the 2027 Training and Development Plan."
+    },
+    {
+      "id": "log-1792718999452-454",
+      "timestamp": "2026-10-23T01:29:59.452Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718972419-485",
+      "timestamp": "2026-10-23T01:29:32.419Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Upload PDS",
+      "details": "Updated Personal Data Sheet (PDS) for test 6 (EMP-789)"
+    },
+    {
+      "id": "log-1792718662474-993",
+      "timestamp": "2026-10-23T01:24:22.474Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718656425-989",
+      "timestamp": "2026-10-23T01:24:16.425Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Change Password",
+      "details": "User successfully modified/updated login credentials."
+    },
+    {
+      "id": "log-1792718640457-854",
+      "timestamp": "2026-10-23T01:24:00.457Z",
+      "userId": "u-1792718606200",
+      "username": "test 6",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718606200-972",
+      "timestamp": "2026-10-23T01:23:26.200Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create User Account",
+      "details": "Created digital user: test 6 and employee EMP-789"
+    },
+    {
+      "id": "log-1792718409626-690",
+      "timestamp": "2026-10-23T01:20:09.626Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Create User Account",
+      "details": "Created digital user: test 4 and employee EMP-440"
+    },
+    {
+      "id": "log-1792718364255-213",
+      "timestamp": "2026-10-23T01:19:24.255Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718354392-159",
+      "timestamp": "2026-10-23T01:19:14.392Z",
+      "userId": "u-1792133718174",
+      "username": "Test Account",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718205705-170",
+      "timestamp": "2026-10-23T01:16:45.705Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718179195-365",
+      "timestamp": "2026-10-23T01:16:19.195Z",
+      "userId": "u-3",
+      "username": "finance",
+      "role": "Financial Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718156728-140",
+      "timestamp": "2026-10-23T01:15:56.728Z",
+      "userId": "u-1792133718174",
+      "username": "Test Account",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792718093241-268",
+      "timestamp": "2026-10-23T01:14:53.241Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792717982314-506",
+      "timestamp": "2026-10-23T01:13:02.314Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792717962627-856",
+      "timestamp": "2026-10-23T01:12:42.627Z",
+      "userId": "u-1792133718174",
+      "username": "Test Account",
+      "role": "Personnel",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792717933892-272",
+      "timestamp": "2026-10-23T01:12:13.892Z",
+      "userId": "u-1",
+      "username": "admin",
+      "role": "Administrator / Division Chief",
+      "action": "Login",
+      "details": "Successful authenticated session login via credentials."
+    },
+    {
+      "id": "log-1792717921112-232",
+      "timestamp": "2026-10-23T01:12:01.112Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"Orientation on SALN\" (Function) for Test Account in the 2027 Training and Development Plan."
+    },
+    {
+      "id": "log-1792717914502-910",
+      "timestamp": "2026-10-23T01:11:54.502Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Add Training Need",
+      "details": "Added \"Anti Sexual Harassment Training\" (Function) for Test Account in the 2027 Training and Development Plan."
+    },
+    {
+      "id": "log-1792717903759-296",
+      "timestamp": "2026-10-23T01:11:43.759Z",
+      "userId": "u-2",
+      "username": "hr",
+      "role": "HR Officer",
+      "action": "Import Plan A Workbook",
+      "details": "Imported 456 training need(s) from \"RAB-1-Training-and-Development-Plan-2026-4.23.26-ABC-D.xlsx\" sheet \"Plan A - 2026\" into the 2027 plan for 14 employee(s); 1 row(s) skipped, 2 duplicate(s) in the file, 0 already in the plan."
+    },
     {
       "id": "log-1792696548320-689",
       "timestamp": "2026-10-22T19:15:48.320Z",
@@ -5813,6 +6256,93 @@
         "liquidationActivityId": "part-1789755275183-876"
       },
       "dedupeKey": "liq-due:part-1789755275183-876:overdue"
+    },
+    {
+      "id": "notif-c778a167-588c-491b-a9da-2044bc03ffc6",
+      "title": "456 training need(s) imported into Plan A",
+      "message": "Plan A for 2027 gained 456 need(s) from the uploaded workbook \"RAB-1-Training-and-Development-Plan-2026-4.23.26-ABC-D.xlsx\".",
+      "type": "info",
+      "readBy": [],
+      "timestamp": "2026-10-23T01:11:43.770Z",
+      "targetRole": "HR Officer",
+      "link": {
+        "tab": "training_development",
+        "subTab": "plan-a"
+      }
+    },
+    {
+      "id": "notif-c3885ed2-a49a-484a-b402-ee36f2fdf1f8",
+      "title": "Seminar assignment: RA 12009 (New Government Procurement Act)",
+      "message": "You are assigned to \"RA 12009 (New Government Procurement Act)\" on October 23, 2026. Your liquidation is due on November 22, 2026 (30 days after the seminar ends).",
+      "type": "info",
+      "readBy": [],
+      "timestamp": "2026-10-23T02:02:48.912Z",
+      "targetRole": "Personnel",
+      "targetEmployeeId": "emp-1792718409622",
+      "link": {
+        "tab": "employee_portal",
+        "record": {
+          "kind": "assignment",
+          "id": "part-1792720968911-33846"
+        }
+      },
+      "dedupeKey": "assign:part-1792720968911-33846"
+    },
+    {
+      "id": "notif-ce430c60-042e-4080-90ed-9f45d444c18c",
+      "title": "Seminar assignment: RA 12009 (New Government Procurement Act)",
+      "message": "You are assigned to \"RA 12009 (New Government Procurement Act)\" on October 23, 2026. Your liquidation is due on November 22, 2026 (30 days after the seminar ends).",
+      "type": "info",
+      "readBy": [
+        "u-1792718606200"
+      ],
+      "timestamp": "2026-10-23T02:06:36.201Z",
+      "targetRole": "Personnel",
+      "targetEmployeeId": "emp-1792718606198",
+      "link": {
+        "tab": "employee_portal",
+        "record": {
+          "kind": "assignment",
+          "id": "part-1792721196201-41694"
+        }
+      },
+      "dedupeKey": "assign:part-1792721196201-41694"
+    },
+    {
+      "id": "notif-83e45ffb-c2c6-48d4-b382-660cbf04f36c",
+      "title": "Seminar assignment: Basic Customer Service Skills Training (BCSST)",
+      "message": "You are assigned to \"Basic Customer Service Skills Training (BCSST)\" on October 23, 2026. Your liquidation is due on November 22, 2026 (30 days after the seminar ends).",
+      "type": "info",
+      "readBy": [],
+      "timestamp": "2026-10-23T02:16:09.064Z",
+      "targetRole": "Personnel",
+      "targetEmployeeId": "emp-1792133718166",
+      "link": {
+        "tab": "employee_portal",
+        "record": {
+          "kind": "assignment",
+          "id": "part-1792721769064-71343"
+        }
+      },
+      "dedupeKey": "assign:part-1792721769064-71343"
+    },
+    {
+      "id": "notif-57741400-2585-41f7-8640-16a435803382",
+      "title": "Seminar assignment: Basic Customer Service Skills Training (BCSST)",
+      "message": "You are assigned to \"Basic Customer Service Skills Training (BCSST)\" on October 23, 2026. Your liquidation is due on November 22, 2026 (30 days after the seminar ends).",
+      "type": "info",
+      "readBy": [],
+      "timestamp": "2026-10-23T02:16:09.065Z",
+      "targetRole": "Personnel",
+      "targetEmployeeId": "emp-1792718606198",
+      "link": {
+        "tab": "employee_portal",
+        "record": {
+          "kind": "assignment",
+          "id": "part-1792721769065-76219"
+        }
+      },
+      "dedupeKey": "assign:part-1792721769065-76219"
     }
   ],
   "activities": [],
@@ -6167,6 +6697,230 @@
           "typeOfLAndD": "TECHNICAL"
         }
       ]
+    },
+    {
+      "id": "pds-1792718972418",
+      "employeeId": "EMP-789",
+      "surname": "SAAVEDRA",
+      "firstName": "NIÑO ROMYR",
+      "middleName": "HUFANO",
+      "nameExtension": "",
+      "dateOfBirth": "1981-04-08",
+      "placeOfBirth": "STA. CRUZ, MANILA",
+      "sex": "Male",
+      "civilStatus": "Single",
+      "heightM": "1.65",
+      "weightKg": "72",
+      "bloodType": "A +",
+      "gsisId": "BP No. 2005932929",
+      "pagibigId": "1280-0068-4072",
+      "philhealthId": "19-089854774-8",
+      "sssId": "",
+      "tinNo": "929-346-979",
+      "agencyEmployeeNo": "2021-0718-24",
+      "citizenshipType": "Filipino",
+      "dualCitizenshipBy": "",
+      "dualCountry": "",
+      "rHouseNo": "PUROK 2",
+      "rStreet": "FRANCISCO ORTEGA HIGHWAY",
+      "rSubdivision": "",
+      "rBarangay": "CAMANSI",
+      "rCityMunicipality": "SAN FERNANDO CITY",
+      "rProvince": "LA UNION",
+      "rZipCode": "2500",
+      "pHouseNo": "",
+      "pStreet": "",
+      "pSubdivision": "",
+      "pBarangay": "",
+      "pCityMunicipality": "",
+      "pProvince": "",
+      "pZipCode": "",
+      "telephoneNo": "N/A",
+      "mobileNo": "09176807060",
+      "emailAddress": "ninoromyr.saavedra@gmail.com",
+      "spouseSurname": "N/A",
+      "spouseFirstName": "N/A",
+      "spouseMiddleName": "N/A",
+      "spouseExtension": "N/A",
+      "spouseOccupation": "N/A",
+      "spouseEmployer": "N/A",
+      "spouseBusinessAddress": "N/A",
+      "spouseTelephone": "N/A",
+      "fatherSurname": "N/A",
+      "fatherFirstName": "N/A",
+      "fatherMiddleName": "N/A",
+      "fatherExtension": "N/A",
+      "motherMaidenSurname": "HUFANO",
+      "motherFirstName": "MYRNA",
+      "motherMiddleName": "MADAYAG",
+      "children": [
+        {
+          "dateOfBirth": "N/A",
+          "fullName": "N/A"
+        }
+      ],
+      "education": [
+        {
+          "attendanceFrom": "01/06/1982",
+          "attendanceTo": "01/04/1993",
+          "degreeCourse": "PRIMARY EDUCATION",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "ELEMENTARY",
+          "scholarshipsHonorsReceived": "LOYALTY AWARD",
+          "schoolName": "FELKRIS GRADE SCHOOL",
+          "yearGraduated": "1993"
+        },
+        {
+          "attendanceFrom": "01/06/1994",
+          "attendanceTo": "01/04/1998",
+          "degreeCourse": "SECONDARY",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "SECONDARY",
+          "scholarshipsHonorsReceived": "N/A",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "1998"
+        },
+        {
+          "attendanceFrom": "08/06/1998",
+          "attendanceTo": "03/11/2002",
+          "degreeCourse": "BS IN COMMERCE",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "COLLEGE",
+          "scholarshipsHonorsReceived": "CUM LAUDE, RECOGNITION AWARD, LOYALTY AWARD",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "2002"
+        },
+        {
+          "attendanceFrom": "01/10/2002",
+          "attendanceTo": "03/31/2006",
+          "degreeCourse": "MASTERS IN BUSINESS ADMINISTRATION",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "GRADUATE STUDIES",
+          "scholarshipsHonorsReceived": "N/A",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "2006"
+        },
+        {
+          "attendanceFrom": "15/06/2009",
+          "attendanceTo": "17/06/2019",
+          "degreeCourse": "DOCTOR OF PHILOSOPHY IN MANAGEMENT",
+          "highestLevelUnitsEarned": "N/A",
+          "level": "POST GRADUATE STUDIES",
+          "scholarshipsHonorsReceived": "N/A",
+          "schoolName": "SAINT LOUIS COLLEGE",
+          "yearGraduated": "2019"
+        }
+      ],
+      "civilService": [
+        {
+          "dateOfExamination": "08/12/2024",
+          "eligibilityName": "CAREER EXECUTIVE SERVICE WRITTEN EXAMINATION (CESWE)",
+          "licenseNumber": "N/A",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "NEW ERA UNIVERSITY, QUEZON CITY",
+          "rating": "85.4"
+        },
+        {
+          "dateOfExamination": "28/09/2008",
+          "eligibilityName": "LICENSURE EXAMINATION FOR TEACHERS (LET)",
+          "licenseNumber": "1013838",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "BAGUIO CITY",
+          "rating": "81.0"
+        },
+        {
+          "dateOfExamination": "NA",
+          "eligibilityName": "CIVIL SERVICE PROFESSIONAL ELIGIBILITY",
+          "licenseNumber": "10010077",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "N/A",
+          "rating": "PD 907 - HONOR GRADUATE"
+        },
+        {
+          "dateOfExamination": "25/11/2000",
+          "eligibilityName": "CIVIL SERVICE SUB-PROFESSIONAL ELIGIBILITY",
+          "licenseNumber": "01030001",
+          "licenseValidityDate": "N/A",
+          "placeOfExamination": "CIVIL SERVICE COMMISSION - SAN FERNANDO CITY",
+          "rating": "80.3"
+        }
+      ],
+      "serviceRecords": [
+        {
+          "departmentAgency": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH I",
+          "govService": "Y",
+          "inclusiveDateFrom": "16/07/2021",
+          "inclusiveDateTo": "PRESENT",
+          "monthlySalary": "",
+          "positionTitle": "CHIEF ADMINISTRATIVE OFFICER",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "11/06/2011",
+          "inclusiveDateTo": "15/07/2021",
+          "monthlySalary": "",
+          "positionTitle": "DEAN",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "01/04/2018",
+          "inclusiveDateTo": "01/07/2018",
+          "monthlySalary": "",
+          "positionTitle": "DEPUTY ASSISTANT EXECUTIVE DIRECTOR",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        },
+        {
+          "departmentAgency": "LORMA COLLEGES",
+          "govService": "N",
+          "inclusiveDateFrom": "15/07/2010",
+          "inclusiveDateTo": "31/05/2011",
+          "monthlySalary": "",
+          "positionTitle": "OFFICER-IN-CHARGE - DEAN",
+          "salaryGrade": "",
+          "statusOfAppointment": "PERMANENT"
+        }
+      ],
+      "trainings": [
+        {
+          "dateFrom": "11/12/2025",
+          "dateTo": "11/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "LEARNING 2 LEARN SESSION 13: EMERGENCY RESPONSE DRILL AND SIMULATION",
+          "trainingHours": "4 HOURS",
+          "typeOfLAndD": "TECHNICAL"
+        },
+        {
+          "dateFrom": "11/12/2025",
+          "dateTo": "11/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "LEARNING 2 LEARN SESSION 13: EXPANDED ANTI-TRAFFICKING IN PERSONS ACT (RA 11862)",
+          "trainingHours": "1.5 HOURS",
+          "typeOfLAndD": "TECHNICAL"
+        },
+        {
+          "dateFrom": "11/12/2025",
+          "dateTo": "11/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "LEARNING 2 LEARN SESSIONS 13: ANTI-SEXUAL HARASSMENT (RA 7877)",
+          "trainingHours": "1.5 HOURS",
+          "typeOfLAndD": "TECHNICAL"
+        },
+        {
+          "dateFrom": "10/12/2025",
+          "dateTo": "12/12/2025",
+          "organizer": "HUMAN SETTLEMENTS ADJUDICATION COMMISSION - REGIONAL ADJUDICATION BRANCH 1",
+          "title": "2025 YEAR-END PERFORMANCE REVIEW; STRATEGIC PLANNING",
+          "trainingHours": "12 HOURS",
+          "typeOfLAndD": "FOUNDATION"
+        }
+      ]
     }
   ],
   "fiscalYears": [
@@ -6383,6 +7137,93 @@
         "Anti Sexual Harassment Training"
       ],
       "createdAt": "2026-10-16T07:32:45.246Z"
+    },
+    {
+      "id": "tp-1792720968911",
+      "seriesId": "tp-1792720968911",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "description": "",
+      "allocatedBudget": 13000,
+      "usedBudget": 0,
+      "fiscalYear": "2027",
+      "startDate": "2026-10-23",
+      "endDate": "2026-10-23",
+      "startTime": "10:03",
+      "endTime": "22:06",
+      "durationDays": 1,
+      "totalHours": 12.05,
+      "venue": "",
+      "facilitator": "test",
+      "maxParticipants": 1,
+      "targetDivision": "",
+      "budgetSplit": {
+        "Meals": 40,
+        "Transportation": 30,
+        "Accommodation": 20,
+        "Materials": 10
+      },
+      "fulfillsNeedTitles": [
+        "RA 12009 (New Government Procurement Act)"
+      ],
+      "createdAt": "2026-10-23T02:02:48.911Z"
+    },
+    {
+      "id": "tp-1792721196201",
+      "seriesId": "tp-1792721196201",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "description": "",
+      "allocatedBudget": 14000,
+      "usedBudget": 0,
+      "fiscalYear": "2027",
+      "startDate": "2026-10-23",
+      "endDate": "2026-10-23",
+      "startTime": "10:08",
+      "endTime": "22:00",
+      "durationDays": 1,
+      "totalHours": 11.866666666666667,
+      "venue": "",
+      "facilitator": "testest",
+      "maxParticipants": 1,
+      "targetDivision": "",
+      "budgetSplit": {
+        "Meals": 40,
+        "Transportation": 30,
+        "Accommodation": 20,
+        "Materials": 10
+      },
+      "fulfillsNeedTitles": [
+        "RA 12009 (New Government Procurement Act)"
+      ],
+      "createdAt": "2026-10-23T02:06:36.201Z"
+    },
+    {
+      "id": "tp-1792721769064",
+      "seriesId": "tp-1792721769064",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "description": "",
+      "allocatedBudget": 3000,
+      "usedBudget": 0,
+      "fiscalYear": "2027",
+      "startDate": "2026-10-23",
+      "endDate": "2026-10-23",
+      "startTime": "10:13",
+      "endTime": "17:00",
+      "durationDays": 1,
+      "totalHours": 6.783333333333333,
+      "venue": "",
+      "facilitator": "test test ",
+      "maxParticipants": 2,
+      "targetDivision": "",
+      "budgetSplit": {
+        "Meals": 40,
+        "Transportation": 30,
+        "Accommodation": 20,
+        "Materials": 10
+      },
+      "fulfillsNeedTitles": [
+        "Basic Customer Service Skills Training (BCSST)"
+      ],
+      "createdAt": "2026-10-23T02:16:09.064Z"
     }
   ],
   "trainingParticipants": [
@@ -6429,6 +7270,34 @@
       "attendance": "Attended",
       "attendanceBy": "Maria Clara V. Santos",
       "attendanceAt": "2026-10-16T07:35:05.238Z"
+    },
+    {
+      "id": "part-1792720968911-33846",
+      "trainingProgramId": "tp-1792720968911",
+      "employeeId": "emp-1792718409622",
+      "status": "Assigned",
+      "allowanceAllocated": 13000
+    },
+    {
+      "id": "part-1792721196201-41694",
+      "trainingProgramId": "tp-1792721196201",
+      "employeeId": "emp-1792718606198",
+      "status": "Assigned",
+      "allowanceAllocated": 14000
+    },
+    {
+      "id": "part-1792721769064-71343",
+      "trainingProgramId": "tp-1792721769064",
+      "employeeId": "emp-1792133718166",
+      "status": "Assigned",
+      "allowanceAllocated": 1500
+    },
+    {
+      "id": "part-1792721769065-76219",
+      "trainingProgramId": "tp-1792721769064",
+      "employeeId": "emp-1792718606198",
+      "status": "Assigned",
+      "allowanceAllocated": 1500
     }
   ],
   "trainingLiquidations": [
@@ -6457,7 +7326,4148 @@
       "status": "Approved"
     }
   ],
-  "trainingNeeds": [],
+  "trainingNeeds": [
+    {
+      "id": "need-1792717903755-0",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Ethics",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-1",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-2",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Mediation, Conciliation & other Alternative Dispute Resolution",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-3",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Research",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-4",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Sensitivity Training (GST)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-5",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Drafting of Compromise Agreement",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-6",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Procedure / Case Management",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-7",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Analysis (GA) and Use of GA Tools",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-8",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "PD 957 and BP 220",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-9",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Writing - Drafting of Oders, Resolutions and Decisions of Cases, Summons, Subpoeas, Order of Finality, Writ of Execution",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-10",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Executive Order No. 71 (1993)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-11",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Drafting of Legal Documents",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-12",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "RA 9904 (Magna Carta for HOAs)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-13",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Technical Writing / Business and Professional Communication",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-14",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Local Government Code of 1991",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-15",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-16",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-17",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-18",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Para Legal Training",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-19",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-20",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-21",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-22",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-23",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-24",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-25",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-26",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-27",
+      "employeeId": "emp-4",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-28",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Ethics",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-29",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-30",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Mediation, Conciliation & other Alternative Dispute Resolution",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-31",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Research",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-32",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Basic Records and Archives Management (BRAM)",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903755-33",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Drafting of Compromise Agreement",
+      "createdAt": "2026-10-23T01:11:43.755Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-34",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Procedure / Case Management",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-35",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Sensitivity Training (GST)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-36",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "PD 957 and BP 220",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-37",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Writing - Drafting of Oders, Resolutions and Decisions of Cases, Summons, Subpoeas, Order of Finality, Writ of Execution",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-38",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Analysis (GA) and Use of GA Tools",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-39",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Executive Order No. 71 (1993)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-40",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Drafting of Legal Documents",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-41",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "RA 9904 (Magna Carta for HOAs)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-42",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Technical Writing / Business and Professional Communication",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-43",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Local Government Code of 1991",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-44",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-45",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-46",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-47",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Para Legal Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-48",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-49",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-50",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-51",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-52",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-53",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-54",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-55",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-56",
+      "employeeId": "emp-1791299600281",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-57",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Mediation, Conciliation & other Alternative Dispute Resolution",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-58",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-59",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leadership and Management Proficiency (LAMP)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-60",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Drafting of Compromise Agreement",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-61",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Government Appraisal and Disposal of Government Properties (ADGP)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-62",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "CES Leadership Conclave Series",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-63",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Mandatory Continuing Legal Education (MCLE)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-64",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "SALN Compliance and Review",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-65",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "CES Accredited Training Programs",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-66",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules on Administrative Cases in the Civil Service (RACCS)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-67",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Drug Free Workplace Program Orientation",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-68",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Executive Leadership and Wellness Camps",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-69",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Omnibus Rules on Appointment and Other Human Resource Actions (ORAOHRA)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-70",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-71",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Public Policy and Governance",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-72",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Seminar Workshop on Administrative Procedures (SWAP)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-73",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-74",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Competency Development",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-75",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Serving Writs, Summons & Subpoenas, Execution of Final Orders",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-76",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-77",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leadership and Governance Series",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-78",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Execution of Final Orders and Decisions, Awards and Judgments",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-79",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Analysis (GA) and Use of GA Tools",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-80",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules of Court",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-81",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Internal Auditor Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-82",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Writ Execution and Enforcement",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-83",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Specialized Courses",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-84",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-85",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-86",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-87",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Supervisory / Management Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-88",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Leadership and Management",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-89",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Specialized Legal Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-90",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Research and Opinion Writing",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-91",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Litigation and Case Handling",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-92",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Contract Administration",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-93",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Counselling and Investigation",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-94",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-95",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-96",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-97",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-98",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-99",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-100",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-101",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-102",
+      "employeeId": "emp-1791299600282",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-103",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Mediation, Conciliation & other Alternative Dispute Resolution",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-104",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-105",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Drafting of Compromise Agreement",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-106",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender and Development (GAD) Planning and Budgeting",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-107",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Mandatory Continuing Legal Education (MCLE)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-108",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Freedom of Information (FOI)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-109",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules on Administrative Cases in the Civil Service (RACCS)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-110",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-111",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Omnibus Rules on Appointment and Other Human Resource Actions (ORAOHRA)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-112",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-113",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Serving Writs, Summons & Subpoenas, Execution of Final Orders",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-114",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-115",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Execution of Final Orders and Decisions, Awards and Judgments",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-116",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Analysis (GA) and Use of GA Tools",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-117",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules of Court",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-118",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Internal Auditor Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-119",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Writ Execution and Enforcement",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-120",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-121",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-122",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-123",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Research and Opinion Writing",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-124",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Litigation and Case Handling",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-125",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Contract Administration",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-126",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Government Procedures",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-127",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Local Government Law",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-128",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-129",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-130",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-131",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-132",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-133",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-134",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-135",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-136",
+      "employeeId": "emp-1791299600283",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-137",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Mediation, Conciliation & other Alternative Dispute Resolution",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-138",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Basic Occupational Safety and Health Training (BOSH)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-139",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Drafting of Compromise Agreement",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-140",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-141",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "PD 957 and BP 220",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-142",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-143",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 6552",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-144",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-145",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 9904 (Magna Carta for HOAs)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-146",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Local Government Code of 1991",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-147",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-148",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-149",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-150",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Supervisory and Development Course",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-151",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Ethics",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-152",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Research",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-153",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Procedure",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-154",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Writing - Drafting of Oders, Resolutions and Decisions of Cases, Summons, Subpoeas, Order of Finality, Writ of Execution",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-155",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-156",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-157",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-158",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-159",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-160",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-161",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-162",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-163",
+      "employeeId": "emp-1791299600284",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-164",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Mediation, Conciliation & other Alternative Dispute Resolution",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-165",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-166",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Drafting of Compromise Agreement",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-167",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "PD 957 and BP 220",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-168",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 6552",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-169",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 9904 (Magna Carta for HOAs)",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903756-170",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Local Government Code of 1991",
+      "createdAt": "2026-10-23T01:11:43.756Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-171",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Records and Archives Management (BRAM)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-172",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-173",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-174",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-175",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Ethics",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-176",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Research",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-177",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Procedure",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-178",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Legal Writing - Drafting of Oders, Resolutions and Decisions of Cases, Summons, Subpoeas, Order of Finality, Writ of Execution",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-179",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-180",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-181",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-182",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-183",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-184",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-185",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-186",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-187",
+      "employeeId": "emp-1791299600285",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-188",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Serving Writs, Summons & Subpoenas, Execution of Final Orders",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-189",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Basic Occupational Safety and Health Training (BOSH)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-190",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Execution of Final Orders and Decisions, Awards and Judgments",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-191",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-192",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules of Court",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-193",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-194",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Writ Execution and Enforcement",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-195",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-196",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Procedural Training for Sheriffs",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-197",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Code of Conduct and Ethical Standards",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-198",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Paralegal / Legal Procedure Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-199",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Security and Peacekeeping",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-200",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Records Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-201",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Police Assistance and Related Rules and Regulations",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-202",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-203",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-204",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-205",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-206",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-207",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-208",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-209",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-210",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-211",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-212",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-213",
+      "employeeId": "emp-1791299600286",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-214",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules on Administrative Cases in the Civil Service (RACCS)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-215",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Inventory Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-216",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leadership and Management Proficiency (LAMP)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-217",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Seminar Workshop on Administrative Procedures (SWAP)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-218",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Government Appraisal and Disposal of Government Properties (ADGP)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-219",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "CES Leadership Conclave Series",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-220",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Omnibus Rules on Appointment and Other Human Resource Actions (ORAOHRA)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-221",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-222",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "CES Accredited Training Programs",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-223",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-224",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Asset Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-225",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Executive Leadership and Wellness Camps",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-226",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-227",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Drug Free Workplace Program Orientation",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-228",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Public Policy and Governance",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-229",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Supervisory / Manageent Learning and Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-230",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-231",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Competency Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-232",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Leadership and Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-233",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-234",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leadership and Governance Series",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-235",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "PRIME - HRM (Program to Institutionalize Meritocracy and Excellence in Human Resource Management)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-236",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-237",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-238",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Analysis (GA) and Use of GA Tools",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-239",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Laws and Rules on Government Expenditures",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-240",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Specialized Courses",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-241",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Property and Supply Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-242",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Internal Auditor Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-243",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Public Service Values and Ethics",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-244",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "GAD Planning and Budget",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-245",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensitivity Training (GST)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-246",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-247",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-248",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-249",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-250",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-251",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-252",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-253",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-254",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-255",
+      "employeeId": "emp-1791299600287",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-256",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rules on Administrative Cases in the Civil Service (RACCS)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-257",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-258",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Supervisory / Manageent Learning and Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-259",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Omnibus Rules on Appointment and Other Human Resource Actions (ORAOHRA)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-260",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-261",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leadership and Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-262",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Seminar Workshop on Administrative Procedures (SWAP)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-263",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-264",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "PRIME - HRM (Program to Institutionalize Meritocracy and Excellence in Human Resource Management)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-265",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 6713 (Code of Conduct and Ethical Standards for Public Officials and Employees)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-266",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-267",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 11032 (Orientation on Ease of Doing Business Act)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-268",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Anti-Sexual Harassment",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-269",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Public Service Ethics and Accountability",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-270",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Recruitment, Selection and Placement (RSP)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-271",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Learning and Development (L&D)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-272",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Strategic Performance Management System (SPMS)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-273",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Rewards and Recognition",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-274",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Competency-Based Human Resource System (CBHRMS)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-275",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Leave Administration Course for Effectiveness (LACE)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-276",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "201 File / Personnel Records Management",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-277",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Professional Communication / Technical Writing",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-278",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-279",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-280",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903757-281",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Supervisory and Development Course (SDC)",
+      "createdAt": "2026-10-23T01:11:43.757Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-282",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Leadership and Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-283",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "HRM Professional Development Program",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-284",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Compensation and Benefits Administration",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-285",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Employee Relations and Compliance",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-286",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Coaching and Mentoring",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-288",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-289",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-290",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-291",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-292",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-293",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-294",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "SALN Compliance and Review",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-295",
+      "employeeId": "emp-1791299600288",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-296",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Government Accounting Manual (GAM) Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-297",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Inventory Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-298",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Rules on Administrative Cases in the Civil Service (RACCS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-299",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Philippine Public Sector Accounting Standards (PPSAS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-300",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "SALN Compliance and Review",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-301",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Omnibus Rules on Appointment and Other Human Resource Actions (ORAOHRA)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-302",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Laws and Rules on Government Expenditures",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-303",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Training on Handling Employee Grievances",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-304",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "RA 6713 (Code of Conduct and Ethical Standards for Public Officials and Employees)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-305",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Tax Management and Remittance",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-306",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Grievance Resolution for Public Service Managers",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-307",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-308",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Leadership and Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-309",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Employee Discipline and Productivity Management 101",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-310",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "RA 11032 (Orientation on Ease of Doing Business Act)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-311",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Internal Control System and Internal Audit",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-312",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Internal Auditor Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-313",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Public Service Ethics and Accountability",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-314",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Cash Management and Control System",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-315",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Government Appraisal and Disposal of Government Properties (ADGP)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-316",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Recruitment, Selection and Placement (RSP)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-317",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-318",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "One time cleansing of PPE",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-319",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Learning and Development (L&D)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-320",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-321",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Property and Supply Management System",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-322",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Strategic Performance Management System (SPMS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-323",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-324",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Rewards and Recognition",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-325",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-326",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Competency-Based Human Resource System (CBHRMS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-327",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Asset Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-328",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leave Administration Course for Effectiveness (LACE)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-329",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-330",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "201 File / Personnel Records Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-331",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-332",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-333",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-335",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-336",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-337",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-338",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-339",
+      "employeeId": "emp-1791299600289",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-340",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Cash Management and Control System",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-341",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Government Appraisal and Disposal of Government Properties (ADGP)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-342",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Rules on Administrative Cases in the Civil Service (RACCS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-343",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Laws and Rules on Government Expenditures",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-344",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-345",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Omnibus Rules on Appointment and Other Human Resource Actions (ORAOHRA)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-346",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Government Accounting Manual (GAM) Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-347",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Asset Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-348",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "RA 6713 (Code of Conduct and Ethical Standards for Public Officials and Employees)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-349",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Property and Supply Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-350",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "One time cleansing of PPE",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-351",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Public Service Ethics and Accountability",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-352",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Internal Control System and Internal Audit",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-353",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Recruitment, Selection and Placement (RSP)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-354",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Inventory Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-355",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Learning and Development (L&D)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-356",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-357",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Strategic Performance Management System (SPMS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-358",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-359",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Rewards and Recognition",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-360",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and development",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-361",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Competency-Based Human Resource System (CBHRMS)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-362",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-363",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Leave Administration Course for Effectiveness (LACE)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-364",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-365",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "201 File / Personnel Records Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-366",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-367",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-368",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-369",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-370",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-371",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-372",
+      "employeeId": "emp-1791299600290",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-373",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-374",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Basic Occupational Safety and Health Training (BOSH)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-375",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Cash Management and Control System",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-376",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Procurement Planning and Budgeting",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-377",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Laws and Rules on Government Expenditures",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-378",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "PHILGEPS Proficiency",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-379",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Government Accounting Manual (GAM) Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-380",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Procurement of Goods and Services",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-381",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Property and Supply Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-382",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Contract Management and Administration",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-383",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Internal Control System and Internal Audit",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-384",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Ethics in Procurement",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-385",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Inventory Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-386",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Preparation of Technical Specifications and Costing",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-387",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 10173 (Data Privacy Act)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-388",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Data Management",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-389",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Government Specific ICT Systems",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-390",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Information Systems Strategic Plan (ISSP)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-391",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-392",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-393",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-394",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-395",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903758-396",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.758Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-397",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-398",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-399",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-400",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-401",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-402",
+      "employeeId": "emp-1791299600291",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-403",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Government Budgeting and the Budget Cycle",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-404",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Basic Customer Service Skills Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-405",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Procurement Planning and Budgeting",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-406",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Government Accounting Manual (GAM) Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-407",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-408",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "PHILGEPS Proficiency",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-409",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Procurement Planning and Budget",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-410",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Analysis (GA) and Use of GA Tools",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-411",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Market Scoping and Technical Specification Writing",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-412",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Unified Reporting System (URS)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-413",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "ISO Internal Auditor Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-414",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Internal Control System and Internal Audit",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-415",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Gender Responsive Procurement",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-416",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Annual Cash - Based Budgeting System",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-417",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Laws and Rules on Government Expenditures",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-418",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development (GAD) Planning and Budgeting",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-419",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-420",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-421",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-422",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-423",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-424",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-425",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-426",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-427",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-428",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-429",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-430",
+      "employeeId": "emp-1791299600292",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-431",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Records and Archives Management (BRAM)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-432",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "Freedom of Information (FOI)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-433",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Government Budgeting and the Budget Cycle",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-434",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Records Disposition Administration (RDA)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-435",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Additional Function",
+      "title": "RA 12009 (New Government Procurement Act)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-436",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Government Accounting Manual (GAM) Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-437",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Electronic Records Management Policy (ERMP)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-438",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Procurement Planning and Budget",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-439",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "RA 9470",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-440",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Unified Reporting System (URS)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-441",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Data Privacy Act",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-442",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Internal Control System and Internal Audit",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-443",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti - Red Tape Act (ARTA)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-444",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Career Advancement",
+      "title": "Gender and Development (GAD) Planning and Budgeting",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-445",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Records Inventory and Appraisal",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-446",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Microsoft Office Proficiency",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-447",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "ISO Awareness Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-448",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender and Development",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-449",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Values Orientation Workshop (VOW)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-450",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on RA 6713 (Code of Conduct and Ethical Standards)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-451",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Training on Ethics, Accountability and Discipline (TEAD)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-452",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Basic Customer Service Skills Training (BCSST)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-453",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on Ease of Doing Business(RA 11032)",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-454",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Gender Sensivity Training (GST) and SOGIESC",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-455",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Updates on Civil Service Laws and Rules",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-456",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717903759-457",
+      "employeeId": "emp-1791299600293",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:43.759Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717914502-94355",
+      "employeeId": "emp-1792133718166",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:11:54.502Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792717921112-85724",
+      "employeeId": "emp-1792133718166",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Orientation on SALN",
+      "createdAt": "2026-10-23T01:12:01.112Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792719403904-11740",
+      "employeeId": "emp-1792718606198",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:36:43.904Z",
+      "createdBy": "hr"
+    },
+    {
+      "id": "need-1792719535436-17202",
+      "employeeId": "emp-1792718409622",
+      "fiscalYear": "2027",
+      "category": "Function",
+      "title": "Anti Sexual Harassment Training",
+      "createdAt": "2026-10-23T01:38:55.436Z",
+      "createdBy": "hr"
+    }
+  ],
   "cashAdvances": [
     {
       "id": "ca-1792136490873",
