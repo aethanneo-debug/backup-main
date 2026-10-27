@@ -24,7 +24,7 @@ and what the system does about it.
    - System: `openAdvanceElsewhere` (since 2026-10-23, known-issues 12s; COA Circular No. 97-002). For a group advance it applies to the holder, who is accountable for the cash.
 6. **RA 12009 (New Government Procurement Act) training** is for BAC members. The Admin Officer IV needs it because procurement is an inherent function of the position: Plan A's "Needed Training for the Function" column. Others, e.g. Budget staff who are BAC TWG members, hold TWG as an additional designation, so for them it is an additional function: the "Needed Training for Additional Function/Designation" column.
    - Reading: Plan A's columns already say who needs a training and why, so no designation field is needed.
-   - System: Part D, a proposal only: the participant picker would list first the people whose Plan A lists the seminar's needs.
+   - System: Part D (built 2026-10-27, known-issues 12y): for a seminar that covers Plan A needs, the participant picker lists the people whose plan lists one of them and names the column ("Needs this: Function" or "…: Additional Function/Designation"); "Show all employees" covers the exceptions.
 7. **Can the vehicle request be filed together with the cash advance?** (asked by a team member)
    "Yes, pwede."
    - System: Part B (built 2026-10-27, known-issues 12v): "Also request a vehicle" on the cash-advance request, filed in the same step, for the seminar's dates. The two are decided separately: the Division Chief the vehicle, Finance the advance.

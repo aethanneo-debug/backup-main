@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Sparkles, UserPlus, Users, X } from "lucide-react";
-import { TrainingCandidate } from "../../types";
+import { TRAINING_NEED_COLUMN_LABELS, TrainingCandidate, type TrainingNeedCategory } from "../../types";
 import { apiCall, getLocalTodayString } from "../../utils";
 import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 
@@ -31,6 +31,16 @@ interface Props {
 
 const BADGE = "px-1.5 py-0.5 rounded border text-[10px] font-semibold whitespace-nowrap";
 
+// The Plan A column a need is listed under, as the badge names it (the form's own words, shortened).
+// The same training can be needed for the function or for an additional designation (HSAC RAB 1's
+// answer 6: RA 12009 for the Admin Officer IV, and for Budget staff on the BAC TWG).
+const COLUMN_NAME: Record<TrainingNeedCategory, string> = {
+  "Function": "Function",
+  "Additional Function": "Additional Function/Designation",
+  "Career Advancement": "Career Advancement"
+};
+const columnsText = (c: TrainingCandidate) => (c.needCategories ?? []).map(k => COLUMN_NAME[k]).join(", ");
+
 // `selected`: they are already on this seminar's list, and the server counts only their other
 // trainings, so this seminar would be their first of the year, or one more.
 function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; selected?: boolean }) {
@@ -50,8 +60,13 @@ function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; select
         </span>
       )}
       {c.needsThis && (
-        <span className={`${BADGE} bg-emerald-50 text-emerald-800 border-emerald-300`} title={`Listed in their plan: ${c.needMatches.join("; ")}`}>
-          Needs this
+        <span
+          className={`${BADGE} bg-emerald-50 text-emerald-800 border-emerald-300`}
+          title={`Plan A, ${(c.needCategories ?? []).map(k => TRAINING_NEED_COLUMN_LABELS[k]).join("; ")}: ${c.needMatches.join("; ")}`}
+        >
+          Needs this{columnsText(c) ? `: ${columnsText(c)}` : ""}
+          {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
+          <span className="sr-only"> ({c.needMatches.join("; ")})</span>
         </span>
       )}
       {c.priority === 1 && (
@@ -69,7 +84,7 @@ function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; select
 
 function optionLabel(c: TrainingCandidate) {
   const extras = [c.division || "No division"];
-  if (c.needsThis) extras.push("listed in their plan");
+  if (c.needsThis) extras.push(columnsText(c) ? `listed in their plan (${columnsText(c)})` : "listed in their plan");
   if (c.priority === 1 && c.monthsSinceHire !== null) extras.push(`hired ${c.monthsSinceHire < 1 ? "this month" : `${c.monthsSinceHire} mo ago`}`);
   const trained = (c.trainingsThisYear ?? []).length;
   extras.push(trained === 0 ? "no training yet this FY" : `${trained} training${trained === 1 ? "" : "s"} this FY`);
@@ -84,6 +99,12 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds ?? []);
   const [reloadKey, setReloadKey] = useState(0);
+  // A seminar that covers Plan A needs lists only those whose plan lists one of them; "Show all
+  // employees" is for the exceptions (someone with no plan entry, or one HR knows needs it anyway).
+  const [showAll, setShowAll] = useState(false);
+  const coversNeeds = (program.fulfillsNeedTitles ?? []).length > 0;
+  const planOnly = coversNeeds && !showAll;
+  const inScope = (c: TrainingCandidate) => !planOnly || c.needsThis;
 
   // Mirrors the server, which treats a blank or invalid max as 1.
   const max = parseInt(String(program.maxParticipants)) || 1;
@@ -128,20 +149,24 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
     const days = seminarWeekdays(program.startDate, program.endDate).filter(d => d >= today);
     if (days.length === 0 || (candidates ?? []).length === 0) return [];
     const away = new Map((candidates ?? []).map(c => [c.employeeId, new Set(c.awayOn ?? [])]));
-    // The roster less anyone marked "Did not attend", as the server counts them.
+    // All active staff (the whole candidate list, never the Plan A view of it), and the roster less
+    // anyone marked "Did not attend", as the server counts them.
     const notAway = new Set(program.notAwayIds ?? []);
     return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days,
       selectedIds.filter(id => !notAway.has(id)), (id, day) => !!away.get(id)?.has(day));
   }, [candidates, selectedIds, program.startDate, program.endDate, (program.notAwayIds ?? []).join("|")]);
-  const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId));
+  // Recommended (and "Add all recommended") and the dropdown follow the list in scope.
+  const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId) && inScope(c));
   const recommended = available.slice(0, freeSlots);
+  const listers = (candidates ?? []).filter(c => c.needsThis).length;
+  const hiddenCount = planOnly ? (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId)).length : 0;
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
   // come first. Each group keeps the server's order (Plan A listers, then new hires, first).
   const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
   const groups: { label: string; items: TrainingCandidate[] }[] = [
     { label: `No training yet in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length === 0) },
     { label: `Already has a training in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length > 0) },
-    { label: "Not eligible", items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId)) }
+    { label: "Not eligible", items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId) && inScope(c)) }
   ];
 
   const add = (ids: string[]) => {
@@ -172,11 +197,37 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
             <Sparkles size={16} className="shrink-0 mt-0.5" />
             <p>
               Every employee should have <strong>at least one training a year</strong>, so those with <strong>no training yet in {fyText}</strong> come first
-              (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t). Within each group, employees whose <strong>Plan A</strong> lists
-              this training come first, then <strong>new hires</strong>. Employees may join more than one seminar a year; only those who already
-              attended this seminar can&rsquo;t be selected.
+              (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t).{" "}
+              {coversNeeds ? (
+                <>This seminar covers <strong>Plan A</strong> needs, so the employees whose plan lists one of them are listed, and the badge says
+                in which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.</>
+              ) : (
+                <>Within each group, employees whose <strong>Plan A</strong> lists this training come first, then <strong>new hires</strong>.</>
+              )}{" "}
+              Employees may join more than one seminar a year; only those who already attended this seminar can&rsquo;t be selected.
             </p>
           </div>
+
+          {/* Plan A first: who is listed, and the way to everyone else. */}
+          {coversNeeds && !loading && !error && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+              <p>
+                {planOnly
+                  ? listers === 0
+                    ? `Nobody's Plan A for ${fyText} lists this training.`
+                    : `Listed: the ${listers} employee${listers === 1 ? "" : "s"} whose Plan A for ${fyText} lists this training.`
+                  : "Listed: all employees."}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowAll(v => !v)}
+                aria-pressed={showAll}
+                className="text-xs font-semibold text-blue-700 bg-white border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-50"
+              >
+                {planOnly ? `Show all employees (${hiddenCount} more)` : "Show only those whose Plan A lists it"}
+              </button>
+            </div>
+          )}
 
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-slate-500 py-8 justify-center">

@@ -6491,14 +6491,19 @@ function normalizeFulfillsNeedTitles(raw: any): string[] {
   return out;
 }
 
-// Which of this employee's own Plan A entries the seminar covers.
-function employeeNeedMatches(employeeId: string, program: SeminarRef): string[] {
+// Which of this employee's own Plan A entries the seminar covers (same title, same fiscal year), with
+// the plan's column for each: the same training can be needed for the function itself, or for an
+// additional designation (HSAC RAB 1's answer 6: RA 12009 for the Admin Officer IV vs the BAC TWG).
+function employeeCoveredNeeds(employeeId: string, program: SeminarRef): TrainingNeed[] {
   const covered = (program.fulfillsNeedTitles || []).map(normalizeTitle).filter(Boolean);
   if (covered.length === 0) return [];
   const forms = employeeIdForms(employeeId);
   return (db.trainingNeeds || [])
-    .filter(n => forms.includes(n.employeeId) && n.fiscalYear === program.fiscalYear && covered.includes(normalizeTitle(n.title)))
-    .map(n => n.title);
+    .filter(n => forms.includes(n.employeeId) && n.fiscalYear === program.fiscalYear && covered.includes(normalizeTitle(n.title)));
+}
+
+function employeeNeedMatches(employeeId: string, program: SeminarRef): string[] {
+  return employeeCoveredNeeds(employeeId, program).map(n => n.title);
 }
 
 // "Today" as a calendar date in the Philippines (UTC+8, no DST), so deadlines flip
@@ -6698,10 +6703,13 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
       const thisYear = yearTrainings(emp);
       const trainingsThisYear = [...thisYear.seminars, ...thisYear.records];
       const priority: 1 | 2 | 3 = newHire ? 1 : trainingsThisYear.length === 0 ? 2 : 3;
-      const needMatches = employeeNeedMatches(emp.id, program);
+      const covered = employeeCoveredNeeds(emp.id, program);
+      const needMatches = covered.map(n => n.title);
       return {
         needsThis: needMatches.length > 0,
         needMatches,
+        // The plan's columns those entries are under (in the form's order).
+        needCategories: TRAINING_NEED_CATEGORIES.filter(c => covered.some(n => n.category === c)),
         employeeId: emp.id,
         fullName: emp.fullName,
         position: emp.position || "",

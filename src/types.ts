@@ -1042,6 +1042,10 @@ export interface TrainingCandidate {
   // reason to give them a seat after having no training yet this year.
   needsThis: boolean;
   needMatches: string[];
+  /** The Plan A columns those entries are under, in the form's order: the same training may be
+   * needed for the function, for an additional designation, or for career advancement (HSAC RAB 1's
+   * answer 6). Empty when the plan doesn't list it. */
+  needCategories?: TrainingNeedCategory[];
   /** Their other trainings that count toward the seminar's fiscal year (seminars and
    * HR-recorded trainings), by title. Empty: none yet, so they are offered first. */
   trainingsThisYear: string[];
