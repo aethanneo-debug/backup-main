@@ -1608,6 +1608,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                         blockedReason={act.advanceBlockedReason}
                         advance={currentAdvanceOf(myAdvances, act.id)}
                         groupReport={act.groupReport}
+                        seminar={{ title: act.seminarTitle, venue: act.venue, startDate: act.dateScheduled, endDate: act.endDate }}
+                        selfName={profile?.fullName || user.fullName}
+                        vehicleOnFile={act.vehicleOnFile}
                         onRequested={message => {
                           setSuccess(message);
                           fetchPortalData();

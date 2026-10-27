@@ -27,6 +27,6 @@ and what the system does about it.
    - System: Part D, a proposal only: the participant picker would list first the people whose Plan A lists the seminar's needs.
 7. **Can the vehicle request be filed together with the cash advance?** (asked by a team member)
    "Yes, pwede."
-   - System: Part B (planned): "Also request a vehicle" on the cash-advance request, filed in the same step. The two are approved separately.
+   - System: Part B (built 2026-10-27, known-issues 12v): "Also request a vehicle" on the cash-advance request, filed in the same step, for the seminar's dates. The two are decided separately: the Division Chief the vehicle, Finance the advance.
 
 Still open: the same or a different budget for each employee (ask HSAC again).

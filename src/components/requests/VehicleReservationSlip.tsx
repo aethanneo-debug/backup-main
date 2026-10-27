@@ -1,4 +1,4 @@
-import { VehicleRequest } from "../../types";
+import { RequestStatus, VehicleRequest } from "../../types";
 import HsacLogo from "../HsacLogo";
 
 /** The controlled form number printed top-right on the official slip. */
@@ -19,7 +19,7 @@ function longDate(iso?: string): string {
 }
 
 /** "14:30" -> "2:30 PM". The printed form asks for AM/PM explicitly. */
-function clockTime(hhmm?: string): string {
+export function clockTime(hhmm?: string): string {
   if (!hhmm) return "";
   const [h, m] = hhmm.split(":").map(Number);
   if (!isFinite(h) || !isFinite(m)) return hhmm;
@@ -42,10 +42,11 @@ function Ruled({ value }: { value?: string }) {
  * and approved the request. The form names two titles, but at RAB 1 one person signs
  * both, and any admin may do it — so the name always comes from `approvedBy` rather than
  * being hardcoded. Before approval both boxes print blank, because an unapproved slip has
- * no signatory.
+ * no signatory: the name prints only while the request is Approved, so an older `approvedBy`
+ * (a request approved, then sent back) can't sign a slip for other dates.
  */
 export default function VehicleReservationSlip({ request, division }: Props) {
-  const signatory = request.approvedBy || "";
+  const signatory = request.status === RequestStatus.APPROVED ? request.approvedBy || "" : "";
 
   return (
     <div id="vrs-print-root" className="mx-auto w-full max-w-3xl bg-white p-8 text-[11px] text-slate-900">

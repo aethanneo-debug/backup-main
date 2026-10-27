@@ -203,6 +203,14 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                         {r.covers!.map(c => `${c.employeeName} (${formatCurrency(Number(c.amount))})`).join(", ")}
                       </p>
                     )}
+                    {/* A vehicle request filed in the same step: decided by the Division Chief, not here. */}
+                    {r.vehicle && (
+                      <p className="text-[11px] text-slate-600">
+                        <span className="font-semibold">Also asked for a vehicle:</span>{" "}
+                        <span className="font-mono">{r.vehicle.vrsNo || ""}</span> ({r.vehicle.status}).
+                        {r.vehicle.status === "Approved" || r.vehicle.status === "Rejected" ? " Decided by the Division Chief." : " The Division Chief decides it."}
+                      </p>
+                    )}
                     <p className="font-mono text-[10px] text-slate-400">Asked on {formatDate(String(r.requestedAt || ""))}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">

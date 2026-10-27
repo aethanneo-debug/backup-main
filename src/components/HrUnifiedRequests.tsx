@@ -4,6 +4,7 @@ import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import ReturnForCorrectionDialog from "./liquidation/ReturnForCorrectionDialog";
 import ReportContents from "./liquidation/ReportContents";
+import VehicleTripDetails from "./requests/VehicleTripDetails";
 import { answeredCorrectionSummary } from "./liquidation/resubmit/correctionModel";
 import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
 
@@ -359,6 +360,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                   <p className="text-slate-700">{viewItem.dateNeeded}</p>
                 </div>
               )}
+              <VehicleTripDetails item={viewItem} />
               {viewItem.meetingDate && (
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase font-mono mb-1">Meeting Date</p>
@@ -445,8 +447,9 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                             setModalRemarks("");
                             fetchData();
                             onRefresh();
-                          } catch (err) {
-                            setError("Action failed.");
+                          } catch (err: any) {
+                            // The server's reason (e.g. the request is no longer waiting for HR), not a bare failure.
+                            setError(err?.message || "Action failed.");
                             setLoading(false);
                           }
                         }}

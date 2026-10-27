@@ -8,7 +8,7 @@
 Browser (React 19 SPA, Vite, Tailwind v4)
    │  apiCall()  → Authorization: Bearer <JWT from localStorage.ipfms_token>
    ▼
-server.ts  (Express, port 3000, ~8.8k lines, ~115 routes)      ← ACTIVE dev/runtime backend
+server.ts  (Express, port 3000, ~9.1k lines, ~115 routes)      ← ACTIVE dev/runtime backend
    │  in-memory `db` object ← getInitialData() ← data_store.json
    │  every mutation → saveDB() → fs.writeFileSync(data_store.json)
    │  also serves Vite middleware in dev, dist/ in prod
@@ -33,6 +33,8 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `src/utils.ts` | `apiCall`, `formatCurrency` (PHP), `formatDate`, `downloadCSV` |
 | `src/trainingBudget.ts` | `seminarBudget`: what each seminar takes from the year's training budget (shared by server and planner, tested) |
 | `src/advanceCoverage.ts` | Which cash advance pays for an enrolment and which report settles it, including group advances (`covers`); every such lookup goes through it |
+| `src/vehicleWithAdvance.ts` | A vehicle request filed with a seminar's cash advance: its checks (the same on the card and the server) and its prefill |
+| `src/inputText.ts` | `cleanText` (typed text, bounded before normalising) and `isCalendarDate`, shared by names, OR/DV numbers, reasons, file names and trips |
 | `src/server/budgetEnrolments.ts` | The training budget's per-enrolment inputs (cash out, split per group member; spending once settled) |
 | `.claude/context/hsac-answers.md` | HSAC RAB 1's own answers (2026-10-26) that office rules come from: group cash advances, division coverage, Plan A columns, vehicle with the CA |
 | `src/App.tsx` | Login, session check, password-change & PDS-upload gates, tab routing via `activeTab` state (no router), global data fetching |

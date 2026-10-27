@@ -316,6 +316,29 @@ export interface VehicleRequest extends BaseRequest {
   departureTime?: string;   // HH:mm, rendered as AM/PM on the slip
   arrivalDate?: string;     // YYYY-MM-DD
   arrivalTime?: string;     // HH:mm
+
+  // Filed together with a seminar's cash advance (HSAC RAB 1, 2026-10-26: "Yes, pwede"): the
+  // enrolment, the seminar and the cash advance it goes with (the latest: asking again after a
+  // decline moves it to the new request). The two are decided separately: Finance releases the
+  // advance, the Division Chief decides the vehicle. Absent otherwise.
+  trainingParticipantId?: string;
+  trainingProgramId?: string;
+  cashAdvanceId?: string;
+}
+
+/** A vehicle request as GET /api/requests sends it: with what it was filed with, each part only to
+ * whoever may see it (null otherwise), worked out on the way out and never stored. */
+export interface VehicleRequestView extends VehicleRequest {
+  /** The seminar (the employee, HR and the Administrator), and why the trip may be off, if it may. */
+  linkedSeminar?: { title: string; startDate?: string; endDate?: string; tripProblem?: string | null } | null;
+  /** The cash advance (the employee, Finance and the Administrator): its number once released. */
+  linkedAdvance?: { advanceNo: string | null; status: CashAdvance["status"] } | null;
+}
+
+/** A vehicle request filed with a seminar's cash advance, as the cash-advance screens show it. */
+export interface LinkedVehicleSummary {
+  vrsNo?: string;
+  status: RequestStatus;
 }
 
 export interface ZoomRequest extends BaseRequest {
@@ -617,6 +640,11 @@ export interface CashAdvance {
   // `activityId` names; the holder is `employeeId`, who receives the cash and files the one report).
   // Absent on an individual advance, which pays for `activityId` alone.
   covers?: CashAdvanceCover[];
+  // The vehicle request filed with it (HSAC RAB 1: "Yes, pwede"), or still standing for the seminar
+  // when it was asked for again after a decline, if any.
+  vehicleRequestId?: string;
+  // DERIVED, never stored: that request's number and status, added by GET /api/cash-advances.
+  vehicle?: LinkedVehicleSummary;
 }
 
 // The instructor's note 11: a reviewer returns a liquidation report with a checklist of what

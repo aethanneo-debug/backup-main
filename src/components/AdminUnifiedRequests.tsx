@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { User, AnyRequest, RequestStatus, ScreenFocus } from "../types";
 import { apiCall, formatDate, firstTimestamp, firstDateString } from "../utils";
+import VehicleTripDetails from "./requests/VehicleTripDetails";
 import { Check, X, Undo2, Filter, RefreshCcw, Info, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -466,6 +467,7 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
                   <p className="text-slate-700">{viewItem.dateNeeded}</p>
                 </div>
               )}
+              <VehicleTripDetails item={viewItem} />
               {viewItem.meetingDate && (
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase font-mono mb-1">Meeting Date</p>
@@ -534,8 +536,9 @@ export default function AdminUnifiedRequests({ user, onRefresh, focus, onFocusHa
                             setModalRemarks("");
                             fetchData();
                             onRefresh();
-                          } catch (err) {
-                            setError("Action failed.");
+                          } catch (err: any) {
+                            // The server's reason (e.g. the request was already decided), not a bare failure.
+                            setError(err?.message || "Action failed.");
                             setLoading(false);
                           }
                         }}

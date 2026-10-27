@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { Banknote, Loader2, Users } from "lucide-react";
-import { CashAdvance } from "../../types";
-import { apiCall, formatCurrency, formatDate } from "../../utils";
+import { Banknote, Car, Loader2, Users } from "lucide-react";
+import { CashAdvance, type LinkedVehicleSummary } from "../../types";
+import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import { advancesCovering, isGroupAdvance, portionCentavos } from "../../advanceCoverage";
+import { vehicleDraftFor, vehicleWithAdvanceFields, type SeminarForVehicle, type VehicleDraft } from "../../vehicleWithAdvance";
 import GroupCoverPicker from "./GroupCoverPicker";
+import VehicleWithAdvance from "./VehicleWithAdvance";
 
 /**
  * The cash-advance record that stands for a seminar now, as the server picks it: a request
@@ -29,6 +31,11 @@ interface Props {
   advance: CashAdvance | null;
   /** The report a co-participant filed on the group advance covering this seminar: number and status only. */
   groupReport?: { submissionNo: string; status: string; filedBy?: string } | null;
+  /** The seminar and the employee's own name: "Also request a vehicle" starts from them. */
+  seminar?: SeminarForVehicle;
+  selfName?: string;
+  /** The vehicle request already filed for this seminar and not rejected: no second one is offered. */
+  vehicleOnFile?: LinkedVehicleSummary | null;
   /** After a request is sent (or a group request left): the server's message, for the page to show and reload. */
   onRequested: (message: string) => void;
 }
@@ -40,17 +47,41 @@ interface Props {
  * ask for one advance for the group (HSAC RAB 1, 2026-10-26): they hold it, and the card of
  * everyone it covers says so.
  */
-export default function AdvanceRequestPanel({ activityId, allowance, canRequest, blockedReason, advance, groupReport, onRequested }: Props) {
+export default function AdvanceRequestPanel({ activityId, allowance, canRequest, blockedReason, advance, groupReport, seminar, selfName, vehicleOnFile, onRequested }: Props) {
   const [sending, setSending] = useState(false);
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState("");
+  // "Also request a vehicle" (HSAC RAB 1): filed with the request, prefilled from the seminar. Not
+  // offered while one stands for this seminar, and then never sent, even if it was ticked before the
+  // card reloaded (a hidden box would send a trip nobody can see or untick).
+  const [withVehicle, setWithVehicle] = useState(false);
+  const freshDraft = () => vehicleDraftFor(seminar ?? {}, selfName ? [selfName] : []);
+  const [vehicle, setVehicle] = useState<VehicleDraft>(freshDraft);
+  const offerVehicle = !vehicleOnFile;
+  const sendVehicle = offerVehicle && withVehicle;
+  const shownVehicle = advance?.vehicle ?? vehicleOnFile ?? null;
+
+  // Ticking it starts from the seminar as it is now (HR may have moved its dates since the card loaded).
+  function toggleVehicle(on: boolean) {
+    setWithVehicle(on);
+    if (on) setVehicle(freshDraft());
+  }
 
   async function request() {
-    setSending(true);
     setError("");
+    // The same checks as the server's, so a mistake in the trip is shown before anything is sent.
+    if (sendVehicle) {
+      const checked = vehicleWithAdvanceFields(vehicle, getLocalTodayString(), seminar);
+      if ("error" in checked) { setError(checked.error); return; }
+    }
+    setSending(true);
     try {
-      const res = await apiCall("/api/cash-advances/request", { method: "POST", body: JSON.stringify({ activityId }) });
+      const res = await apiCall("/api/cash-advances/request", {
+        method: "POST",
+        body: JSON.stringify({ activityId, ...(sendVehicle ? { vehicle } : {}) })
+      });
       if (res?.status !== "success") throw new Error(res?.message || "The request could not be sent.");
+      setWithVehicle(false);
       onRequested(res.message || "Your request was sent to Finance.");
     } catch (err: any) {
       setError(err?.message || "The request could not be sent.");
@@ -175,28 +206,52 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
         </>
       )}
 
+      {/* The vehicle request filed with it, else the one still standing for this seminar (filed with
+          an earlier, declined request), decided by the Division Chief on its own. */}
+      {shownVehicle && (
+        <p className="flex items-center gap-1 text-[11px] text-slate-600">
+          <Car size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
+          {/* One flex item, so the gap doesn't split "VRS-…: status". */}
+          <span>Vehicle request <span className="font-mono">{shownVehicle.vrsNo || ""}</span>: {shownVehicle.status}</span>
+        </p>
+      )}
+
       {canRequest && !picking ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={request}
-            disabled={sending}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {sending && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
-            {sending ? "Sending…" : `${status === "Declined" || status === "Refunded" ? "Ask again" : "Request cash advance"}: ${formatCurrency(allowance)}`}
-          </button>
-          <button
-            type="button"
-            onClick={() => { setError(""); setPicking(true); }}
-            disabled={sending}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
-          >
-            <Users size={12} aria-hidden="true" /> For my group…
-          </button>
+        <div className="space-y-2">
+          {/* Above the buttons, so it is seen before either is pressed; "For my group…" carries it over. */}
+          {offerVehicle && (
+            <VehicleWithAdvance idPrefix={activityId} on={withVehicle} onToggle={toggleVehicle} draft={vehicle} onChange={setVehicle} disabled={sending} />
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={request}
+              disabled={sending}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {sending && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
+              {sending ? "Sending…" : `${status === "Declined" || status === "Refunded" ? "Ask again" : "Request cash advance"}: ${formatCurrency(allowance)}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setError(""); setPicking(true); }}
+              disabled={sending}
+              className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
+            >
+              <Users size={12} aria-hidden="true" /> For my group…
+            </button>
+          </div>
         </div>
       ) : canRequest && picking ? (
-        <GroupCoverPicker activityId={activityId} onRequested={message => { setPicking(false); onRequested(message); }} onCancel={() => setPicking(false)} />
+        <GroupCoverPicker
+          activityId={activityId}
+          seminar={seminar}
+          selfName={selfName}
+          offerVehicle={offerVehicle}
+          initialVehicle={sendVehicle ? vehicle : undefined}
+          onRequested={message => { setPicking(false); setWithVehicle(false); onRequested(message); }}
+          onCancel={() => setPicking(false)}
+        />
       ) : !advance && blockedReason ? (
         <p className="text-[10px] italic text-slate-500">{blockedReason}</p>
       ) : null}

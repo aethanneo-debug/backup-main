@@ -16,10 +16,12 @@ import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
 import { cleanFileName, liquidationDocumentRows } from "./src/server/liquidationDocuments";
 import { trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
 import {
-  advanceCovering, advancesCovering, coveredEnrolmentIds, coversTotal, isGroupAdvance, portionCentavos, releasedByEnrolment, reportCovering,
-  spendableCentavos
+  advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, isGroupAdvance, portionCentavos, releasedByEnrolment,
+  reportCovering, spendableCentavos
 } from "./src/advanceCoverage";
 import { enrolmentsForBudget } from "./src/server/budgetEnrolments";
+import { vehicleWithAdvanceFields as checkVehicleWithAdvance, type VehicleWithAdvanceFields } from "./src/vehicleWithAdvance";
+import { cleanText, isCalendarDate } from "./src/inputText";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -2534,17 +2536,67 @@ app.post("/api/supplies/issue", authenticateToken, (req: any, res) => {
 
 
 // 5. Digital Request & Approvals Workflow
+// Why a vehicle request filed with a seminar's advance may no longer be needed, or null: the seminar
+// was archived, the person is off it, or HR marked "Did not attend" (for a group's trip, everyone it
+// covers). The Division Chief decides the vehicle on its own, so the request screens say so.
+function vehicleTripProblem(r: any, p: any): string | null {
+  // (One archived once finished keeps its history: its trip took place.)
+  if (p.archivedAt && p.archivedBeforeUse) return "The seminar was archived before it was held.";
+  const e: any = (db.trainingParticipants || []).find((x: any) => x && x.id === r.trainingParticipantId);
+  if (!e || e.status === "Cancelled" || e.status === "Archived") return "They are no longer on this seminar.";
+  const a: any = (db.cashAdvances || []).find((x: any) => x && x.id === r.cashAdvanceId);
+  const people = (a ? coveredEnrolmentIds(a) : [e.id])
+    .map(id => (db.trainingParticipants || []).find((x: any) => x && x.id === id)).filter(Boolean);
+  if (people.length > 0 && people.every((x: any) => x.attendance === "Did not attend")) {
+    return people.length === 1 ? 'HR marked them "Did not attend".' : 'HR marked everyone it covers "Did not attend".';
+  }
+  return null;
+}
+
+// A vehicle request filed with a seminar's cash advance, as the request screens show it, worked out on
+// the way out and never stored. Each part goes only to whoever may see it: the employee their own; the
+// advance (number and status) to Finance and the Administrator, as /api/cash-advances; the seminar, and
+// whether the trip may be off, to HR and the Administrator, as the training records.
+function withAdvanceLinks(r: any, user: any) {
+  if (!r || r.requestType !== RequestType.VEHICLE || !r.cashAdvanceId) return r;
+  const own = isOwnRecord(user, r.employeeId);
+  const a: any = own || isCashAdvanceRole(user?.role) ? (db.cashAdvances || []).find((x: any) => x && x.id === r.cashAdvanceId) : null;
+  const p: any = own || isTrainingRecordsRole(user?.role) ? (db.trainingPrograms || []).find((x: any) => x && x.id === r.trainingProgramId) : null;
+  return {
+    ...r,
+    linkedSeminar: p ? { title: String(p.title || "").trim(), startDate: p.startDate, endDate: p.endDate, tripProblem: vehicleTripProblem(r, p) } : null,
+    linkedAdvance: a ? { advanceNo: a.advanceNo || null, status: a.status } : null
+  };
+}
+
 app.get("/api/requests", authenticateToken, (req: any, res) => {
   // Employees can only view their own requests unless they are Admin, HR, Department Head, Custodian
   const { role, employeeId } = req.user;
-  
+
   if (role === UserRole.EMPLOYEE) {
     const records = db.requests.filter(r => r.employeeId === employeeId);
-    return res.json({ status: "success", data: records });
+    return res.json({ status: "success", data: records.map(r => withAdvanceLinks(r, req.user)) });
   }
-  
-  res.json({ status: "success", data: db.requests });
+
+  res.json({ status: "success", data: db.requests.map(r => withAdvanceLinks(r, req.user)) });
 });
+
+// A vehicle request's Vehicle Reservation Slip fields, as the request form and a seminar's cash
+// advance request ("Also request a vehicle") both file them. The serial is issued here rather than
+// typed, so the printed slip carries a number the office can file against.
+function vehicleRequestFields(data: any) {
+  return {
+    destination: data.destination,
+    purpose: data.purpose,
+    dateNeeded: data.dateNeeded,
+    passengers: data.passengers,
+    vrsNo: nextVrsNo(new Date()),
+    departureDate: data.departureDate || "",
+    departureTime: data.departureTime || "",
+    arrivalDate: data.arrivalDate || "",
+    arrivalTime: data.arrivalTime || ""
+  };
+}
 
 app.post("/api/requests", authenticateToken, (req: any, res) => {
   const data = req.body;
@@ -2583,20 +2635,7 @@ app.post("/api/requests", authenticateToken, (req: any, res) => {
       } as any;
       break;
     case RequestType.VEHICLE:
-      fullReq = {
-        ...baseReq,
-        destination: data.destination,
-        purpose: data.purpose,
-        dateNeeded: data.dateNeeded,
-        passengers: data.passengers,
-        // Vehicle Reservation Slip fields. The serial is issued here rather than typed,
-        // so the printed slip carries a number the office can file against.
-        vrsNo: nextVrsNo(new Date()),
-        departureDate: data.departureDate || "",
-        departureTime: data.departureTime || "",
-        arrivalDate: data.arrivalDate || "",
-        arrivalTime: data.arrivalTime || ""
-      } as any;
+      fullReq = { ...baseReq, ...vehicleRequestFields(data) } as any;
       break;
     case RequestType.ZOOM:
       fullReq = {
@@ -2809,18 +2848,10 @@ const SIGNATORY_TEXT_MAX = 150;
 
 // Names print on official forms, so invisible characters (zero-width, direction
 // overrides) are removed: they would let a lookalike pass the duplicate check, or print
-// a name that reads differently from the stored one.
+// a name that reads differently from the stored one. OR and DV numbers and reasons are
+// cleaned the same way (src/inputText.ts, which also bounds the work on huge input).
 function signatoryText(value: any): string {
-  if (typeof value !== "string") return "";
-  // Whitespace (tabs, newlines) becomes one space first, so "Juan\tDela Cruz" keeps its gap.
-  return value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
-}
-
-// A real calendar date in YYYY-MM-DD (isIsoDate only checks the shape).
-function isCalendarDate(value: any): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const d = new Date(`${value}T00:00:00Z`);
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+  return cleanText(value);
 }
 
 // Same person: by staff record when both have one, otherwise by name.
@@ -3521,6 +3552,10 @@ app.put("/api/requests/:id/hr-endorse", authenticateToken, (req: any, res) => {
 
   const request = db.requests.find(r => r.id === id);
   if (!request) return res.status(404).json({ status: "error", message: "Personnel Request not found" });
+  // Only a request waiting for HR, as HR's screen offers it: endorsing a decided one would reopen it.
+  if (String(request.status) !== RequestStatus.PENDING_HR_REVIEW && String(request.status) !== "Pending") {
+    return res.status(409).json({ status: "error", message: `This request is ${request.status}, so HR can't act on it now.` });
+  }
 
   if (endorse) {
     request.status = RequestStatus.ENDORSED_TO_CHIEF;
@@ -3544,6 +3579,8 @@ app.put("/api/requests/:id/hr-endorse", authenticateToken, (req: any, res) => {
   }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Endorse Personnel Request", `HR acted on request ${request.id}, status: ${request.status}`);
+  // Acting on their own request is allowed, and flagged, as with reports (12q).
+  if (isOwnRecord(req.user, request.employeeId)) flagSelfApproval(req.user, `${endorse ? "endorsed" : "returned"} their own ${request.requestType}`);
   saveDB();
   res.json({ status: "success", data: request });
 });
@@ -3557,6 +3594,15 @@ app.put("/api/requests/:id/chief-decide", authenticateToken, (req: any, res) => 
 
   const request = db.requests.find(r => r.id === id);
   if (!request) return res.status(404).json({ status: "error", message: "Personnel Request not found" });
+  // Only a request waiting for a decision, as Request Management offers it. Deciding a decided one
+  // again re-ran a supply's stock deduction, and could revive a rejected vehicle request next to the
+  // one filed after it. Anything but the three decisions used to count as a rejection.
+  if (!/Pending|Endorsed/.test(String(request.status))) {
+    return res.status(409).json({ status: "error", message: `This request is ${request.status}, so it can't be decided now.` });
+  }
+  if (decision !== "Approved" && decision !== "Rejected" && decision !== "Returned") {
+    return res.status(400).json({ status: "error", message: 'Choose a decision: "Approved", "Rejected" or "Returned".' });
+  }
 
   if (decision === "Approved") {
     request.status = RequestStatus.APPROVED;
@@ -3595,12 +3641,15 @@ app.put("/api/requests/:id/chief-decide", authenticateToken, (req: any, res) => 
 
   notify({ employee: request.employeeId }, {
     title: `Request ${request.status}`,
-    message: `Division Chief Hon. Romeo M. Alcantara acted on your ${request.requestType}: ${request.status}`,
+    // Whoever holds the role and decided it, not a fixed name.
+    message: `The Division Chief, ${(req as any).user.fullName}, acted on your ${request.requestType}: ${request.status}`,
     type: request.status === RequestStatus.APPROVED ? "success" : "warning",
     link: { tab: "employee_portal", record: { kind: "request", id: request.id } }
   });
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Final Chief Decision", `Chief decided ${request.id}, status: ${request.status}`);
+  // Deciding their own request is allowed, and flagged, as with reports (12q).
+  if (isOwnRecord(req.user, request.employeeId)) flagSelfApproval(req.user, `decided their own ${request.requestType}: ${request.status}`);
   saveDB();
   res.json({ status: "success", data: request });
 });
@@ -3637,6 +3686,16 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
           description: `FY ${prog.fiscalYear} Training and Development Plan`,
           dateScheduled: prog.startDate,
           endDate: prog.endDate,
+          // For "Also request a vehicle" on the cash advance: the trip is prefilled from these (and
+          // the seminar's dates), and has to fit those dates.
+          seminarTitle: String(prog.title || "").trim(),
+          venue: prog.venue || "",
+          // The vehicle request standing for this seminar (not rejected), theirs or their group's: no
+          // second one is offered.
+          vehicleOnFile: (() => {
+            const v = vehicleRequestFor(t.id);
+            return v ? { vrsNo: v.vrsNo, status: v.status } : null;
+          })(),
           liquidationDueDate: liquidationDueDateFor(prog),
           participantStatus: t.status,
           // Attendance and whether the liquidation form is open (see seminarFormEligibility).
@@ -4480,7 +4539,31 @@ app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
   if (request.employeeId !== req.user.employeeId && (req as any).user.role !== UserRole.SUPER_ADMIN) {
     return res.status(403).json({ status: "error", message: "Forbidden: You cannot resubmit this request." });
   }
-  
+  // Only a request returned or rejected comes back, as the portal offers it. An approved one sent again
+  // with new dates would print the Division Chief's name on a slip for dates nobody approved.
+  const resubmittable: string[] = [RequestStatus.REJECTED, RequestStatus.RETURNED_BY_HR, RequestStatus.RETURNED_BY_CHIEF];
+  if (!resubmittable.includes(request.status)) {
+    return res.status(409).json({ status: "error", message: `This request is ${request.status}, so it can't be resubmitted.` });
+  }
+  // A vehicle request filed with a seminar's cash advance comes back only while no other one stands for
+  // that seminar, for anyone its advance covers (one per seminar).
+  const linked: any = request;
+  if (linked.trainingParticipantId) {
+    const a: any = linked.cashAdvanceId ? (db.cashAdvances || []).find((x: any) => x && x.id === linked.cashAdvanceId) : null;
+    for (const pid of a ? coveredEnrolmentIds(a) : [linked.trainingParticipantId]) {
+      const other = vehicleRequestFor(pid, request.id);
+      if (other) {
+        return res.status(409).json({
+          status: "error",
+          message: other.employeeId === request.employeeId
+            ? `Vehicle request ${other.vrsNo || "on file"} already stands for this seminar (${other.status}), so this one can't be resubmitted.`
+            : "Another vehicle request for this seminar already stands, so this one can't be resubmitted."
+        });
+      }
+    }
+  }
+  delete (request as any).approvedBy;
+
   if (dateRequested) request.dateRequested = dateRequested;
   
   // Depending on request type update relevant date fields
@@ -5437,6 +5520,28 @@ function youForm(why: string): string {
   return why.replace(/^isn't /, "aren't ").replace(/^is /, "are ").replace(/^(already )?has /, "$1have ");
 }
 
+// The vehicle request filed with an advance (HSAC RAB 1: "Yes, pwede"), for the cash-advance screens:
+// its number and status, added on the way out, never stored on the advance.
+function withVehicle<T>(a: T): T {
+  const id = (a as any)?.vehicleRequestId;
+  if (!id) return a;
+  const v: any = (db.requests || []).find((r: any) => r && r.id === id);
+  return v ? { ...(a as any), vehicle: { vrsNo: v.vrsNo, status: v.status } } : a;
+}
+
+// The vehicle request standing for this enrolment's seminar (anything the Division Chief hasn't
+// rejected): one filed with their own cash advance, or with a group's advance that covers them, since
+// that trip includes them. One per seminar: asking again after Finance declines the advance doesn't file
+// a second vehicle, nor does a member asking on their own while their group's still stands.
+function vehicleRequestFor(participantId: string, exceptId?: string): any {
+  return (db.requests || []).find((r: any) => {
+    if (!r || r.id === exceptId || r.requestType !== RequestType.VEHICLE || r.status === RequestStatus.REJECTED) return false;
+    if (r.trainingParticipantId === participantId) return true;
+    const a: any = r.cashAdvanceId ? (db.cashAdvances || []).find((x: any) => x && x.id === r.cashAdvanceId) : null;
+    return !!a && advanceCovers(a, participantId);
+  }) || null;
+}
+
 // A group advance still open that someone else holds for this enrolment, or null.
 function groupCoveringOthers(participantId: string): CashAdvance | null {
   const a = advanceCovering(db.cashAdvances || [], participantId, ["Requested", "Released"]);
@@ -5477,8 +5582,9 @@ function advanceRequestEligibility(p: any): { canRequest: boolean; reason?: stri
 app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
   const { role, employeeId } = req.user;
   const all = db.cashAdvances || [];
+  // (Each with the vehicle request filed alongside, if any: its number and status.)
   if (isCashAdvanceRole(role)) {
-    return res.json({ status: "success", data: all });
+    return res.json({ status: "success", data: all.map(withVehicle) });
   }
   // Everyone else sees only their own, so the employee's liquidation form can fill and
   // lock its DV fields from the real record, and a group advance that covers them, for their
@@ -5490,13 +5596,15 @@ app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
     status: "success",
     data: all
       .filter((a: any) => a && (forms.includes(a.employeeId) || covered(a)))
-      .map((a: any) => forms.includes(a.employeeId) ? a : {
+      .map((a: any) => forms.includes(a.employeeId) ? withVehicle(a) : {
         id: a.id, advanceNo: a.advanceNo, status: a.status,
         employeeName: a.employeeName, activityId: a.activityId, activityTitle: a.activityTitle, amount: a.amount,
         dvNo: a.dvNo, dvDate: a.dvDate, requestedAt: a.requestedAt, decidedAt: a.decidedAt, issuedAt: a.issuedAt,
         liquidatedAt: a.liquidatedAt, refundedAt: a.refundedAt,
         covers: a.covers.filter((c: any) => coverIsUser(req.user, c)),
-        coversCount: a.covers.length
+        coversCount: a.covers.length,
+        // (The group's vehicle, if one was asked for: they may be among its passengers.)
+        vehicle: withVehicle(a).vehicle
       })
   });
 });
@@ -5824,6 +5932,36 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
       });
     }
   }
+  // "Also request a vehicle" (HSAC RAB 1: "Yes, pwede"): filed in the same step, so both are made or
+  // neither. Checked strictly here, unlike the general request form.
+  let vehicle: VehicleWithAdvanceFields | null = null;
+  // One vehicle request per seminar: one already standing (filed with an earlier, declined request, or
+  // with a group's that includes them) isn't filed again, and their own goes with this request instead.
+  const standingVehicle = vehicleRequestFor(enrolment.id);
+  if (req.body?.vehicle !== undefined && req.body?.vehicle !== null) {
+    if (standingVehicle) {
+      const ref = `${standingVehicle.vrsNo || "on file"}: ${standingVehicle.status}`;
+      return res.status(409).json({
+        status: "error",
+        message: standingVehicle.trainingParticipantId === enrolment.id
+          ? `You already asked for a vehicle for this seminar (${ref}). Untick it to send the cash advance request alone.`
+          : `A vehicle request for this seminar already includes you (${ref}), filed by ${standingVehicle.employeeName} with your group's request. Untick it to send the cash advance request alone.`
+      });
+    }
+    // ...nor one for someone the group covers who is on a vehicle request for this seminar already.
+    const onAnother = members.filter((m: any) => vehicleRequestFor(m.id));
+    if (onAnother.length > 0) {
+      const names = namesText(onAnother.map((m: any) => enrolmentEmployee(m)?.fullName || "One of them"));
+      return res.status(409).json({
+        status: "error",
+        message: `${names} ${onAnother.length === 1 ? "is" : "are"} already on a vehicle request for this seminar. Untick ${onAnother.length === 1 ? "them" : "those people"}, or the vehicle.`
+      });
+    }
+    const prog: any = (db.trainingPrograms || []).find((p: any) => p && p.id === enrolment.trainingProgramId);
+    const v = checkVehicleWithAdvance(req.body.vehicle, manilaToday(), prog ? { startDate: prog.startDate, endDate: prog.endDate } : undefined);
+    if ("error" in v) return res.status(400).json({ status: "error", message: v.error });
+    vehicle = v.fields;
+  }
 
   const request: CashAdvance = {
     id: `ca-${crypto.randomUUID()}`,
@@ -5844,12 +5982,54 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
     ...(covers ? { covers } : {})
   };
   db.cashAdvances.push(request);
+  // The vehicle request, linked both ways. It starts with the Division Chief (the Administrator), as
+  // any vehicle request does, and is decided apart from the advance.
+  let vehicleReq: any = null;
+  if (vehicle) {
+    vehicleReq = {
+      id: `req-${crypto.randomUUID()}`,
+      requestType: RequestType.VEHICLE,
+      employeeId: emp.employeeId,
+      employeeName: emp.fullName,
+      dateRequested: manilaToday(),
+      status: RequestStatus.ENDORSED_TO_CHIEF,
+      ...vehicleRequestFields(vehicle),
+      trainingParticipantId: enrolment.id,
+      trainingProgramId: enrolment.trainingProgramId,
+      cashAdvanceId: request.id
+    };
+    db.requests.push(vehicleReq);
+    request.vehicleRequestId = vehicleReq.id;
+    notify({ role: UserRole.SUPER_ADMIN }, {
+      title: `New ${RequestType.VEHICLE}`,
+      message: `${emp.fullName} submitted a ${RequestType.VEHICLE} (${vehicleReq.vrsNo}) for ${facts.title}, filed with their cash advance request.`,
+      type: "info",
+      link: { tab: "requests", record: { kind: "request", id: vehicleReq.id } }
+    });
+    logEvent(req.user.id, req.user.username, req.user.role, "Create Request",
+      `Submitted digital request: ${RequestType.VEHICLE} ${vehicleReq.vrsNo} for ${facts.title}, filed with cash advance request ${request.id}.`);
+  }
+  // Asked again after a decline: their vehicle request, still standing, goes with this request, so the
+  // request screens show the advance that is live, and Finance sees the vehicle with it. Not when the
+  // group now covers someone already on another vehicle request for the seminar: that would make two.
+  const ownStanding = !vehicleReq && standingVehicle && standingVehicle.trainingParticipantId === enrolment.id ? standingVehicle : null;
+  const onOtherVehicles = ownStanding ? members.filter((m: any) => vehicleRequestFor(m.id, ownStanding.id)) : [];
+  if (ownStanding && onOtherVehicles.length === 0) {
+    ownStanding.cashAdvanceId = request.id;
+    request.vehicleRequestId = ownStanding.id;
+  }
+  const linkedVehicle: any = vehicleReq || (request.vehicleRequestId ? standingVehicle : null);
+  const vehicleStays = ownStanding && onOtherVehicles.length > 0
+    ? ` Your vehicle request ${ownStanding.vrsNo} stays with your earlier request: ${namesText(onOtherVehicles.map((m: any) => enrolmentEmployee(m)?.fullName || "one of them"))} ${onOtherVehicles.length === 1 ? "is" : "are"} on another vehicle request for this seminar.`
+    : "";
   const groupNames = covers ? namesText(covers.map(c => c.employeeName)) : "";
+  const alsoVehicle = vehicleReq ? ` They also asked for a vehicle (${vehicleReq.vrsNo}), which the Division Chief decides.`
+    : linkedVehicle ? ` Their vehicle request ${linkedVehicle.vrsNo} (${linkedVehicle.status}) goes with it.` : "";
   notify({ role: UserRole.FINANCE_OFFICER }, {
     title: covers ? "Group cash advance requested" : "Cash advance requested",
-    message: covers
+    message: (covers
       ? `${emp.fullName} asked for one ${pesoText(request.amount)} cash advance for ${covers.length} participants of ${facts.title}: ${groupNames}. Release it with a DV, or decline it.`
-      : `${emp.fullName} asked for their ${pesoText(request.amount)} cash advance for ${facts.title}. Release it with a DV, or decline it.`,
+      : `${emp.fullName} asked for their ${pesoText(request.amount)} cash advance for ${facts.title}. Release it with a DV, or decline it.`) + alsoVehicle,
     type: "info",
     link: { tab: "finance", subTab: "liquidation", record: { kind: "cashAdvance", id: request.id } }
   });
@@ -5864,14 +6044,17 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
   }
   logEvent(req.user.id, req.user.username, req.user.role, "Request Cash Advance",
     `${emp.fullName} asked for ${pesoText(request.amount)} for ${facts.title}${covers
-      ? `, one advance for a group of ${covers.length}: ${covers.map(c => `${c.employeeName} (${pesoText(c.amount)})`).join(", ")}` : ""}`);
+      ? `, one advance for a group of ${covers.length}: ${covers.map(c => `${c.employeeName} (${pesoText(c.amount)})`).join(", ")}` : ""}`
+    + (linkedVehicle && !vehicleReq ? `, with vehicle request ${linkedVehicle.vrsNo} (still standing)` : ""));
   saveDB();
   res.json({
     status: "success",
-    message: covers
+    message: (covers
       ? `Your request for ${pesoText(request.amount)} for your group of ${covers.length} was sent to Finance.`
-      : `Your request for ${pesoText(request.amount)} was sent to Finance.`,
-    data: request
+      : `Your request for ${pesoText(request.amount)} was sent to Finance.`)
+      + (vehicleReq ? ` Your vehicle request ${vehicleReq.vrsNo} went to the Division Chief.`
+        : linkedVehicle ? ` Your vehicle request ${linkedVehicle.vrsNo} goes with it.` : vehicleStays),
+    data: withVehicle(request)
   });
 }));
 

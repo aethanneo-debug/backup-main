@@ -4,6 +4,7 @@
 // inside the database as base64 and the list would otherwise carry all of them at once.
 import type { LiquidationDocumentRow, LiquidationSubmissionView } from "../types";
 import { SAFE_FILE_URL } from "../utils";
+import { cleanText } from "../inputText";
 
 /**
  * A file's name as the vault shows it, saves it and logs it. The employee chose it, so invisible
@@ -11,8 +12,7 @@ import { SAFE_FILE_URL } from "../utils";
  * read as "receiptexe.pdf". Runs of whitespace become one space. "" when nothing is left.
  */
 export function cleanFileName(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+  return cleanText(value);
 }
 
 /** Every attached file of every report, as rows for the vault. Malformed entries are skipped, and

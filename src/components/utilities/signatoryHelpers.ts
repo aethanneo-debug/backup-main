@@ -23,22 +23,13 @@ export function manilaToday(): string {
 }
 
 /**
- * Cleans a name or position the way the server does before it saves (server.ts
- * signatoryText): NFKC-normalises it, turns any whitespace into one space, removes
- * invisible characters (zero-width, direction overrides), then trims. Matching the server
- * keeps the form's duplicate warning and length check in line with what it will decide.
+ * A name or position cleaned exactly as the server cleans it before it saves (server.ts
+ * signatoryText), and a real calendar date (so 2026-02-30 is refused): the very same functions
+ * (src/inputText.ts), so the form's duplicate warning and length check can't drift from what the
+ * server will decide.
  */
-export function cleanText(value: string | undefined | null): string {
-  if (typeof value !== "string") return "";
-  return value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
-}
-
-/** A real calendar date in YYYY-MM-DD form (so 2026-02-30 is refused, as on the server). */
-export function isCalendarDate(value: string | undefined | null): boolean {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const d = new Date(`${value}T00:00:00Z`);
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-}
+import { cleanText, isCalendarDate } from "../../inputText";
+export { cleanText, isCalendarDate };
 
 /**
  * A stored YYYY-MM-DD date for display, or an em dash when there is none.

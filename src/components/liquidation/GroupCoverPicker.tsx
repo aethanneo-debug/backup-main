@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Users } from "lucide-react";
-import { apiCall, formatCurrency } from "../../utils";
+import { apiCall, formatCurrency, getLocalTodayString } from "../../utils";
 import { sumPesos } from "../../liquidationMoney";
+import { vehicleDraftFor, vehicleWithAdvanceFields, type SeminarForVehicle, type VehicleDraft } from "../../vehicleWithAdvance";
+import { cleanText } from "../../inputText";
+import VehicleWithAdvance from "./VehicleWithAdvance";
 
 interface GroupOption {
   participantId: string;
@@ -15,6 +18,13 @@ interface GroupOption {
 
 interface Props {
   activityId: string;
+  /** The seminar and the holder's own name: "Also request a vehicle" starts from them. */
+  seminar?: SeminarForVehicle;
+  selfName?: string;
+  /** False when a vehicle request for this seminar still stands (filed with an earlier request). */
+  offerVehicle?: boolean;
+  /** The trip already filled in on the card before "For my group…" was pressed: it starts ticked. */
+  initialVehicle?: VehicleDraft;
   /** After the request is sent: the server's message, for the page to show and reload. */
   onRequested: (message: string) => void;
   onCancel: () => void;
@@ -26,7 +36,7 @@ interface Props {
  * cash, file the group's one liquidation report and hand back the one leftover. Everyone who can
  * be covered starts ticked; each share is that person's allowance, set by the server.
  */
-export default function GroupCoverPicker({ activityId, onRequested, onCancel }: Props) {
+export default function GroupCoverPicker({ activityId, seminar, selfName, offerVehicle = true, initialVehicle, onRequested, onCancel }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [own, setOwn] = useState(0);
@@ -34,6 +44,23 @@ export default function GroupCoverPicker({ activityId, onRequested, onCancel }: 
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  // "Also request a vehicle" (HSAC RAB 1): its passengers follow the people ticked, until typed by hand.
+  // Never sent while it isn't offered (a vehicle request for this seminar stands).
+  const [withVehicle, setWithVehicle] = useState(!!initialVehicle);
+  const [vehicle, setVehicle] = useState<VehicleDraft>(() => initialVehicle ?? vehicleDraftFor(seminar ?? {}, selfName ? [selfName] : []));
+  // Passengers typed on the card (anything but the holder's own name) are kept, not replaced by the ticks.
+  const [passengersEdited, setPassengersEdited] = useState(() => !!initialVehicle && initialVehicle.passengers !== cleanText(selfName));
+  const sendVehicle = offerVehicle && withVehicle;
+
+  // Ticking it starts from the seminar as it is now, with the people ticked as passengers (the effect
+  // below only follows later changes to the ticks).
+  function toggleVehicle(on: boolean) {
+    setWithVehicle(on);
+    if (on) {
+      setVehicle(vehicleDraftFor(seminar ?? {}, [selfName || "", ...chosen.map(o => o.employeeName)]));
+      setPassengersEdited(false);
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -60,6 +87,10 @@ export default function GroupCoverPicker({ activityId, onRequested, onCancel }: 
 
   const chosen = useMemo(() => (options ?? []).filter(o => o.canCover && picked.has(o.participantId)), [options, picked]);
   const total = useMemo(() => sumPesos([own, ...chosen.map(o => o.allowance)]), [own, chosen]);
+  const passengerNames = useMemo(() => [selfName || "", ...chosen.map(o => o.employeeName)].filter(Boolean).join(", "), [selfName, chosen]);
+  useEffect(() => {
+    if (!passengersEdited) setVehicle(v => (v.passengers === passengerNames ? v : { ...v, passengers: passengerNames }));
+  }, [passengerNames, passengersEdited]);
 
   function toggle(id: string) {
     setError("");
@@ -75,12 +106,17 @@ export default function GroupCoverPicker({ activityId, onRequested, onCancel }: 
       setError("Tick at least one co-participant, or ask for your own cash advance instead.");
       return;
     }
+    // The same checks as the server's, so a mistake in the trip is shown before anything is sent.
+    if (sendVehicle) {
+      const checked = vehicleWithAdvanceFields(vehicle, getLocalTodayString(), seminar);
+      if ("error" in checked) { setError(checked.error); return; }
+    }
     setSending(true);
     setError("");
     try {
       const res = await apiCall("/api/cash-advances/request", {
         method: "POST",
-        body: JSON.stringify({ activityId, coverParticipantIds: chosen.map(o => o.participantId) })
+        body: JSON.stringify({ activityId, coverParticipantIds: chosen.map(o => o.participantId), ...(sendVehicle ? { vehicle } : {}) })
       });
       if (res?.status !== "success") throw new Error(res?.message || "The request could not be sent.");
       onRequested(res.message || "Your group's request was sent to Finance.");
@@ -146,6 +182,17 @@ export default function GroupCoverPicker({ activityId, onRequested, onCancel }: 
         <p className="text-[11px] text-slate-700" aria-live="polite">
           You and {chosen.length} other{chosen.length === 1 ? "" : "s"}: <strong className="font-mono">{formatCurrency(total)}</strong>
         </p>
+      )}
+      {offerVehicle && !loading && !loadError && options.some(o => o.canCover) && (
+        <VehicleWithAdvance
+          idPrefix={`group-${activityId}`}
+          on={withVehicle}
+          onToggle={toggleVehicle}
+          draft={vehicle}
+          onChange={setVehicle}
+          onPassengersEdited={() => setPassengersEdited(true)}
+          disabled={sending}
+        />
       )}
       {error && <p role="alert" className="text-[11px] font-semibold text-rose-700">{error}</p>}
 
