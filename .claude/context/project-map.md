@@ -34,6 +34,7 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `src/trainingBudget.ts` | `seminarBudget`: what each seminar takes from the year's training budget (shared by server and planner, tested) |
 | `src/advanceCoverage.ts` | Which cash advance pays for an enrolment and which report settles it, including group advances (`covers`); every such lookup goes through it |
 | `src/vehicleWithAdvance.ts` | A vehicle request filed with a seminar's cash advance: its checks (the same on the card and the server) and its prefill |
+| `src/divisionCoverage.ts` | "Someone must stay to man the division": the days a seminar would leave a division with nobody at the office (shared by the server's refusal and the participant picker's warning) |
 | `src/inputText.ts` | `cleanText` (typed text, bounded before normalising) and `isCalendarDate`, shared by names, OR/DV numbers, reasons, file names and trips |
 | `src/server/budgetEnrolments.ts` | The training budget's per-enrolment inputs (cash out, split per group member; spending once settled) |
 | `.claude/context/hsac-answers.md` | HSAC RAB 1's own answers (2026-10-26) that office rules come from: group cash advances, division coverage, Plan A columns, vehicle with the CA |

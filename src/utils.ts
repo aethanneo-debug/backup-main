@@ -100,7 +100,12 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(json.message || `API error occurred (Status: ${response.status})`);
+    // The status and the reply's data go with the message, for a screen that acts on one particular
+    // refusal (a division left with nobody at the office, which HR may confirm).
+    const error: Error & { status?: number; data?: unknown } = new Error(json.message || `API error occurred (Status: ${response.status})`);
+    error.status = response.status;
+    error.data = json.data;
+    throw error;
   }
   return json;
 }

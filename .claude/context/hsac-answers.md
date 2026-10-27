@@ -7,7 +7,7 @@ and what the system does about it.
 1. **If 2 or more employees are set to attend the same TDP seminar, do they attend at the same time?**
    "Depends if: a. same division – rule is someone must stay to man the division; b. availability of funds – kaya ba ng sabay-sabay?"
    - Reading: on every day of a seminar, each division keeps at least one person at the office. And the money has to allow sending them together.
-   - System: division coverage (known-issues 12v, Part C, planned). The funds side is the existing ceilings: seats, the seminar's allocation and the year's Unallocated.
+   - System: division coverage (built 2026-10-27, known-issues 12x): a seminar that would leave a division with nobody at the office on a weekday is refused unless HR confirms it, which is recorded; the participant picker warns as people are chosen. The funds side is the existing ceilings: seats, the seminar's allocation and the year's Unallocated.
 2. **Does one person process and receive the cash advance (CA) for everyone, or does each employee get their own? Same budget for each, or different?**
    "Yes, if sabay-sabay pwedeng iisa na lang ang mag-process ng CA."
    - Reading: when they attend together, one person may process one CA for the group. The budget-per-employee part was **not answered**: every participant keeps allocation ÷ seats until HSAC answers it.

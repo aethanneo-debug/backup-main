@@ -22,6 +22,7 @@ import {
 import { enrolmentsForBudget } from "./src/server/budgetEnrolments";
 import { vehicleWithAdvanceFields as checkVehicleWithAdvance, type VehicleWithAdvanceFields } from "./src/vehicleWithAdvance";
 import { cleanText, isCalendarDate } from "./src/inputText";
+import { addedGaps, divisionGaps, gapText, seminarWeekdays, type CoverageStaff, type DivisionGap } from "./src/divisionCoverage";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -6591,6 +6592,84 @@ function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { rea
   return attended ? { reason: attended } : null;
 }
 
+// --- Division coverage (HSAC RAB 1's answer 1: "someone must stay to man the division") ---
+// The rule is in src/divisionCoverage.ts; these read it off the data. Days already past aren't
+// checked: nobody can be kept at the office on them any more.
+
+// Active staff with a division, as the rule counts them.
+function coverageStaff(): CoverageStaff[] {
+  return (db.employees || [])
+    .filter((e: any) => e && e.isActive !== false && String(e.division || "").trim())
+    .map((e: any) => ({ id: e.id, division: String(e.division).trim() }));
+}
+
+// Who a seminar takes from the office (Employee.id): its roster, less anyone cancelled, archived or
+// marked "Did not attend".
+function seminarAwayIds(programId: string): string[] {
+  const ids = new Set<string>();
+  for (const p of db.trainingParticipants || []) {
+    if (!p || p.trainingProgramId !== programId || p.status === "Cancelled" || p.status === "Archived" || p.attendance === "Did not attend") continue;
+    const emp = (db.employees || []).find((e: any) => e.id === p.employeeId || e.employeeId === p.employeeId);
+    if (emp) ids.add(emp.id);
+  }
+  return [...ids];
+}
+
+// Whether someone is at a seminar other than `exceptId` (and not archived) on a day.
+function awayAtOtherSeminars(exceptId?: string): (id: string, date: string) => boolean {
+  const away = new Map<string, Set<string>>();
+  for (const prog of db.trainingPrograms || []) {
+    if (!prog || prog.id === exceptId || prog.archivedAt) continue;
+    const ids = seminarAwayIds(prog.id);
+    if (ids.length === 0) continue;
+    for (const date of seminarWeekdays(prog.startDate, prog.endDate)) {
+      const set = away.get(date) ?? new Set<string>();
+      ids.forEach(id => set.add(id));
+      away.set(date, set);
+    }
+  }
+  return (id, date) => !!away.get(date)?.has(id);
+}
+
+type SeminarSpan = { startDate: unknown; endDate: unknown; ids: string[] };
+
+// What a change to one seminar (its days or its roster) adds to the divisions left with nobody at the
+// office, on days still to come. `before`: the seminar as it was (null when it took nobody).
+function addedDivisionGaps(programId: string | undefined, before: SeminarSpan | null, after: SeminarSpan): DivisionGap[] {
+  const today = manilaToday();
+  const staff = coverageStaff();
+  const elsewhere = awayAtOtherSeminars(programId);
+  const days = (s: SeminarSpan) => seminarWeekdays(s.startDate, s.endDate).filter(d => d >= today);
+  const was = before ? divisionGaps(staff, days(before), before.ids, elsewhere) : [];
+  return addedGaps(was, divisionGaps(staff, days(after), after.ids, elsewhere));
+}
+
+// The refusal (409, with the gaps for the screen) of a change that leaves a division with nobody, unless
+// HR confirmed it (allowDivisionGap: true). True when it refused. A confirmed one is recorded by the
+// caller once the change is made (logDivisionOverride).
+function refuseDivisionGap(req: any, res: any, gaps: DivisionGap[]): boolean {
+  if (gaps.length === 0 || req.body?.allowDivisionGap === true) return false;
+  res.status(409).json({
+    status: "error",
+    message: `This leaves nobody at the office: ${gapText(gaps)}. Someone must stay to man the division.`,
+    data: { code: "DIVISION_GAP", gaps }
+  });
+  return true;
+}
+
+function logDivisionOverride(req: any, gaps: DivisionGap[], what: string) {
+  if (gaps.length === 0) return;
+  logEvent(req.user.id, req.user.username, req.user.role, "Division Coverage Override",
+    `${req.user.fullName} ${what}, confirming it leaves nobody at the office: ${gapText(gaps)}.`);
+}
+
+// A seminar's dates as they will be saved: real dates, the end on or after the start.
+function seminarDatesProblem(startDate: unknown, endDate: unknown): string | null {
+  if (!isCalendarDate(startDate) || !isCalendarDate(endDate)) return "Enter the seminar's start and end dates.";
+  if (endDate < startDate) return "The end date can't be before the start date.";
+  return null;
+}
+
 function monthsSinceHire(emp: Employee, today: string): number | null {
   if (!isIsoDate(emp.dateHired)) return null;
   const [hy, hm, hd] = emp.dateHired.slice(0, 10).split("-").map(Number);
@@ -7143,16 +7222,33 @@ function autoAssignEmployeeToTraining(employee: Employee) {
       return null;
     }
 
+    // Someone must stay to man their division (HSAC RAB 1): a seminar that would leave it with nobody
+    // isn't picked here, where nobody is asked to confirm. HR is told once, and can seat them by hand.
+    const fits = withOpenSeats.filter(p => {
+      const ids = seminarAwayIds(p.id);
+      return addedDivisionGaps(p.id, { startDate: p.startDate, endDate: p.endDate, ids }, { startDate: p.startDate, endDate: p.endDate, ids: [...ids, employee.id] }).length === 0;
+    });
+    if (fits.length === 0) {
+      notify({ role: UserRole.HR_OFFICER }, {
+        title: "Enrollment Would Leave a Division Empty",
+        message: `${employee.fullName} matched training program "${withOpenSeats[0].title}", but enrolling them would leave nobody at the office in ${employee.division}. Please review manually.`,
+        type: "warning",
+        link: { tab: "training_development", record: { kind: "seminar", id: withOpenSeats[0].id } },
+        dedupeKey: `auto-enrol-gap:${employee.id}:${withOpenSeats[0].id}`
+      });
+      return null;
+    }
+
     // 1. Specialization match beats division-only match.
     // 2. If tied, pick earliest startDate
-    withOpenSeats.sort((a, b) => {
+    fits.sort((a, b) => {
       const aSpec = a.targetSpecialization === employee.fieldOfSpecialization ? 0 : 1;
       const bSpec = b.targetSpecialization === employee.fieldOfSpecialization ? 0 : 1;
       if (aSpec !== bSpec) return aSpec - bSpec;
       return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
     });
 
-    const chosen = withOpenSeats[0];
+    const chosen = fits[0];
     const part: TrainingParticipant = {
       id: `part-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       trainingProgramId: chosen.id,
@@ -7360,7 +7456,15 @@ app.get("/api/training/recommendations", authenticateToken, (req: any, res: any)
       ? normalizeFulfillsNeedTitles(Array.isArray(q.needTitle) ? q.needTitle : [q.needTitle])
       : stored?.fulfillsNeedTitles
   };
-  res.json({ status: "success", data: rankTrainingCandidates(program) });
+  // Who is already at another seminar on this one's weekdays (?startDate=&endDate= for a draft, as
+  // HR edits it), for the picker's badge and its warning that a division would be left with nobody.
+  const days = seminarWeekdays(
+    typeof q.startDate === "string" && q.startDate ? q.startDate : stored?.startDate,
+    typeof q.endDate === "string" && q.endDate ? q.endDate : stored?.endDate
+  );
+  const elsewhere = awayAtOtherSeminars(stored?.id);
+  const ranked = rankTrainingCandidates(program);
+  res.json({ status: "success", data: { ...ranked, candidates: ranked.candidates.map(c => ({ ...c, awayOn: days.filter(d => elsewhere(c.employeeId, d)) })) } });
 });
 
 // Programs & Budget's coverage panel: at least one training per year per employee. How many
@@ -8009,7 +8113,9 @@ app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) =>
   res.json({ status: "success", message: "Training need removed." });
 });
 
-app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
+// One transaction: a refusal after the participants are enrolled (a division left with nobody at the
+// office) undoes the seminar and its enrolments together.
+app.post("/api/training/programs", authenticateToken, transactional((req: any, res: any) => {
   if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Unauthorized" });
   }
@@ -8018,6 +8124,8 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
   if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
   const seats = readSeats(body.maxParticipants);
   if (seats === null) return res.status(400).json({ status: "error", message: SEATS_MESSAGE });
+  const datesProblem = seminarDatesProblem(body.startDate, body.endDate);
+  if (datesProblem) return res.status(400).json({ status: "error", message: datesProblem });
   const timeProblem = seminarTimeProblem(body.startDate, body.startTime, body.endDate, body.endTime);
   if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
   // Seminars are planned in the active fiscal year, as the planner does: a closed year's
@@ -8083,9 +8191,14 @@ app.post("/api/training/programs", authenticateToken, (req: any, res: any) => {
     skippedMessages = enrollTrainingParticipants(newProgram, body.participantIds, (req as any).user, 0).skipped;
   }
 
+  // Someone must stay to man each division (HSAC RAB 1): judged on who was actually enrolled.
+  const gaps = addedDivisionGaps(newProgram.id, null, { startDate: newProgram.startDate, endDate: newProgram.endDate, ids: seminarAwayIds(newProgram.id) });
+  if (refuseDivisionGap(req, res, gaps)) return;
+  logDivisionOverride(req, gaps, `added "${String(newProgram.title || "").trim()}" (FY ${newProgram.fiscalYear})`);
+
   saveDB();
   res.json({ status: "success", data: newProgram, message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
-});
+}));
 
 
 
@@ -8105,16 +8218,24 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   if (existingProgram.archivedAt) {
     return res.status(409).json({ status: "error", message: `"${existingProgram.title}" is archived. Restore it before editing it.` });
   }
+  // Who it took from the office, and when, before this edit: the division check counts only what the
+  // edit adds.
+  const coverageBefore = { startDate: existingProgram.startDate, endDate: existingProgram.endDate, ids: seminarAwayIds(existingProgram.id) };
   const allocation = body.allocatedBudget !== undefined ? readAllocation(body.allocatedBudget) : Number(existingProgram.allocatedBudget || 0);
   if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
   const newSeats = readSeats(body.maxParticipants);
   if (newSeats === null) return res.status(400).json({ status: "error", message: SEATS_MESSAGE });
+  // The dates as they will be saved: a date not sent keeps the stored one (it used to be blanked).
+  const startDate = body.startDate ?? existingProgram.startDate;
+  const endDate = body.endDate ?? existingProgram.endDate;
+  const datesProblem = seminarDatesProblem(startDate, endDate);
+  if (datesProblem) return res.status(400).json({ status: "error", message: datesProblem });
   // The times as they will be saved (a value not sent keeps the stored one). A seminar saved before
   // the office-hours rule with times outside it has to be corrected on its next edit.
   const timeProblem = seminarTimeProblem(
-    body.startDate ?? existingProgram.startDate,
+    startDate,
     body.startTime !== undefined ? body.startTime : existingProgram.startTime,
-    body.endDate ?? existingProgram.endDate,
+    endDate,
     body.endTime !== undefined ? body.endTime : existingProgram.endTime
   );
   if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
@@ -8165,14 +8286,14 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     }
   }
 
-  const start = new Date(body.startDate);
-  const end = new Date(body.endDate);
+  const start = new Date(startDate);
+  const end = new Date(endDate);
   const diffTime = Math.abs(end.getTime() - start.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
   const startTime = body.startTime !== undefined ? body.startTime : existingProgram.startTime;
   const endTime = body.endTime !== undefined ? body.endTime : existingProgram.endTime;
-  const totalHours = computeTrainingHours(body.startDate, body.endDate, startTime, endTime);
+  const totalHours = computeTrainingHours(startDate, endDate, startTime, endTime);
 
   db.trainingPrograms[programIndex] = {
     ...existingProgram,
@@ -8182,8 +8303,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     description: body.description,
     category: body.category,
     allocatedBudget: body.allocatedBudget !== undefined ? allocation : existingProgram.allocatedBudget,
-    startDate: body.startDate,
-    endDate: body.endDate,
+    startDate,
+    endDate,
     startTime: body.startTime !== undefined ? body.startTime : existingProgram.startTime,
     endTime: body.endTime !== undefined ? body.endTime : existingProgram.endTime,
     durationDays: diffDays,
@@ -8242,6 +8363,13 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     const toAdd = [...requested].filter(id => !employeeIdForms(id).some(f => keptForms.has(f)));
     skippedMessages.push(...enrollTrainingParticipants(program, toAdd, (req as any).user, keptCount).skipped);
   }
+
+  // Someone must stay to man each division (HSAC RAB 1): what this edit adds, by its new days or
+  // roster. A refusal undoes the whole edit (the route is one transaction).
+  const saved = db.trainingPrograms[programIndex];
+  const gaps = addedDivisionGaps(saved.id, coverageBefore, { startDate: saved.startDate, endDate: saved.endDate, ids: seminarAwayIds(saved.id) });
+  if (refuseDivisionGap(req, res, gaps)) return;
+  logDivisionOverride(req, gaps, `saved "${String(saved.title || "").trim()}" (FY ${saved.fiscalYear})`);
 
   saveDB();
   res.json({ status: "success", data: db.trainingPrograms[programIndex], message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
@@ -8403,6 +8531,11 @@ app.post("/api/training/programs/:id/restore", authenticateToken, transactional(
   delete prog.archivedAt;
   delete prog.archivedBy;
   delete prog.archivedBeforeUse;
+  // Someone must stay to man each division (HSAC RAB 1): archived, it took nobody from the office; back,
+  // its participants are away on its days again. A refusal undoes the restore (one transaction).
+  const gaps = addedDivisionGaps(prog.id, null, { startDate: prog.startDate, endDate: prog.endDate, ids: seminarAwayIds(prog.id) });
+  if (refuseDivisionGap(req, res, gaps)) return;
+  logDivisionOverride(req, gaps, `restored "${title}" (FY ${prog.fiscalYear})`);
   const details = `Restored "${title}" (FY ${prog.fiscalYear})${increase > 0 ? `: it holds ${pesoText(increase)} again` : ""}`
     + `${back.length ? `, with ${back.length} participant${back.length === 1 ? "" : "s"} back on it` : ""}`
     + `${leftOff.length ? `; left off: ${leftOff.join("; ")}` : ""}.`;
@@ -8608,6 +8741,10 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
   const prog = db.trainingPrograms.find(p => p.id === trainingProgramId);
   if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
   if (!employeeId) return res.status(400).json({ status: "error", message: "employeeId is required." });
+  // An archived seminar takes nobody new (12t): it would be enrolled with no seminar to attend.
+  if (prog.archivedAt) {
+    return res.status(409).json({ status: "error", message: `"${String(prog.title || "").trim()}" is archived. Restore it before adding participants.` });
+  }
 
   const enrolledCount = (db.trainingParticipants || []).filter(p => p.trainingProgramId === trainingProgramId && p.status !== "Cancelled").length;
   if (enrolledCount >= (prog.maxParticipants || Infinity)) {
@@ -8625,10 +8762,19 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
     });
   }
 
+  // Someone must stay to man each division (HSAC RAB 1), checked before anything is written.
+  const emp = (db.employees || []).find((e: any) => e.id === employeeId || e.employeeId === employeeId);
+  const takenNow = seminarAwayIds(prog.id);
+  const gaps = emp && !takenNow.includes(emp.id)
+    ? addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenNow }, { startDate: prog.startDate, endDate: prog.endDate, ids: [...takenNow, emp.id] })
+    : [];
+  if (refuseDivisionGap(req, res, gaps)) return;
+
   const { created, skipped } = enrollTrainingParticipants(prog, [employeeId], (req as any).user, enrolledCount);
   if (created.length === 0) {
     return res.status(400).json({ status: "error", message: skipped[0] || "Employee could not be enrolled." });
   }
+  logDivisionOverride(req, gaps, `added ${emp?.fullName || "a participant"} to "${String(prog.title || "").trim()}" (FY ${prog.fiscalYear})`);
   saveDB();
   res.json({ status: "success", data: created[0] });
 });

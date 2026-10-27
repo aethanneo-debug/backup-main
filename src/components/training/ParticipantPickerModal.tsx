@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Sparkles, UserPlus, Users, X } from "lucide-react";
 import { TrainingCandidate } from "../../types";
-import { apiCall } from "../../utils";
+import { apiCall, getLocalTodayString } from "../../utils";
+import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.
 export interface PickerProgram {
@@ -14,6 +15,9 @@ export interface PickerProgram {
   maxParticipants: number | string;
   // Plan A entries this seminar covers; drives the "Needs this" ranking.
   fulfillsNeedTitles?: string[];
+  // Its days (YYYY-MM-DD): who is at another seminar then, and which division would be left with nobody.
+  startDate?: string;
+  endDate?: string;
 }
 
 interface Props {
@@ -54,6 +58,9 @@ function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; select
         </span>
       )}
       {c.matchesTarget && <span className={`${BADGE} bg-slate-50 text-slate-700 border-slate-200`}>Target match</span>}
+      {(c.awayOn ?? []).length > 0 && (
+        <span className={`${BADGE} bg-amber-50 text-amber-700 border-amber-200`}>At another seminar on {datesText(c.awayOn!)}</span>
+      )}
     </span>
   );
 }
@@ -65,6 +72,7 @@ function optionLabel(c: TrainingCandidate) {
   const trained = (c.trainingsThisYear ?? []).length;
   extras.push(trained === 0 ? "no training yet this FY" : `${trained} training${trained === 1 ? "" : "s"} this FY`);
   if (c.matchesTarget) extras.push("target match");
+  if ((c.awayOn ?? []).length > 0) extras.push(`at another seminar on ${datesText(c.awayOn!)}`);
   return `${c.fullName} — ${extras.join(" · ")}`;
 }
 
@@ -86,7 +94,9 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
       fiscalYear: program.fiscalYear || "",
       targetDivision: program.targetDivision || "",
       targetSpecialization: program.targetSpecialization || "",
-      maxParticipants: String(max)
+      maxParticipants: String(max),
+      startDate: program.startDate || "",
+      endDate: program.endDate || ""
     });
     if (!program.isNew) params.set("programId", program.id);
     // Repeatable needTitle, so an unsaved draft row ranks by the plan too.
@@ -104,9 +114,21 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [program.id, program.isNew, program.title, program.fiscalYear, program.targetDivision, program.targetSpecialization,
-      (program.fulfillsNeedTitles ?? []).join("|"), max, reloadKey]);
+      (program.fulfillsNeedTitles ?? []).join("|"), max, program.startDate, program.endDate, reloadKey]);
 
   const byId = useMemo(() => new Map((candidates ?? []).map(c => [c.employeeId, c])), [candidates]);
+
+  // Someone must stay to man each division (HSAC RAB 1): the divisions this choice would leave with
+  // nobody at the office on the seminar's days still to come. The server checks it again on Save,
+  // where HR may confirm it; this only warns as people are chosen.
+  const divisionGapsNow = useMemo(() => {
+    const today = getLocalTodayString();
+    const days = seminarWeekdays(program.startDate, program.endDate).filter(d => d >= today);
+    if (days.length === 0 || (candidates ?? []).length === 0) return [];
+    const away = new Map((candidates ?? []).map(c => [c.employeeId, new Set(c.awayOn ?? [])]));
+    return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days, selectedIds,
+      (id, day) => !!away.get(id)?.has(day));
+  }, [candidates, selectedIds, program.startDate, program.endDate]);
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId));
   const recommended = available.slice(0, freeSlots);
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
@@ -226,6 +248,20 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
                 </select>
               </section>
             </>
+          )}
+
+          {/* A division left with nobody at the office: a warning, since HR may go ahead knowingly. */}
+          {divisionGapsNow.length > 0 && (
+            <div role="status" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-lg flex gap-2">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="space-y-1">
+                <p className="font-semibold">Someone must stay to man the division. With these participants, nobody would be left at the office:</p>
+                <ul className="list-disc pl-4">
+                  {divisionGapsNow.map(g => <li key={g.division}>{g.division}: on {datesText(g.dates)}</li>)}
+                </ul>
+                <p>You can still save it; you will be asked to confirm, and it is recorded in the audit log.</p>
+              </div>
+            </div>
           )}
 
           {/* SELECTED */}

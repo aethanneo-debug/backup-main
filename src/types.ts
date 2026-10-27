@@ -1047,6 +1047,9 @@ export interface TrainingCandidate {
   trainingsThisYear: string[];
   eligible: boolean;
   ineligibleReason?: string;
+  /** The seminar's weekdays on which they are already at another seminar (YYYY-MM-DD). Someone
+   * must stay to man each division (HSAC RAB 1), so the picker warns when a division would be empty. */
+  awayOn?: string[];
 }
 
 /** One active employee with no training yet in the fiscal year (Programs & Budget's coverage). */

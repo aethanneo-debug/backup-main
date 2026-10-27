@@ -50,6 +50,12 @@ function seminarTimeProblem(row: { startDate?: string; endDate?: string; startTi
   return null;
 }
 
+// Someone must stay to man each division (HSAC RAB 1's answer 1). The server refuses a save or
+// restore that would leave a division with nobody at the office (409, code DIVISION_GAP) and says
+// which; HR may go ahead knowingly, and it is recorded.
+const divisionGapQuestion = (reason: string, action: "Save" | "Restore") =>
+  `${reason}\n\n${action} anyway? It will be recorded in the audit log as a Division Coverage Override.`;
+
 // A row's title box, so a row added from the plan can take focus once it renders.
 const titleInputId = (rowId: string) => `tdp-title-${rowId}`;
 // Unique even when rows are added in quick succession.
@@ -352,8 +358,18 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         body: JSON.stringify(row)
       });
     } catch (err: any) {
-      alert("Error saving training program: " + err.message);
-      return;
+      if (err?.data?.code !== "DIVISION_GAP") {
+        alert("Error saving training program: " + err.message);
+        return;
+      }
+      // A division would be left with nobody at the office: HR may still save it, knowingly.
+      if (!confirm(divisionGapQuestion(err.message, "Save"))) return;
+      try {
+        res = await apiCall(endpoint, { method, body: JSON.stringify({ ...row, allowDivisionGap: true }) });
+      } catch (err2: any) {
+        alert("Error saving training program: " + err2.message);
+        return;
+      }
     }
 
     if (res && res.status === "success") {
@@ -419,7 +435,16 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     if (!confirm(`Restore "${title}" to Training Programs?\n\n${effect}`)) return;
     setArchiveBusyId(p.id);
     try {
-      const res = await apiCall(`/api/training/programs/${encodeURIComponent(p.id)}/restore`, { method: "POST" });
+      const url = `/api/training/programs/${encodeURIComponent(p.id)}/restore`;
+      let res;
+      try {
+        res = await apiCall(url, { method: "POST" });
+      } catch (err: any) {
+        if (err?.data?.code !== "DIVISION_GAP") throw err;
+        // A division would be left with nobody at the office: HR may still restore it, knowingly.
+        if (!confirm(divisionGapQuestion(err.message, "Restore"))) return;
+        res = await apiCall(url, { method: "POST", body: JSON.stringify({ allowDivisionGap: true }) });
+      }
       triggerRefresh();
       await fetchData().catch(() => undefined);
       setShownSeminar({ id: p.id, key: Date.now() });
@@ -494,7 +519,10 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       targetDivision: row.targetDivision,
       targetSpecialization: row.targetSpecialization,
       maxParticipants: row.maxParticipants,
-      fulfillsNeedTitles: row.fulfillsNeedTitles || []
+      fulfillsNeedTitles: row.fulfillsNeedTitles || [],
+      // Its days, as HR has them now: the picker warns when a division would be left with nobody.
+      startDate: row.startDate,
+      endDate: row.endDate
     };
     setParticipantModalData({ program, selectedIds: row.participantIds || [] });
     setShowParticipantModal(rowId);
