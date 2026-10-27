@@ -1210,7 +1210,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           </div>
         </div>
       )}
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    {/* self-start: <main> is a flex row, and a stretched item is held to its height, so content
+        taller than the screen ran out past the white panels; min-h-full keeps short pages full-height. */}
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 self-start min-h-full">
       {/* SIDEBAR SUB-MENU CONTROL UNIT */}
       <div className="lg:col-span-1 bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-2 shrink-0">
         <p className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-wider px-2 mb-3">Personnel Desk</p>
