@@ -246,11 +246,23 @@ Prioritized. When you fix one, remove or update its entry here.
       - Dates are now checked on create and edit: real dates, the end not before the start.
       - Seminar creation is one transaction now (item 9).
       - `apiCall` keeps the server's status and `data` on the error it throws, so a screen can act on one particular refusal.
+    - **From the code review (2026-10-27; it approved with nits), fixed:**
+      - The picker's warning counted people marked "Did not attend", whom the server leaves out. It also said HR "will be asked to confirm" when Save asks only about days a change adds. It now leaves them out, and says so.
+      - `POST /api/training/participants` asked about a gap before its own refusals (already enrolled, attended before). It now asks only for someone it would enrol.
+      - Smaller: typed helpers, `isCalendarDate` shared instead of copied, and `apiErrorCode` / `ApiError` in src/utils.ts. Security Audit Logs can now filter "Division coverage overrides" and "Self-approvals (flagged)".
+      - A seminar edit that sends no title, description or category keeps the stored ones (they were blanked, as the dates were).
     - **Limits:**
       - Public holidays aren't known to the system; only weekends are skipped.
       - Divisions are compared as typed on each staff record (live: 4 divisions, all 22 staff active).
       - A double booking (one person at two seminars on a day) is shown, not refused.
       - The picker's warning matches participants by their internal id; an enrolment stored under a staff code is matched by the server only.
+      - **Staff changes go unchecked:** an employee transferred, deactivated or deleted can leave a division empty under a seminar already booked, with no warning and no override entry. So can attendance corrected from "Did not attend" back to "Attended" (that records a fact, so it shouldn't be refused). A notice to HR after such a change would close it; that is the user's call.
+      - A gap hidden by a double booking (everyone already away at another seminar, whose gap HR confirmed) becomes this seminar's own if that other seminar is later moved or archived, with no override entry naming it. Every gap was still confirmed once.
+      - The confirmation accepts the gaps as they are when it arrives, including any another officer's save added while the dialog was open. The audit entry names the real ones.
+    - **Pre-existing, found by the review:**
+      - Save on a planner row has no in-flight guard (it is disabled only while a plan fill runs), so a double-click on a new row creates two seminars, and now two confirmations.
+      - `enrollTrainingParticipants` never checks `isActive`, so the API can enrol inactive staff (the picker lists only active staff).
+      - Auto-enrolment's `seatsTaken` counts Cancelled enrolments.
     - **Checked:** 6 unit tests (`tests/divisionCoverage.test.ts`; `npm test` 93/93), 28 API and 17 browser checks on sandboxes. The older suites still pass. The "at least one training a year" browser suite (12s) now misses 9 counts, each 2 higher than when it was written, from data entered since 2026-10-23: the pushed code misses the same 9 on the same data.
 12w. **Personnel requests: still open** (found 2026-10-27 by the reviews of 12v Part B; pre-existing).
     - `GET /api/requests` sends every request, leave reasons included, to every officer role, the Budget Officer too. Leave reasons are health data, which RA 10173 counts as sensitive personal information. Generated Reports uses only 8 columns. Fix: full records for the Administrator and HR, a narrow copy for the others. It is an RBAC change, so it needs approval.

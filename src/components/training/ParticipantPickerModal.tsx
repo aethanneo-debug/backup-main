@@ -18,6 +18,8 @@ export interface PickerProgram {
   // Its days (YYYY-MM-DD): who is at another seminar then, and which division would be left with nobody.
   startDate?: string;
   endDate?: string;
+  // On its roster but marked "Did not attend", so at the office: left out of the division warning.
+  notAwayIds?: string[];
 }
 
 interface Props {
@@ -126,9 +128,11 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
     const days = seminarWeekdays(program.startDate, program.endDate).filter(d => d >= today);
     if (days.length === 0 || (candidates ?? []).length === 0) return [];
     const away = new Map((candidates ?? []).map(c => [c.employeeId, new Set(c.awayOn ?? [])]));
-    return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days, selectedIds,
-      (id, day) => !!away.get(id)?.has(day));
-  }, [candidates, selectedIds, program.startDate, program.endDate]);
+    // The roster less anyone marked "Did not attend", as the server counts them.
+    const notAway = new Set(program.notAwayIds ?? []);
+    return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days,
+      selectedIds.filter(id => !notAway.has(id)), (id, day) => !!away.get(id)?.has(day));
+  }, [candidates, selectedIds, program.startDate, program.endDate, (program.notAwayIds ?? []).join("|")]);
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId));
   const recommended = available.slice(0, freeSlots);
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
@@ -259,7 +263,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
                 <ul className="list-disc pl-4">
                   {divisionGapsNow.map(g => <li key={g.division}>{g.division}: on {datesText(g.dates)}</li>)}
                 </ul>
-                <p>You can still save it; you will be asked to confirm, and it is recorded in the audit log.</p>
+                <p>You can still save it. Save asks you to confirm any day this change adds, and records it in the audit log.</p>
               </div>
             </div>
           )}

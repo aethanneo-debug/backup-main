@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
-import { apiCall, formatCurrency } from "../utils";
+import { apiCall, apiErrorCode, formatCurrency } from "../utils";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck, Archive } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
@@ -358,7 +358,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         body: JSON.stringify(row)
       });
     } catch (err: any) {
-      if (err?.data?.code !== "DIVISION_GAP") {
+      if (apiErrorCode(err) !== "DIVISION_GAP") {
         alert("Error saving training program: " + err.message);
         return;
       }
@@ -440,7 +440,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       try {
         res = await apiCall(url, { method: "POST" });
       } catch (err: any) {
-        if (err?.data?.code !== "DIVISION_GAP") throw err;
+        if (apiErrorCode(err) !== "DIVISION_GAP") throw err;
         // A division would be left with nobody at the office: HR may still restore it, knowingly.
         if (!confirm(divisionGapQuestion(err.message, "Restore"))) return;
         res = await apiCall(url, { method: "POST", body: JSON.stringify({ allowDivisionGap: true }) });
@@ -522,7 +522,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       fulfillsNeedTitles: row.fulfillsNeedTitles || [],
       // Its days, as HR has them now: the picker warns when a division would be left with nobody.
       startDate: row.startDate,
-      endDate: row.endDate
+      endDate: row.endDate,
+      // Those HR marked "Did not attend" are at the office: the warning leaves them out, as the server does.
+      notAwayIds: participants.filter(part => part.trainingProgramId === rowId && onRoster(part) && part.attendance === "Did not attend").map(part => part.employeeId)
     };
     setParticipantModalData({ program, selectedIds: row.participantIds || [] });
     setShowParticipantModal(rowId);

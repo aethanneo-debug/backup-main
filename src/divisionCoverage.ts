@@ -5,6 +5,7 @@
 // them "Did not attend". Leave doesn't count, and weekends need nobody (decision 4, 2026-10-26).
 // The server refuses a change that would leave a division empty unless HR confirms it, and the
 // participant picker warns as HR chooses; both use these functions.
+import { isCalendarDate as isDate } from "./inputText";
 
 export interface CoverageStaff {
   id: string;        // Employee.id
@@ -18,12 +19,6 @@ export interface DivisionGap {
 
 /** The longest seminar the rule looks at, in days (a mistyped end date can't make it loop for long). */
 const MAX_DAYS = 366;
-
-function isDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const d = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-}
 
 /** The weekdays (Monday to Friday) from the start to the end date, both included. None when either isn't a real date. */
 export function seminarWeekdays(startDate: unknown, endDate: unknown): string[] {

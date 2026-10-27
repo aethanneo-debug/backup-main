@@ -68,6 +68,16 @@ export function downloadBase64File(name: string, content: string | undefined): b
   return true;
 }
 
+/** What apiCall throws on a refusal: the server's message, with the status and the reply's data. */
+export type ApiError = Error & { status?: number; data?: unknown };
+
+/** The `data.code` of a refusal apiCall threw, if any (e.g. "DIVISION_GAP"). */
+export function apiErrorCode(err: unknown): string | undefined {
+  const data = (err as ApiError | null | undefined)?.data;
+  const code = data && typeof data === "object" ? (data as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : undefined;
+}
+
 // Secure Fetch API wrapper
 export async function apiCall(endpoint: string, options: RequestInit = {}) {
   const token = localStorage.getItem("ipfms_token");
@@ -102,7 +112,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   if (!response.ok) {
     // The status and the reply's data go with the message, for a screen that acts on one particular
     // refusal (a division left with nobody at the office, which HR may confirm).
-    const error: Error & { status?: number; data?: unknown } = new Error(json.message || `API error occurred (Status: ${response.status})`);
+    const error: ApiError = new Error(json.message || `API error occurred (Status: ${response.status})`);
     error.status = response.status;
     error.data = json.data;
     throw error;

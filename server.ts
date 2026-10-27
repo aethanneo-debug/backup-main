@@ -6599,8 +6599,8 @@ function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { rea
 // Active staff with a division, as the rule counts them.
 function coverageStaff(): CoverageStaff[] {
   return (db.employees || [])
-    .filter((e: any) => e && e.isActive !== false && String(e.division || "").trim())
-    .map((e: any) => ({ id: e.id, division: String(e.division).trim() }));
+    .filter(e => e && e.isActive !== false && String(e.division || "").trim())
+    .map(e => ({ id: e.id, division: String(e.division).trim() }));
 }
 
 // Who a seminar takes from the office (Employee.id): its roster, less anyone cancelled, archived or
@@ -6609,7 +6609,7 @@ function seminarAwayIds(programId: string): string[] {
   const ids = new Set<string>();
   for (const p of db.trainingParticipants || []) {
     if (!p || p.trainingProgramId !== programId || p.status === "Cancelled" || p.status === "Archived" || p.attendance === "Did not attend") continue;
-    const emp = (db.employees || []).find((e: any) => e.id === p.employeeId || e.employeeId === p.employeeId);
+    const emp = (db.employees || []).find(e => e.id === p.employeeId || e.employeeId === p.employeeId);
     if (emp) ids.add(emp.id);
   }
   return [...ids];
@@ -8299,9 +8299,10 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     ...existingProgram,
     // Backfill for programs saved before series tracking existed.
     seriesId: existingProgram.seriesId || existingProgram.id,
-    title: body.title,
-    description: body.description,
-    category: body.category,
+    // A value not sent keeps the stored one (they used to be blanked, as the dates were).
+    title: body.title ?? existingProgram.title,
+    description: body.description ?? existingProgram.description,
+    category: body.category ?? existingProgram.category,
     allocatedBudget: body.allocatedBudget !== undefined ? allocation : existingProgram.allocatedBudget,
     startDate,
     endDate,
@@ -8762,11 +8763,15 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
     });
   }
 
-  // Someone must stay to man each division (HSAC RAB 1), checked before anything is written.
-  const emp = (db.employees || []).find((e: any) => e.id === employeeId || e.employeeId === employeeId);
+  // Someone must stay to man each division (HSAC RAB 1), checked before anything is written, and only
+  // for someone the enrolment below would take (not someone already on it or who attended it before,
+  // whom it refuses anyway: nobody is asked to confirm a gap and then refused).
+  const emp = (db.employees || []).find(e => e.id === employeeId || e.employeeId === employeeId);
   const takenNow = seminarAwayIds(prog.id);
-  const gaps = emp && !takenNow.includes(emp.id)
-    ? addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenNow }, { startDate: prog.startDate, endDate: prog.endDate, ids: [...takenNow, emp.id] })
+  const wouldEnrol = !!emp && !takenNow.includes(emp.id) && !trainingEnrollmentBlock(emp.id, prog)
+    && !(db.trainingParticipants || []).some(p => p.trainingProgramId === prog.id && p.status !== "Cancelled" && employeeIdForms(p.employeeId).includes(emp.id));
+  const gaps = wouldEnrol
+    ? addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenNow }, { startDate: prog.startDate, endDate: prog.endDate, ids: [...takenNow, emp!.id] })
     : [];
   if (refuseDivisionGap(req, res, gaps)) return;
 
