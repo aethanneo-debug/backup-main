@@ -17,8 +17,9 @@ export interface DivisionGap {
   dates: string[];   // YYYY-MM-DD weekdays, ascending
 }
 
-/** The longest seminar the rule looks at, in days (a mistyped end date can't make it loop for long). */
-const MAX_DAYS = 366;
+/** The longest seminar the rule looks at, in days (a mistyped end date can't make it loop for long).
+ * The server refuses to save a longer seminar, so none escapes the rule. */
+export const MAX_DAYS = 366;
 
 /** The weekdays (Monday to Friday) from the start to the end date, both included. None when either isn't a real date. */
 export function seminarWeekdays(startDate: unknown, endDate: unknown): string[] {

@@ -22,7 +22,7 @@ import {
 import { enrolmentsForBudget } from "./src/server/budgetEnrolments";
 import { vehicleWithAdvanceFields as checkVehicleWithAdvance, type VehicleWithAdvanceFields } from "./src/vehicleWithAdvance";
 import { cleanText, isCalendarDate } from "./src/inputText";
-import { addedGaps, divisionGaps, gapText, seminarWeekdays, type CoverageStaff, type DivisionGap } from "./src/divisionCoverage";
+import { addedGaps, divisionGaps, gapText, MAX_DAYS as MAX_SEMINAR_DAYS, seminarWeekdays, type CoverageStaff, type DivisionGap } from "./src/divisionCoverage";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
@@ -6502,10 +6502,6 @@ function employeeCoveredNeeds(employeeId: string, program: SeminarRef): Training
     .filter(n => forms.includes(n.employeeId) && n.fiscalYear === program.fiscalYear && covered.includes(normalizeTitle(n.title)));
 }
 
-function employeeNeedMatches(employeeId: string, program: SeminarRef): string[] {
-  return employeeCoveredNeeds(employeeId, program).map(n => n.title);
-}
-
 // "Today" as a calendar date in the Philippines (UTC+8, no DST), so deadlines flip
 // at local midnight instead of 8 AM.
 function manilaToday(): string {
@@ -6549,7 +6545,9 @@ function participantAllowance(program: TrainingProgram): number {
 }
 
 function normalizeTitle(title: string | undefined): string {
-  return (title || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  // A stored title that isn't text (saved before the checks on save) counts as none, rather than
+  // failing every ranking that meets it.
+  return (typeof title === "string" ? title : "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 // Same seminar = same series (a program and its fiscal-year rollover copies) or,
@@ -6672,6 +6670,23 @@ function logDivisionOverride(req: any, gaps: DivisionGap[], what: string) {
 function seminarDatesProblem(startDate: unknown, endDate: unknown): string | null {
   if (!isCalendarDate(startDate) || !isCalendarDate(endDate)) return "Enter the seminar's start and end dates.";
   if (endDate < startDate) return "The end date can't be before the start date.";
+  // The division rule reads a seminar's first MAX_SEMINAR_DAYS days, so a longer one would escape it.
+  if ((Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 >= MAX_SEMINAR_DAYS) {
+    return "A seminar can't run longer than a year.";
+  }
+  return null;
+}
+
+// A seminar's title, description and category as they will be saved: text, and not so long that
+// matching titles (normalizeTitle) holds the server up. The title is required, with the room a Plan A
+// need's title has, since a seminar can be named after one.
+function seminarTextProblem(title: unknown, description: unknown, category: unknown): string | null {
+  if (typeof title !== "string" || !title.trim()) return "Enter the seminar's title.";
+  if (title.trim().length > 300) return "Keep the seminar's title under 300 characters.";
+  if (description != null && (typeof description !== "string" || description.length > 2000)) {
+    return "The description must be text, up to 2,000 characters.";
+  }
+  if (category != null && (typeof category !== "string" || category.length > 100)) return "The category must be text, up to 100 characters.";
   return null;
 }
 
@@ -6704,7 +6719,8 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
       const trainingsThisYear = [...thisYear.seminars, ...thisYear.records];
       const priority: 1 | 2 | 3 = newHire ? 1 : trainingsThisYear.length === 0 ? 2 : 3;
       const covered = employeeCoveredNeeds(emp.id, program);
-      const needMatches = covered.map(n => n.title);
+      // Each title once, even when their plan lists it under two columns.
+      const needMatches = [...new Set(covered.map(n => n.title))];
       return {
         needsThis: needMatches.length > 0,
         needMatches,
@@ -6983,6 +6999,13 @@ function notifyTrainingAssignment(participant: TrainingParticipant, program: Tra
   });
 }
 
+// Whether this person holds a place on the seminar already (any enrolment but a cancelled one). The
+// enrolment and the participants route's division check both ask it, so they can't disagree.
+function onSeminarRoster(programId: string, emp: Employee): boolean {
+  return (db.trainingParticipants || []).some(p =>
+    p.trainingProgramId === programId && p.status !== "Cancelled" && (p.employeeId === emp.id || p.employeeId === emp.employeeId));
+}
+
 // Enrols each requested employee who passes the capacity and eligibility rules and
 // notifies them. `alreadyEnrolled` is the program's current head count.
 // Callers are responsible for saveDB().
@@ -7001,9 +7024,7 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
     if (seen.has(emp.id)) continue;
     seen.add(emp.id);
 
-    const alreadyInProgram = (db.trainingParticipants || []).some(p =>
-      p.trainingProgramId === program.id && p.status !== "Cancelled" && (p.employeeId === emp.id || p.employeeId === emp.employeeId));
-    if (alreadyInProgram) {
+    if (onSeminarRoster(program.id, emp)) {
       skipped.push(`${emp.fullName} skipped: already enrolled in this seminar.`);
       continue;
     }
@@ -8136,6 +8157,8 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   if (datesProblem) return res.status(400).json({ status: "error", message: datesProblem });
   const timeProblem = seminarTimeProblem(body.startDate, body.startTime, body.endDate, body.endTime);
   if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
+  const textProblem = seminarTextProblem(body.title, body.description, body.category);
+  if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
   // Seminars are planned in the active fiscal year, as the planner does: a closed year's
   // unallocated money was carried over, and a label with no fiscal year is outside every budget.
   const fy = (db.fiscalYears || []).find((f: any) => f.label === body.fiscalYear);
@@ -8168,7 +8191,7 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
     id: newProgramId,
     // A brand-new seminar starts its own series; rollover copies inherit it.
     seriesId: newProgramId,
-    title: body.title,
+    title: body.title.trim(),
     description: body.description,
     category: body.category,
     allocatedBudget: allocation,
@@ -8238,6 +8261,13 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   const endDate = body.endDate ?? existingProgram.endDate;
   const datesProblem = seminarDatesProblem(startDate, endDate);
   if (datesProblem) return res.status(400).json({ status: "error", message: datesProblem });
+  // Title, description and category as they will be saved: a value not sent keeps the stored one
+  // (they used to be blanked, as the dates were).
+  const title = body.title ?? existingProgram.title;
+  const description = body.description ?? existingProgram.description;
+  const category = body.category ?? existingProgram.category;
+  const textProblem = seminarTextProblem(title, description, category);
+  if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
   // The times as they will be saved (a value not sent keeps the stored one). A seminar saved before
   // the office-hours rule with times outside it has to be corrected on its next edit.
   const timeProblem = seminarTimeProblem(
@@ -8307,10 +8337,9 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     ...existingProgram,
     // Backfill for programs saved before series tracking existed.
     seriesId: existingProgram.seriesId || existingProgram.id,
-    // A value not sent keeps the stored one (they used to be blanked, as the dates were).
-    title: body.title ?? existingProgram.title,
-    description: body.description ?? existingProgram.description,
-    category: body.category ?? existingProgram.category,
+    title: String(title).trim(),
+    description,
+    category,
     allocatedBudget: body.allocatedBudget !== undefined ? allocation : existingProgram.allocatedBudget,
     startDate,
     endDate,
@@ -8772,14 +8801,12 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
   }
 
   // Someone must stay to man each division (HSAC RAB 1), checked before anything is written, and only
-  // for someone the enrolment below would take (not someone already on it or who attended it before,
-  // whom it refuses anyway: nobody is asked to confirm a gap and then refused).
+  // for someone the enrolment below would take, by its own tests (not someone already on it or who
+  // attended it before, whom it refuses anyway: nobody is asked to confirm a gap and then refused).
   const emp = (db.employees || []).find(e => e.id === employeeId || e.employeeId === employeeId);
   const takenNow = seminarAwayIds(prog.id);
-  const wouldEnrol = !!emp && !takenNow.includes(emp.id) && !trainingEnrollmentBlock(emp.id, prog)
-    && !(db.trainingParticipants || []).some(p => p.trainingProgramId === prog.id && p.status !== "Cancelled" && employeeIdForms(p.employeeId).includes(emp.id));
-  const gaps = wouldEnrol
-    ? addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenNow }, { startDate: prog.startDate, endDate: prog.endDate, ids: [...takenNow, emp!.id] })
+  const gaps = emp && !onSeminarRoster(prog.id, emp) && !trainingEnrollmentBlock(emp.id, prog)
+    ? addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenNow }, { startDate: prog.startDate, endDate: prog.endDate, ids: [...takenNow, emp.id] })
     : [];
   if (refuseDivisionGap(req, res, gaps)) return;
 

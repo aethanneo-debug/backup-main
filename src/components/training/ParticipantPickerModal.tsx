@@ -40,6 +40,8 @@ const COLUMN_NAME: Record<TrainingNeedCategory, string> = {
   "Career Advancement": "Career Advancement"
 };
 const columnsText = (c: TrainingCandidate) => (c.needCategories ?? []).map(k => COLUMN_NAME[k]).join(", ");
+// The official column names, for the badge's tooltip.
+const columnLabels = (c: TrainingCandidate) => (c.needCategories ?? []).map(k => TRAINING_NEED_COLUMN_LABELS[k]).join("; ");
 
 // `selected`: they are already on this seminar's list, and the server counts only their other
 // trainings, so this seminar would be their first of the year, or one more.
@@ -62,7 +64,7 @@ function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; select
       {c.needsThis && (
         <span
           className={`${BADGE} bg-emerald-50 text-emerald-800 border-emerald-300`}
-          title={`Plan A, ${(c.needCategories ?? []).map(k => TRAINING_NEED_COLUMN_LABELS[k]).join("; ")}: ${c.needMatches.join("; ")}`}
+          title={`Plan A${columnLabels(c) ? `, ${columnLabels(c)}` : ""}: ${c.needMatches.join("; ")}`}
         >
           Needs this{columnsText(c) ? `: ${columnsText(c)}` : ""}
           {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
@@ -122,8 +124,11 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
       endDate: program.endDate || ""
     });
     if (!program.isNew) params.set("programId", program.id);
-    // Repeatable needTitle, so an unsaved draft row ranks by the plan too.
-    for (const title of program.fulfillsNeedTitles ?? []) params.append("needTitle", title);
+    // Repeatable needTitle, so an unsaved draft row ranks by the plan too. A row with no needs sends
+    // one empty needTitle: with none at all, the server would go by the saved seminar's needs.
+    const needTitles = program.fulfillsNeedTitles ?? [];
+    if (needTitles.length === 0) params.append("needTitle", "");
+    for (const title of needTitles) params.append("needTitle", title);
 
     setLoading(true);
     setError("");
@@ -159,7 +164,10 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId) && inScope(c));
   const recommended = available.slice(0, freeSlots);
   const listers = (candidates ?? []).filter(c => c.needsThis).length;
-  const hiddenCount = planOnly ? (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId)).length : 0;
+  // What "Show all employees" adds: everyone off the plan not selected yet, and how many of them can be picked.
+  const offPlan = planOnly ? (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId)) : [];
+  const hiddenCount = offPlan.length;
+  const hiddenEligible = offPlan.filter(c => c.eligible).length;
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
   // come first. Each group keeps the server's order (Plan A listers, then new hires, first).
   const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
@@ -168,6 +176,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
     { label: `Already has a training in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length > 0) },
     { label: "Not eligible", items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId) && inScope(c)) }
   ];
+  const choices = groups.filter(g => g.items.length > 0);
 
   const add = (ids: string[]) => {
     setSelectedIds(prev => {
@@ -197,13 +206,12 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
             <Sparkles size={16} className="shrink-0 mt-0.5" />
             <p>
               Every employee should have <strong>at least one training a year</strong>, so those with <strong>no training yet in {fyText}</strong> come first
-              (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t).{" "}
-              {coversNeeds ? (
-                <>This seminar covers <strong>Plan A</strong> needs, so the employees whose plan lists one of them are listed, and the badge says
-                in which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.</>
-              ) : (
-                <>Within each group, employees whose <strong>Plan A</strong> lists this training come first, then <strong>new hires</strong>.</>
-              )}{" "}
+              (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t). Within each group, employees whose{" "}
+              <strong>Plan A</strong> lists this training come first, then <strong>new hires</strong>.{" "}
+              {coversNeeds && (
+                <>This seminar covers Plan A needs, so at first only those employees are shown, and their badge says in which column:
+                for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>
+              )}
               Employees may join more than one seminar a year; only those who already attended this seminar can&rsquo;t be selected.
             </p>
           </div>
@@ -211,21 +219,24 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
           {/* Plan A first: who is listed, and the way to everyone else. */}
           {coversNeeds && !loading && !error && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              <p>
+              {/* Read out when it changes, so a screen reader hears what the switch did. The switch itself
+                  has no pressed state: its label already says what a click does. */}
+              <p aria-live="polite">
                 {planOnly
                   ? listers === 0
                     ? `Nobody's Plan A for ${fyText} lists this training.`
-                    : `Listed: the ${listers} employee${listers === 1 ? "" : "s"} whose Plan A for ${fyText} lists this training.`
-                  : "Listed: all employees."}
+                    : `Showing the ${listers} employee${listers === 1 ? "" : "s"} whose Plan A for ${fyText} lists this training.`
+                  : "Showing all employees."}
               </p>
-              <button
-                type="button"
-                onClick={() => setShowAll(v => !v)}
-                aria-pressed={showAll}
-                className="text-xs font-semibold text-blue-700 bg-white border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-50"
-              >
-                {planOnly ? `Show all employees (${hiddenCount} more)` : "Show only those whose Plan A lists it"}
-              </button>
+              {(!planOnly || hiddenCount > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(v => !v)}
+                  className="text-xs font-semibold text-blue-700 bg-white border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-50"
+                >
+                  {planOnly ? `Show all employees (${hiddenCount} more)` : "Show only those whose Plan A lists it"}
+                </button>
+              )}
             </div>
           )}
 
@@ -256,7 +267,11 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
                 {freeSlots === 0 ? (
                   <p className="text-xs text-slate-500 italic">All {max} seat{max === 1 ? " is" : "s are"} filled. Remove someone below to add another.</p>
                 ) : recommended.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic">No more eligible employees to recommend.</p>
+                  <p className="text-xs text-slate-500 italic">
+                    {hiddenEligible > 0
+                      ? <>Nobody else whose Plan A lists this training can be added. &ldquo;Show all employees&rdquo; lists the others.</>
+                      : "No more eligible employees to recommend."}
+                  </p>
                 ) : (
                   <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100">
                     {recommended.map(c => (
@@ -286,12 +301,12 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
                 <select
                   id="participant-dropdown"
                   value=""
-                  disabled={freeSlots === 0}
+                  disabled={freeSlots === 0 || choices.length === 0}
                   onChange={(e) => { if (e.target.value) add([e.target.value]); }}
                   className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
                 >
-                  <option value="">{freeSlots === 0 ? "Maximum participants reached" : "Choose an employee…"}</option>
-                  {groups.filter(g => g.items.length > 0).map(g => (
+                  <option value="">{freeSlots === 0 ? "Maximum participants reached" : choices.length === 0 ? "Nobody left on this list" : "Choose an employee…"}</option>
+                  {choices.map(g => (
                     <optgroup key={g.label} label={g.label}>
                       {g.items.map(c => (
                         <option key={c.employeeId} value={c.employeeId} disabled={!c.eligible}>
