@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { UserRole, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput } from "../types";
+import { UserRole, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput, type SeminarTdpJustificationInput, type TrainingProgramRow } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, apiErrorCode, formatCurrency, type ApiError } from "../utils";
-import { tdpBadgeText } from "../tdpRules";
+import { normalizeTitle, seminarTdpBadgeText, tdpBadgeText } from "../tdpRules";
+import SeminarTdpForm from "./training/SeminarTdpForm";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck, Archive } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
@@ -75,7 +76,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   focus?: ScreenFocus | null;
   onFocusHandled?: () => void;
 }) {
-  const [programs, setPrograms] = useState<TrainingProgram[]>([]);
+  const [programs, setPrograms] = useState<TrainingProgramRow[]>([]);
   const [activeFy, setActiveFy] = useState<any>(null);
   const [trainingBudgets, setTrainingBudgets] = useState<any[]>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
@@ -111,6 +112,36 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   const [editingRows, setEditingRows] = useState<{ [key: string]: any }>({});
   const [newRows, setNewRows] = useState<any[]>([]);
   const [showParticipantModal, setShowParticipantModal] = useState<string | null>(null); // row id or "new-index"
+  // Why a seminar outside the TDP is held (12z Part C), in one dialog with two uses. A save refused for
+  // want of one asks for it: the answer goes back to that save, which retries (null: cancelled). A saved
+  // row's "Add why" / "Change why" (`programId`) records it there and then; the dialog stays open, with
+  // the server's refusal, until it is saved. Each request gets a fresh dialog (`key`).
+  const [seminarForm, setSeminarForm] = useState<{
+    key: number; title: string; fiscalYear?: string; initial?: SeminarTdpJustificationInput; note?: string; programId?: string;
+  } | null>(null);
+  const [seminarFormSaving, setSeminarFormSaving] = useState(false);
+  const [seminarFormError, setSeminarFormError] = useState("");
+  // The save waiting for an answer. A newer request answers it with null (that save stops), so no save is
+  // left waiting on a dialog that has gone.
+  const seminarAsk = useRef<((value: SeminarTdpJustificationInput | null) => void) | null>(null);
+  const seminarFormKey = useRef(0);
+  const openSeminarForm = (form: Omit<NonNullable<typeof seminarForm>, "key">) => {
+    seminarAsk.current?.(null);
+    seminarAsk.current = null;
+    setSeminarFormError("");
+    setSeminarForm({ ...form, key: ++seminarFormKey.current });
+  };
+  const askSeminarWhy = (title: string, fiscalYear?: string, initial?: SeminarTdpJustificationInput, note?: string) =>
+    new Promise<SeminarTdpJustificationInput | null>(resolve => {
+      openSeminarForm({ title, fiscalYear, initial, note });
+      seminarAsk.current = resolve;
+    });
+  const closeSeminarForm = (value: SeminarTdpJustificationInput | null) => {
+    const answer = seminarAsk.current;
+    seminarAsk.current = null;
+    setSeminarForm(null);
+    answer?.(value);
+  };
   const [participantModalData, setParticipantModalData] = useState<{
     program: PickerProgram; selectedIds: string[];
     // Why each person outside the TDP is seated (12z), kept with the draft row and sent on Save; and
@@ -316,7 +347,20 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     fillFromPlan(id, [item.title], item.title);
   };
 
+  // One save per row at a time: a second click while one is in flight is ignored (a double-click on a new
+  // row created two seminars, 12x, and would now ask why each is held).
+  const savingRows = useRef(new Set<string>());
   const handleSaveRow = async (id: string, isNew: boolean) => {
+    if (savingRows.current.has(id)) return;
+    savingRows.current.add(id);
+    try {
+      await saveRow(id, isNew);
+    } finally {
+      savingRows.current.delete(id);
+    }
+  };
+
+  const saveRow = async (id: string, isNew: boolean) => {
     const row = isNew ? newRows.find(r => r.id === id) : editingRows[id];
     if (!row) return;
     // Still looking up who listed it: saving now would save the seminar with nobody in it.
@@ -363,29 +407,43 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       const people = ((err.data as { people?: { employeeId: string }[] } | undefined)?.people ?? []).map(x => x.employeeId);
       alert(`${err.message}\n\nThe participant list opens on them: record why each one is seated, or remove them, then save again.`);
       openParticipantModal(id, isNew, people);
+      // What this screen knew was out of date (the plan may have changed since it loaded).
+      fetchData();
     };
+    // The save, asking what the server needs to hear, in the order it asks: why a seminar outside the
+    // TDP is held (12z Part C), why each person outside it is seated (Part A), then whether to leave a
+    // division with nobody at the office (12x). Each answer goes with the retry.
+    let body: Record<string, unknown> = { ...row };
     let res;
-    try {
-      res = await apiCall(endpoint, {
-        method,
-        body: JSON.stringify(row)
-      });
-    } catch (err: any) {
-      if (apiErrorCode(err) === "OUTSIDE_TDP") {
-        askWhy(err);
-        return;
-      }
-      if (apiErrorCode(err) !== "DIVISION_GAP") {
-        alert("Error saving training program: " + err.message);
-        return;
-      }
-      // A division would be left with nobody at the office: HR may still save it, knowingly.
-      if (!confirm(divisionGapQuestion(err.message, "Save"))) return;
+    for (;;) {
       try {
-        res = await apiCall(endpoint, { method, body: JSON.stringify({ ...row, allowDivisionGap: true }) });
-      } catch (err2: any) {
-        if (apiErrorCode(err2) === "OUTSIDE_TDP") askWhy(err2);
-        else alert("Error saving training program: " + err2.message);
+        res = await apiCall(endpoint, { method, body: JSON.stringify(body) });
+        break;
+      } catch (err: any) {
+        const code = apiErrorCode(err);
+        if (code === "NOT_IN_TDP" && !body.seminarTdpException) {
+          // Filled in from before: one given for this row earlier, or the one on record, which is asked
+          // again when the seminar was renamed (a justification is for the training it names).
+          const renamedFrom = saved?.tdpException && normalizeTitle(saved.title) !== normalizeTitle(row.title) ? String(saved.title || "").trim() : "";
+          const why = await askSeminarWhy(row.title, row.fiscalYear, row.seminarTdpException ?? saved?.tdpException,
+            renamedFrom ? `It was renamed from "${renamedFrom}". Its justification was for that title: confirm it, or change it, for this one.` : undefined);
+          if (!why) return;
+          body = { ...body, seminarTdpException: why };
+          // Kept with the draft row, so saving it again (after a Cancel below) doesn't ask twice.
+          patchRow(id, isNew, { seminarTdpException: why });
+          continue;
+        }
+        if (code === "OUTSIDE_TDP") {
+          askWhy(err);
+          return;
+        }
+        // A division would be left with nobody at the office: HR may still save it, knowingly.
+        if (code === "DIVISION_GAP" && !body.allowDivisionGap) {
+          if (!confirm(divisionGapQuestion(err.message, "Save"))) return;
+          body = { ...body, allowDivisionGap: true };
+          continue;
+        }
+        alert("Error saving training program: " + err.message);
         return;
       }
     }
@@ -489,6 +547,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     });
   };
 
+  // Several fields of a draft row at once, as a functional update (the lists may have changed while an
+  // answer was awaited).
+  const patchRow = (id: string, isNew: boolean, patch: Record<string, unknown>) => {
+    if (isNew) setNewRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
+    else setEditingRows(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  };
+
   const updateRow = (id: string, field: string, value: any, isNew: boolean) => {
     if (isNew) {
       // Functional: a row added from the plan gets its participants a moment later
@@ -551,7 +616,11 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       // A saved seminar's enrolments and where each stands against the TDP (12z).
       roster: isNew ? undefined : Object.fromEntries(participants
         .filter(part => part.trainingProgramId === rowId && onRoster(part))
-        .map(part => [staffIdOf(part.employeeId), { tdp: part.tdp, tdpException: part.tdpException }]))
+        .map(part => [staffIdOf(part.employeeId), { tdp: part.tdp, tdpException: part.tdpException }])),
+      // A row covering no need is held outside the TDP with its own justification, which covers everyone
+      // on it (Part C): Save asks for it when the seminar is new or was in the TDP, or it has one.
+      seminarCovers: (row.fulfillsNeedTitles || []).length === 0 && (isNew || !!row.seminarTdpException
+        || ["inTdp", "justified"].includes(programs.find(x => x.id === rowId)?.tdp ?? ""))
     };
     setParticipantModalData({ program, selectedIds: row.participantIds || [], justifications: row.tdpExceptions || {}, mustJustify });
     setShowParticipantModal(rowId);
@@ -607,9 +676,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     const { program } = participantModalData;
     // The roster and its justifications in one functional update (two updateRow calls on an edited
     // row would lose the first).
-    const patch = { participantIds: selectedIds, tdpExceptions: justifications };
-    if (program.isNew) setNewRows(prev => prev.map(r => (r.id === program.id ? { ...r, ...patch } : r)));
-    else setEditingRows(prev => ({ ...prev, [program.id]: { ...prev[program.id], ...patch } }));
+    patchRow(program.id, program.isNew, { participantIds: selectedIds, tdpExceptions: justifications });
     setShowParticipantModal(null);
     setParticipantModalData(null);
   };
@@ -688,9 +755,39 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     }
   }
 
+  // Why a saved seminar outside the TDP is held, recorded without saving the seminar (12z Part C).
+  const recordSeminarWhy = (p: TrainingProgramRow) =>
+    openSeminarForm({ title: String(p.title || "").trim(), fiscalYear: p.fiscalYear, initial: p.tdpException, programId: p.id });
+  // The dialog's Save: back to the save that asked, or recorded at once for a saved row, keeping the
+  // dialog (and what HR typed) open with the server's refusal.
+  const saveSeminarWhy = async (value: SeminarTdpJustificationInput) => {
+    const programId = seminarForm?.programId;
+    if (!programId) return closeSeminarForm(value);
+    setSeminarFormSaving(true);
+    setSeminarFormError("");
+    try {
+      const res = await apiCall(`/api/training/programs/${encodeURIComponent(programId)}/tdp-exception`, { method: "PUT", body: JSON.stringify(value) });
+      setSeminarForm(null);
+      if (res?.message) alert(res.message);
+      fetchData();
+    } catch (err: any) {
+      setSeminarFormError(err?.message || "The justification could not be saved.");
+    } finally {
+      setSeminarFormSaving(false);
+    }
+  };
+
   const renderRow = (p: any, isNew: boolean) => {
     const isEditing = isNew || !!editingRows[p.id];
     const row = isEditing ? (isNew ? p : editingRows[p.id]) : p;
+    const savedRow = isNew ? undefined : programs.find(x => x.id === p.id);
+    const savedTdp = savedRow?.tdp;
+    // Outside the TDP (12z Part C), as the server will take the save: a justification that applies (one
+    // given for this row, or the one on record unless the seminar was renamed) covers everyone on it;
+    // otherwise Save asks for one when the seminar is new, was in the TDP, or was renamed from a justified one.
+    const renamedNow = !!savedRow && normalizeTitle(savedRow.title) !== normalizeTitle(row.title);
+    const holdsWhy = !!row.seminarTdpException || (!!savedRow?.tdpException && !renamedNow);
+    const saveAsksWhy = !holdsWhy && (isNew || savedTdp === "inTdp" || (renamedNow && !!savedRow?.tdpException));
     
     // For participants, if viewing, we show count. If editing, we show a button.
     const partsCount = isEditing ? (row.participantIds ? row.participantIds.length : 0) : participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).length;
@@ -718,7 +815,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                   <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
                 ))
               ) : (
-                <div className="px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200 text-[10px] font-semibold leading-snug">No plan need linked yet</div>
+                <div className="px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200 text-[10px] font-semibold leading-snug">
+                  No plan need linked yet
+                  {/* Outside the TDP (12z Part C): held with its own justification, which covers everyone on it. */}
+                  {holdsWhy
+                    ? <span className="block text-[9px] font-normal">Held outside the TDP: its justification covers everyone on it.</span>
+                    : saveAsksWhy && <span className="block text-[9px] font-normal">Save asks why it is held outside the TDP.</span>}
+                </div>
               )}
               {/* Disabled while the row's participants are being looked up for its current needs. */}
               <button type="button" onClick={() => openCoverageModal(p.id, isNew)} disabled={filling} className="flex items-center gap-1 rounded text-[10px] font-semibold text-blue-700 hover:text-blue-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline">
@@ -728,20 +831,28 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           ) : (
             <div className="space-y-1">
               <div className="font-bold text-slate-800">{p.title}</div>
-              {(p.fulfillsNeedTitles || []).length > 0 ? (
-                p.fulfillsNeedTitles.map((t: string) => (
-                  <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
-                ))
-              ) : (
-                /* A seminar with no covered need can never mark anything accomplished in
-                   Plan D, and its participants lose the "Needs this" ranking. That used to
-                   read as grey italic small print, which is how it went unnoticed. */
-                <div className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 leading-snug">
-                  <span className="block text-[10px] font-semibold text-amber-800">Not linked to the plan</span>
-                  <span className="block text-[9px] text-amber-700">
-                    Edit this row and tick the need it answers &mdash; otherwise Plan D can never
-                    mark it accomplished.
-                  </span>
+              {(p.fulfillsNeedTitles || []).map((t: string) => (
+                <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
+              ))}
+              {/* Outside the TDP (12z Part C): none of its needs is in its year's Plan A, so it can never mark
+                  anything accomplished in Plan D, and its participants lose the "Needs this" ranking. Shown
+                  with its own justification (HR's and the Administrator's to see), or flagged until one is
+                  recorded. (It used to read as grey italic small print, which is how it went unnoticed.) */}
+              {seminarTdpBadgeText(p.tdp, p.tdpException) && (
+                <div className={`rounded border px-1.5 py-1 leading-snug ${p.tdp === "justified" ? "border-slate-300 bg-slate-50" : "border-amber-200 bg-amber-50"}`}>
+                  <span className={`block text-[10px] font-semibold ${p.tdp === "justified" ? "text-slate-700" : "text-amber-800"}`}>{seminarTdpBadgeText(p.tdp, p.tdpException)}</span>
+                  {p.tdp === "justified" && p.tdpException ? (
+                    <span className="block text-[9px] text-slate-600">
+                      {p.tdpException.reason} · approved by {p.tdpException.approvedBy.name} ({p.tdpException.approvedBy.position})
+                    </span>
+                  ) : (
+                    <span className="block text-[9px] text-amber-700">
+                      It covers no need in its year&rsquo;s plan, so Plan D can never mark it accomplished. Tick the need it answers, or record why it is held.
+                    </span>
+                  )}
+                  <button type="button" onClick={() => recordSeminarWhy(p)} className="mt-0.5 rounded text-[10px] font-semibold text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                    {p.tdpException ? "Change why" : "Add why"}<span className="sr-only">: {String(p.title || "").trim()}</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -814,7 +925,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                          {emp.fullName.split(' ')[0]}
                          {tdpText && (
                            <>
-                             <span aria-hidden="true" className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${part.tdp === "justified" ? "bg-slate-400" : "bg-amber-500"}`} />
+                             <span aria-hidden="true" className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${part.tdp === "justified" || part.tdp === "seminar" ? "bg-slate-400" : "bg-amber-500"}`} />
                              <span className="sr-only">: {tdpText}</span>
                            </>
                          )}
@@ -1161,6 +1272,20 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           selectedTitles={coverageModalData.selectedTitles}
           onConfirm={handleSaveCoverage}
           onClose={() => setCoverageModalData(null)}
+        />
+      )}
+
+      {seminarForm && (
+        <SeminarTdpForm
+          key={seminarForm.key}
+          seminarTitle={seminarForm.title}
+          fiscalYear={seminarForm.fiscalYear}
+          initial={seminarForm.initial}
+          note={seminarForm.note}
+          saving={seminarFormSaving}
+          error={seminarFormError}
+          onSave={value => { void saveSeminarWhy(value); }}
+          onCancel={() => closeSeminarForm(null)}
         />
       )}
 

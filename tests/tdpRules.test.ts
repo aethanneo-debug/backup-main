@@ -2,7 +2,10 @@
 // RAB 1's answer of 2026-10-28; src/tdpRules.ts). Pure functions, no data touched. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coveredNeeds, normalizeTitle, readTdpJustification, seatsNeedingJustification, tdpBadgeText, tdpKindText, tdpStanding } from "../src/tdpRules";
+import {
+  coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
+  seminarNeedsJustification, seminarTdpBadgeText, seminarTdpStanding, tdpBadgeText, tdpKindText, tdpStanding
+} from "../src/tdpRules";
 
 const needs = [
   { employeeId: "emp-4", fiscalYear: "2027", title: "Legal Ethics", category: "Function" },
@@ -95,6 +98,56 @@ test("text is cleaned as everywhere else: invisible characters out, spaces colla
   const r = readTdpJustification({ ...valid, reason: "On​ leave\n\n until  Nov 30", identifiedBy: { name: " Test\tOfficer ", position: "CAO" } }, today);
   assert.ok("value" in r);
   assert.deepEqual([r.value.reason, r.value.identifiedBy.name], ["On leave until Nov 30", "Test Officer"]);
+});
+
+test("Part C: a seminar is in the TDP when one of its titles is a need in its year's Plan A, anyone's", () => {
+  assert.equal(seminarCoversPlan(needs, legalEthics), true);
+  assert.equal(seminarCoversPlan(needs, { fiscalYear: "2027", fulfillsNeedTitles: ["values orientation workshop"] }), false, "that need is in another year's plan");
+  assert.equal(seminarCoversPlan(needs, { fiscalYear: "2027", fulfillsNeedTitles: ["Something nobody listed"] }), false, "a title typed in doesn't count");
+  assert.equal(seminarCoversPlan(needs, { fiscalYear: "2027", fulfillsNeedTitles: [] }), false);
+  assert.equal(seminarCoversPlan(needs, { fiscalYear: "2027", fulfillsNeedTitles: ["typed in", "Legal Ethics"] }), true, "one real need is enough");
+});
+
+test("Part C: a save gives the seminar's justification only when it takes it outside the TDP", () => {
+  const s = (o: object) => ({ isNew: false, inTdpBefore: false, inTdpAfter: false, justified: false, ...o });
+  assert.equal(seminarNeedsJustification(s({ isNew: true })), true, "a new seminar outside the TDP");
+  assert.equal(seminarNeedsJustification(s({ inTdpBefore: true })), true, "one that was in the TDP and isn't now");
+  assert.equal(seminarNeedsJustification(s({ isNew: true, justified: true })), false, "…with its justification");
+  assert.equal(seminarNeedsJustification(s({})), false, "an older seminar already outside it: re-saved without a question");
+  assert.equal(seminarNeedsJustification(s({ isNew: true, inTdpAfter: true })), false, "in the TDP");
+  // A justification is for the training it names (the security review): renamed, it is asked again.
+  assert.equal(seminarNeedsJustification(s({ renamedFromJustified: true })), true, "renamed away from a justified title");
+  assert.equal(seminarNeedsJustification(s({ renamedFromJustified: true, justified: true })), false, "…confirmed for the new title");
+  assert.equal(seminarNeedsJustification(s({ renamedFromJustified: true, inTdpAfter: true })), false, "…or renamed into the TDP");
+});
+
+test("Part C: a seminar's standing, and an enrolment under its seminar's justification", () => {
+  assert.equal(seminarTdpStanding({ inTdp: true, tdpException: { kind: "Other" } }), "inTdp");
+  assert.equal(seminarTdpStanding({ inTdp: false, tdpException: { kind: "Other" } }), "justified");
+  assert.equal(seminarTdpStanding({ inTdp: false, createdAt: "2026-10-23T02:00:00Z" }), "beforeRule");
+  assert.equal(seminarTdpStanding({ inTdp: false, createdAt: "2026-10-29T02:00:00Z" }), "missing");
+  // The rule's day is Manila's: 01:00 on 29 October in Manila is still the 28th in UTC.
+  assert.equal(seminarTdpStanding({ inTdp: false, createdAt: "2026-10-28T17:00:00.000Z" }), "missing", "after midnight in Manila");
+  assert.equal(seminarTdpStanding({ inTdp: false, createdAt: "2026-10-28T15:59:59.000Z" }), "beforeRule", "before midnight in Manila");
+  assert.equal(seminarTdpStanding({ inTdp: false }), "beforeRule", "no date: from before the rule");
+  assert.equal(tdpStanding({ identified: false, underSeminar: "2026-10-29T02:00:00Z" }), "seminar");
+  assert.equal(tdpStanding({ identified: false, tdpException: { kind: "Other" }, underSeminar: "x" }), "justified", "their own justification first");
+  assert.equal(tdpBadgeText("seminar"), "Under the seminar's justification");
+  assert.equal(seminarTdpBadgeText("justified", { kind: "Central Office training" }), "Not in the TDP: Central Office training");
+  assert.equal(seminarTdpBadgeText("justified", { kind: "Other" }), "Not in the TDP: other reason");
+  assert.equal(seminarTdpBadgeText("beforeRule"), "Not in the TDP (before this rule)");
+  assert.equal(seminarTdpBadgeText("inTdp"), null);
+});
+
+test("Part C: a seminar's justification needs its kind, the reason and who approved it", () => {
+  const ok = { kind: "Central Office training", reason: "Paid by the Central Office; slots for each RAB", approvedBy: { name: "Test Chief", position: "Regional Adjudicator" } };
+  const r = readSeminarTdpJustification({ ...ok, referenceNo: " Memo 12 ", referenceDate: "2026-10-01" }, today);
+  assert.ok("value" in r);
+  assert.deepEqual(r.value, { ...ok, referenceNo: "Memo 12", referenceDate: "2026-10-01" });
+  assert.ok("problem" in readSeminarTdpJustification({ ...ok, kind: "Designated" }, today), "a seat's kind isn't a seminar's");
+  assert.ok("problem" in readSeminarTdpJustification({ ...ok, approvedBy: { name: "Test Chief" } }, today), "no position for who approved it");
+  assert.ok("problem" in readSeminarTdpJustification({ ...ok, reason: "" }, today));
+  assert.ok("problem" in readSeminarTdpJustification({ ...ok, referenceDate: "2026-11-01" }, today), "a reference dated after today");
 });
 
 test("badges and words for each kind", () => {

@@ -98,9 +98,14 @@ import {
   LiquidationSubmission,
   LiquidationSubmissionView,
   TdpJustificationInput,
-  TrainingParticipantRow
+  TrainingParticipantRow,
+  SeminarTdpJustificationInput,
+  TrainingProgramRow
 } from "./src/types";
-import { coveredNeeds, normalizeTitle, readTdpJustification, seatsNeedingJustification, tdpKindText, tdpStanding, type SeatCheck } from "./src/tdpRules";
+import {
+  coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
+  seminarNeedsJustification, seminarTdpStanding, tdpKindText, tdpStanding, type SeatCheck
+} from "./src/tdpRules";
 
 const app = express();
 const PORT = 3000;
@@ -6702,10 +6707,12 @@ function tdpRosterBefore(program: TrainingProgram): Map<string, boolean> {
 }
 
 // After a save has seated people: the enrolments it leaves outside the TDP with no justification (none
-// sent, none on record), and the justifications to record (on its new seats, or on anyone HR justified
-// with it). `created`: the enrolments the save made; `kept`: those HR unticked but it had to keep.
+// sent, none on record), the justifications to record (on its new seats, or on anyone HR justified
+// with it), and the seats its seminar's own justification covers (Part C). `created`: the enrolments the
+// save made; `kept`: those HR unticked but it had to keep; `seminarCovers`: the seminar is outside the
+// TDP and held with its own justification, which covers everyone on it.
 function tdpSeatsPlan(program: TrainingProgram, created: TrainingParticipant[], before: Map<string, boolean>,
-  sent: Map<string, TdpJustificationInput>, kept: Set<string> = new Set()) {
+  sent: Map<string, TdpJustificationInput>, kept: Set<string> = new Set(), seminarCovers = false) {
   const createdIds = new Set(created.map(p => p.id));
   const seats = (db.trainingParticipants || [])
     .filter(p => p.trainingProgramId === program.id && p.status !== "Cancelled" && p.status !== "Archived")
@@ -6716,7 +6723,7 @@ function tdpSeatsPlan(program: TrainingProgram, created: TrainingParticipant[], 
         newSeat: createdIds.has(p.id),
         identifiedBefore: before.get(p.id) ?? false,
         identifiedAfter: tdpIdentifies(p.employeeId, program),
-        justified: !!p.tdpException || sent.has(empId),
+        justified: !!p.tdpException || sent.has(empId) || !!p.tdpUnderSeminar || seminarCovers,
         keptForHistory: kept.has(p.id)
       };
       return { p, empId, check };
@@ -6725,8 +6732,91 @@ function tdpSeatsPlan(program: TrainingProgram, created: TrainingParticipant[], 
   return {
     missing: seats.filter(s => missing.has(s.p.id)).map(s => s.p),
     toRecord: seats.filter(s => !s.check.identifiedAfter && sent.has(s.empId))
-      .map(s => ({ participant: s.p, justification: sent.get(s.empId)!, newSeat: s.check.newSeat }))
+      .map(s => ({ participant: s.p, justification: sent.get(s.empId)!, newSeat: s.check.newSeat })),
+    toCover: seminarCovers
+      ? seats.filter(s => !s.check.identifiedAfter && !s.p.tdpException && !sent.has(s.empId) && !s.p.tdpUnderSeminar).map(s => s.p)
+      : []
   };
+}
+
+// Whether a seminar is in the TDP (12z Part C): one of its titles is a need in its fiscal year's Plan A,
+// anyone's. A title typed in that no plan lists doesn't count.
+function seminarInTdp(program: SeminarRef): boolean {
+  return seminarCoversPlan(db.trainingNeeds || [], program);
+}
+
+// The refusal (409) of a save that leaves a seminar outside the TDP with no justification of its own
+// (Part C). The caller returns at once; in a transaction, the save is undone.
+function refuseNotInTdp(res: any, program: TrainingProgram): void {
+  res.status(409).json({
+    status: "error",
+    message: `"${String(program.title || "").trim()}" covers no need in FY ${program.fiscalYear}'s Plan A, so it is outside the TDP. `
+      + "Record why it is held (a Central Office training, an invitation from another agency, a new law or issuance, or another reason) and who approved it.",
+    data: { code: "NOT_IN_TDP" }
+  });
+}
+
+// A seminar outside the TDP held with its own justification covers everyone seated on it (Part C): each
+// seat records it, so it stays justified if the seminar later covers a need. Who seated whom is on
+// record, as for Part A's seats: one "TDP Exception (seminar)" entry naming them, "Self-Approval" for an
+// officer seating themself, and the Administrator's notice (`tellAdministrator`: not when the seminar's
+// own justification was just recorded, whose notice already went). Callers save. True when it covered
+// anyone.
+function coverSeatsBySeminar(user: TdpActor, program: TrainingProgram, seats: TrainingParticipant[], tellAdministrator: boolean): boolean {
+  const fresh = seats.filter(p => !p.tdpUnderSeminar);
+  if (fresh.length === 0) return false;
+  const at = new Date().toISOString();
+  const title = JSON.stringify(String(program.title || "").trim());
+  const names = fresh.map(p => employeeByKey(p.employeeId)?.fullName || p.employeeId);
+  for (const p of fresh) {
+    p.tdpUnderSeminar = at;
+    if (isOwnRecord(user, p.employeeId)) flagSelfApproval(user, `seated themself in ${title} under the seminar's TDP justification`);
+  }
+  logEvent(user.id, user.username, user.role, "TDP Exception (seminar)",
+    `${user.fullName} seated ${names.map(n => JSON.stringify(n)).join(", ")} in ${title} (FY ${program.fiscalYear}) under the seminar's justification.`);
+  if (tellAdministrator && user.role !== UserRole.SUPER_ADMIN) {
+    notify({ role: UserRole.SUPER_ADMIN }, {
+      title: "Seated under a seminar's TDP exception",
+      message: `${user.fullName} seated ${namesText(names)} in ${title} (FY ${program.fiscalYear}) under the seminar's justification.`,
+      type: "info",
+      link: { tab: "training_development", record: { kind: "seminar", id: program.id } },
+      dedupeKey: `tdp-seminar-seats:${program.id}:${at}`
+    });
+  }
+  return true;
+}
+
+const SEMINAR_TDP_FIELDS = ["kind", "reason", "referenceNo", "referenceDate"] as const;
+
+// Records why a seminar outside the TDP is held (Part C): who recorded it and when, the "TDP Exception
+// (seminar)" audit entry (the kind and who approved it, HR's words quoted; the reason stays on the
+// seminar), and the Administrator's notice unless they recorded it. One that changes nothing records
+// nothing, unless the seminar was renamed (`renamedFrom`): a justification is for the training it
+// names, so it is confirmed for the new title. Callers save. True when it recorded one.
+function recordSeminarTdpException(user: TdpActor, program: TrainingProgram, j: SeminarTdpJustificationInput, renamedFrom?: string): boolean {
+  const before = program.tdpException;
+  if (!renamedFrom && before && SEMINAR_TDP_FIELDS.every(f => (before[f] ?? "") === (j[f] ?? ""))
+    && before.approvedBy.name === j.approvedBy.name && before.approvedBy.position === j.approvedBy.position) return false;
+  const recordedAt = new Date().toISOString();
+  program.tdpException = { ...j, recordedBy: { id: user.id, name: user.fullName, role: user.role }, recordedAt };
+  const title = `${JSON.stringify(String(program.title || "").trim())} (FY ${program.fiscalYear})`;
+  const what = renamedFrom ? `renamed ${JSON.stringify(renamedFrom)} to ${title} and recorded why it is held`
+    : before ? `changed why ${title} is held` : `held ${title}`;
+  logEvent(user.id, user.username, user.role, "TDP Exception (seminar)",
+    `${user.fullName} ${what} outside the TDP. Kind: ${j.kind}. `
+    + `Approved by: ${JSON.stringify(j.approvedBy.name)}, ${JSON.stringify(j.approvedBy.position)}.`
+    + `${j.referenceNo ? ` Reference: ${JSON.stringify(j.referenceNo)}${j.referenceDate ? ` (${j.referenceDate})` : ""}.` : ""}`);
+  if (user.role !== UserRole.SUPER_ADMIN) {
+    notify({ role: UserRole.SUPER_ADMIN }, {
+      title: before ? "Seminar's TDP exception changed" : "Seminar held outside the TDP",
+      // HR's own words quoted, so a name can't read as the system's text.
+      message: `${user.fullName} ${what} outside the TDP: ${j.kind}, approved by ${JSON.stringify(j.approvedBy.name)}.`,
+      type: "info",
+      link: { tab: "training_development", record: { kind: "seminar", id: program.id } },
+      dedupeKey: `tdp-seminar:${program.id}:${recordedAt}`
+    });
+  }
+  return true;
 }
 
 // The refusal (409, naming the people, for the screen to ask HR why each is seated) of a save that
@@ -6771,20 +6861,21 @@ function recordTdpException(user: TdpActor, p: TrainingParticipant, program: Tra
   const recordedAt = new Date().toISOString();
   p.tdpException = { ...j, recordedBy: { id: user.id, name: user.fullName, role: user.role }, recordedAt };
   const who = employeeByKey(p.employeeId)?.fullName || p.employeeId;
-  const title = String(program.title || "").trim();
+  // The title quoted too, so one typed to look like the fields that follow can't pass for them.
+  const title = JSON.stringify(String(program.title || "").trim());
   const kind = j.kind === "Designated" && j.committee === "Other" ? `Designated (${JSON.stringify(j.committeeOther ?? "")})` : tdpKindText(j);
   const what = newSeat ? `seated ${who} in` : before ? `changed why ${who} is seated in` : `recorded why ${who} is seated in`;
   logEvent(user.id, user.username, user.role, "TDP Exception",
-    `${user.fullName} ${what} "${title}" (FY ${program.fiscalYear}) outside the TDP. Kind: ${kind}. `
+    `${user.fullName} ${what} ${title} (FY ${program.fiscalYear}) outside the TDP. Kind: ${kind}. `
     + `Identified by: ${JSON.stringify(j.identifiedBy.name)}, ${JSON.stringify(j.identifiedBy.position)}.`
     + `${j.referenceNo ? ` Reference: ${JSON.stringify(j.referenceNo)}${j.referenceDate ? ` (${j.referenceDate})` : ""}.` : ""}`);
   if (isOwnRecord(user, p.employeeId)) {
-    flagSelfApproval(user, `${newSeat ? "seated themself in" : "recorded why they are seated in"} "${title}" outside the TDP: ${kind}`);
+    flagSelfApproval(user, `${newSeat ? "seated themself in" : "recorded why they are seated in"} ${title} outside the TDP: ${kind}`);
   }
   if (user.role !== UserRole.SUPER_ADMIN) {
     notify({ role: UserRole.SUPER_ADMIN }, {
       title: newSeat ? "Seated outside the TDP" : before ? "TDP exception changed" : "TDP exception recorded",
-      message: `${user.fullName} ${what} "${title}" (FY ${program.fiscalYear}) outside the TDP: ${kind}, identified by ${j.identifiedBy.name}.`,
+      message: `${user.fullName} ${what} ${title} (FY ${program.fiscalYear}) outside the TDP: ${kind}, identified by ${JSON.stringify(j.identifiedBy.name)}.`,
       type: "info",
       link: { tab: "training_development", record: { kind: "seminar", id: program.id } },
       dedupeKey: `tdp-exception:${p.id}:${recordedAt}`
@@ -6806,10 +6897,12 @@ function seminarDatesProblem(startDate: unknown, endDate: unknown): string | nul
 
 // A seminar's title, description and category as they will be saved: text, and not so long that
 // matching titles (normalizeTitle) holds the server up. The title is required, with the room a Plan A
-// need's title has, since a seminar can be named after one.
+// need's title has, since a seminar can be named after one. It is saved cleaned like a name
+// (`cleanText`: no control or direction characters, which could scramble the audit entries that quote it).
 function seminarTextProblem(title: unknown, description: unknown, category: unknown): string | null {
   if (typeof title !== "string" || !title.trim()) return "Enter the seminar's title.";
   if (title.trim().length > 300) return "Keep the seminar's title under 300 characters.";
+  if (!cleanText(title)) return "Enter the seminar's title.";
   if (description != null && (typeof description !== "string" || description.length > 2000)) {
     return "The description must be text, up to 2,000 characters.";
   }
@@ -7583,7 +7676,13 @@ app.get("/api/training/programs", authenticateToken, (req: any, res: any) => {
   if (!isTrainingRecordsRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Training program details are restricted to HR." });
   }
-  res.json({ status: "success", data: db.trainingPrograms || [] });
+  // With where each stands against the TDP (12z Part C). A seminar's own justification travels with
+  // it, so this list stays HR's and the Administrator's, and out of the browser's cache.
+  res.set("Cache-Control", "no-store");
+  const rows: TrainingProgramRow[] = (db.trainingPrograms || []).map(p => ({
+    ...p, tdp: seminarTdpStanding({ inTdp: seminarInTdp(p), tdpException: p.tdpException, createdAt: p.createdAt })
+  }));
+  res.json({ status: "success", data: rows });
 });
 
 // Ranked participant suggestions for a seminar. Works for saved programs
@@ -7624,7 +7723,11 @@ app.get("/api/training/recommendations", authenticateToken, (req: any, res: any)
   );
   const elsewhere = awayAtOtherSeminars(stored?.id);
   const ranked = rankTrainingCandidates(program);
-  res.json({ status: "success", data: { ...ranked, candidates: ranked.candidates.map(c => ({ ...c, awayOn: days.filter(d => elsewhere(c.employeeId, d)) })) } });
+  // Whether the seminar's own justification will cover everyone on it (12z Part C), so the picker asks
+  // nobody for their own: the seminar as drafted is outside the TDP, and Save asks for one (a new
+  // seminar, or one in the TDP now) or one is on record. The picker no longer guesses it from the row.
+  const seminarCovers = !seminarInTdp(program) && (!stored || seminarInTdp(stored) || !!stored.tdpException);
+  res.json({ status: "success", data: { ...ranked, candidates: ranked.candidates.map(c => ({ ...c, awayOn: days.filter(d => elsewhere(c.employeeId, d)) })), seminarCovers } });
 });
 
 // Programs & Budget's coverage panel: at least one training per year per employee. How many
@@ -8234,6 +8337,8 @@ app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
   if (!need) return res.status(404).json({ status: "error", message: "Training need not found." });
 
   const { title, category, remarks, accomplishedOverride } = req.body || {};
+  // Who the TDP identifies follows these titles (12z), so a rename is logged with the old title too.
+  const titleBefore = need.title;
   if (title !== undefined) {
     // As on create: text, at most 300 characters. Every TDP check matches titles (12z), so one far
     // longer would hold the server up each time.
@@ -8259,7 +8364,7 @@ app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
 
   const emp = (db.employees || []).find(e => e.id === need.employeeId || e.employeeId === need.employeeId);
   logEvent(req.user.id, req.user.username, req.user.role, "Update Training Need",
-    `Updated "${need.title}" (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
+    `Updated ${titleBefore !== need.title ? `${JSON.stringify(titleBefore)} to ` : ""}${JSON.stringify(need.title)} (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
   saveDB();
   res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
 });
@@ -8283,6 +8388,7 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Unauthorized" });
   }
+  res.set("Cache-Control", "no-store");   // the reply carries the seminar's justification (12z Part C)
   const body = req.body;
   const allocation = readAllocation(body.allocatedBudget);
   if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
@@ -8296,6 +8402,8 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
   const tdpSent = readTdpExceptions(body.tdpExceptions);
   if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
+  const seminarSent = body.seminarTdpException == null ? null : readSeminarTdpJustification(body.seminarTdpException, manilaToday());
+  if (seminarSent && "problem" in seminarSent) return res.status(400).json({ status: "error", message: seminarSent.problem });
   // Seminars are planned in the active fiscal year, as the planner does: a closed year's
   // unallocated money was carried over, and a label with no fiscal year is outside every budget.
   const fy = (db.fiscalYears || []).find((f: any) => f.label === body.fiscalYear);
@@ -8328,7 +8436,7 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
     id: newProgramId,
     // A brand-new seminar starts its own series; rollover copies inherit it.
     seriesId: newProgramId,
-    title: body.title.trim(),
+    title: cleanText(body.title),
     description: body.description,
     category: body.category,
     allocatedBudget: allocation,
@@ -8351,6 +8459,15 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
     createdAt: new Date().toISOString(),
   };
 
+  // A seminar the TDP doesn't cover (no need in its year's Plan A) is held only with its own
+  // justification (12z Part C), which then covers everyone seated on it. Asked first.
+  const inTdp = seminarInTdp(newProgram);
+  if (seminarNeedsJustification({ isNew: true, inTdpBefore: false, inTdpAfter: inTdp, justified: !!seminarSent })) {
+    refuseNotInTdp(res, newProgram);
+    return;
+  }
+  const seminarCovers = !inTdp && !!seminarSent;
+
   db.trainingPrograms.push(newProgram);
 
   let skippedMessages: string[] = [];
@@ -8361,16 +8478,21 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   }
 
   // Both judged on who was actually enrolled, and a refusal undoes the whole save (one transaction):
-  // anyone the TDP doesn't identify needs a justification (HSAC RAB 1, 2026-10-28), then someone must
-  // stay to man each division.
-  const tdpPlan = tdpSeatsPlan(newProgram, created, new Map(), tdpSent.map);
+  // anyone the TDP doesn't identify needs a justification (HSAC RAB 1, 2026-10-28), unless the
+  // seminar's own covers them, then someone must stay to man each division.
+  const tdpPlan = tdpSeatsPlan(newProgram, created, new Map(), tdpSent.map, new Set(), seminarCovers);
   if (refuseOutsideTdp(res, newProgram, tdpPlan.missing)) return;
   const gaps = addedDivisionGaps(newProgram.id, null, { startDate: newProgram.startDate, endDate: newProgram.endDate, ids: seminarAwayIds(newProgram.id) });
   if (refuseDivisionGap(req, res, gaps)) return;
+  if (seminarCovers && seminarSent && "value" in seminarSent) {
+    recordSeminarTdpException((req as any).user, newProgram, seminarSent.value);
+    // (The seminar's notice just went to the Administrator; the audit entry names who is on it.)
+    coverSeatsBySeminar((req as any).user, newProgram, tdpPlan.toCover, false);
+  }
   for (const r of tdpPlan.toRecord) recordTdpException((req as any).user, r.participant, newProgram, r.justification, r.newSeat);
   logDivisionOverride(req, gaps, `added "${String(newProgram.title || "").trim()}" (FY ${newProgram.fiscalYear})`);
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Create Training Program",
-    `${(req as any).user.fullName} added "${String(newProgram.title || "").trim()}" (FY ${newProgram.fiscalYear}), covering ${seminarNeedsText(newProgram.fulfillsNeedTitles)}.`);
+    `${(req as any).user.fullName} added ${JSON.stringify(newProgram.title)} (FY ${newProgram.fiscalYear}), covering ${seminarNeedsText(newProgram.fulfillsNeedTitles)}.`);
 
   saveDB();
   res.json({ status: "success", data: newProgram, message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
@@ -8384,6 +8506,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER && req.user.role !== "Super Admin" && req.user.role !== "HR Officer") {
     return res.status(403).json({ status: "error", message: "Unauthorized" });
   }
+  res.set("Cache-Control", "no-store");   // the reply carries the seminar's justification (12z Part C)
   const programIndex = (db.trainingPrograms || []).findIndex((p) => p.id === req.params.id);
   if (programIndex === -1) {
     return res.status(404).json({ status: "error", message: "Program not found" });
@@ -8399,6 +8522,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   const coverageBefore = { startDate: existingProgram.startDate, endDate: existingProgram.endDate, ids: seminarAwayIds(existingProgram.id) };
   // Likewise who the TDP identified on it, before its needs may change (12z).
   const tdpBefore = tdpRosterBefore(existingProgram);
+  const inTdpBefore = seminarInTdp(existingProgram);
   const allocation = body.allocatedBudget !== undefined ? readAllocation(body.allocatedBudget) : Number(existingProgram.allocatedBudget || 0);
   if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
   const newSeats = readSeats(body.maxParticipants);
@@ -8417,6 +8541,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
   const tdpSent = readTdpExceptions(body.tdpExceptions);
   if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
+  const seminarSent = body.seminarTdpException == null ? null : readSeminarTdpJustification(body.seminarTdpException, manilaToday());
+  if (seminarSent && "problem" in seminarSent) return res.status(400).json({ status: "error", message: seminarSent.problem });
   // The times as they will be saved (a value not sent keeps the stored one). A seminar saved before
   // the office-hours rule with times outside it has to be corrected on its next edit.
   const timeProblem = seminarTimeProblem(
@@ -8486,7 +8612,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     ...existingProgram,
     // Backfill for programs saved before series tracking existed.
     seriesId: existingProgram.seriesId || existingProgram.id,
-    title: String(title).trim(),
+    title: cleanText(title),
     description,
     category,
     allocatedBudget: body.allocatedBudget !== undefined ? allocation : existingProgram.allocatedBudget,
@@ -8506,6 +8632,20 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
       ? normalizeFulfillsNeedTitles(body.fulfillsNeedTitles)
       : existingProgram.fulfillsNeedTitles
   };
+
+  // A seminar this edit takes outside the TDP is held only with its own justification (12z Part C),
+  // which then covers everyone on it; an older seminar already outside it isn't refused for a re-save.
+  // A justification is for the training it names: renamed, a seminar held with one is asked again (the
+  // screen fills it in from before), so it can't carry over to a different training.
+  const edited = db.trainingPrograms[programIndex];
+  const renamed = normalizeTitle(existingProgram.title) !== normalizeTitle(edited.title);
+  const inTdpAfter = seminarInTdp(edited);
+  const seminarJustified = (!!edited.tdpException && !renamed) || !!seminarSent;
+  if (seminarNeedsJustification({ isNew: false, inTdpBefore, inTdpAfter, justified: seminarJustified, renamedFromJustified: renamed && !!edited.tdpException })) {
+    refuseNotInTdp(res, edited);
+    return;
+  }
+  const seminarCovers = !inTdpAfter && seminarJustified;
 
   // Budget or head-count edits re-price the allowances nobody has liquidated yet, whether or
   // not the roster was sent: an allowance caps the cash advance Finance can release.
@@ -8560,20 +8700,58 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   // one transaction): anyone it seats outside the TDP, or turns outside, needs a justification (HSAC
   // RAB 1, 2026-10-28), then someone must stay to man each division.
   const saved = db.trainingPrograms[programIndex];
-  const tdpPlan = tdpSeatsPlan(saved, created, tdpBefore, tdpSent.map, keptForHistory);
+  const tdpPlan = tdpSeatsPlan(saved, created, tdpBefore, tdpSent.map, keptForHistory, seminarCovers);
   if (refuseOutsideTdp(res, saved, tdpPlan.missing)) return;
   const gaps = addedDivisionGaps(saved.id, coverageBefore, { startDate: saved.startDate, endDate: saved.endDate, ids: seminarAwayIds(saved.id) });
   if (refuseDivisionGap(req, res, gaps)) return;
+  if (seminarCovers) {
+    const recorded = seminarSent && "value" in seminarSent
+      ? recordSeminarTdpException((req as any).user, saved, seminarSent.value,
+        renamed && existingProgram.tdpException ? String(existingProgram.title || "").trim() : undefined)
+      : false;
+    // Seats added under a justification already on record: the Administrator is told who.
+    coverSeatsBySeminar((req as any).user, saved, tdpPlan.toCover, !recorded);
+  }
   for (const r of tdpPlan.toRecord) recordTdpException((req as any).user, r.participant, saved, r.justification, r.newSeat);
   logDivisionOverride(req, gaps, `saved "${String(saved.title || "").trim()}" (FY ${saved.fiscalYear})`);
   if (seminarNeedsKey(existingProgram.fulfillsNeedTitles) !== seminarNeedsKey(saved.fulfillsNeedTitles)) {
     logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Change Seminar Needs",
-      `${(req as any).user.fullName} changed the Plan A needs "${String(saved.title || "").trim()}" (FY ${saved.fiscalYear}) covers, `
+      `${(req as any).user.fullName} changed the Plan A needs ${JSON.stringify(saved.title)} (FY ${saved.fiscalYear}) covers, `
       + `from ${seminarNeedsText(existingProgram.fulfillsNeedTitles)} to ${seminarNeedsText(saved.fulfillsNeedTitles)}.`);
+  }
+  // Its title decides who the TDP identifies on it, and what its justification is for (12z).
+  if (renamed) {
+    logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Rename Training Program",
+      `${(req as any).user.fullName} renamed ${JSON.stringify(String(existingProgram.title || "").trim())} to ${JSON.stringify(saved.title)} (FY ${saved.fiscalYear}).`);
   }
 
   saveDB();
   res.json({ status: "success", data: db.trainingPrograms[programIndex], message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
+}));
+
+// Why a seminar outside the TDP is held, recorded (or corrected) by HR or the Administrator without a
+// full save (12z Part C): for one from before the rule, or one that lost its need since. As at saving,
+// it covers everyone on the seminar who has no justification of their own.
+app.put("/api/training/programs/:id/tdp-exception", authenticateToken, transactional((req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Only HR and the Administrator record why a seminar is held." });
+  }
+  res.set("Cache-Control", "no-store");
+  const prog = (db.trainingPrograms || []).find(p => p.id === req.params.id);
+  if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
+  if (prog.archivedAt) {
+    return res.status(409).json({ status: "error", message: `"${String(prog.title || "").trim()}" is archived. Restore it first.` });
+  }
+  if (seminarInTdp(prog)) {
+    return res.status(409).json({ status: "error", message: `It covers a need in FY ${prog.fiscalYear}'s Plan A, so it is in the TDP and needs no justification.` });
+  }
+  const read = readSeminarTdpJustification(req.body, manilaToday());
+  if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
+  const recorded = recordSeminarTdpException((req as any).user, prog, read.value);
+  // Anyone on it with no justification of their own (seated before the rule, or the plan changed since).
+  const covered = coverSeatsBySeminar((req as any).user, prog, tdpSeatsPlan(prog, [], new Map(), new Map(), new Set(), true).toCover, !recorded);
+  saveDB();
+  res.json({ status: "success", message: recorded || covered ? undefined : "Nothing changed.", data: { ...prog, tdp: "justified" } });
 }));
 
 // A saved seminar is archived, never deleted (the user, 2026-10-23: "the only ones that can be
@@ -8620,6 +8798,7 @@ app.post("/api/training/programs/:id/archive", authenticateToken, transactional(
   if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Only HR or the Administrator can archive a seminar." });
   }
+  res.set("Cache-Control", "no-store");   // the reply carries the seminar's justification (12z Part C)
   const prog: TrainingProgram | undefined = (db.trainingPrograms || []).find((p: any) => p.id === req.params.id);
   if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
   const title = String(prog.title || "").trim();
@@ -8683,6 +8862,7 @@ app.post("/api/training/programs/:id/restore", authenticateToken, transactional(
   if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Only HR or the Administrator can restore a seminar." });
   }
+  res.set("Cache-Control", "no-store");   // the reply carries the seminar's justification (12z Part C)
   const prog: TrainingProgram | undefined = (db.trainingPrograms || []).find((p: any) => p.id === req.params.id);
   if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
   const title = String(prog.title || "").trim();
@@ -8762,7 +8942,7 @@ app.get("/api/training/participants", authenticateToken, (req: any, res: any) =>
   const programs = new Map((db.trainingPrograms || []).map(p => [p.id, p]));
   const rows: TrainingParticipantRow[] = participantsForBudget().map(p => {
     const prog = programs.get(p.trainingProgramId);
-    return { ...p, tdp: tdpStanding({ identified: !!prog && tdpIdentifies(p.employeeId, prog), tdpException: p.tdpException, assignedAt: p.assignedAt }) };
+    return { ...p, tdp: tdpStanding({ identified: !!prog && tdpIdentifies(p.employeeId, prog), tdpException: p.tdpException, underSeminar: p.tdpUnderSeminar, assignedAt: p.assignedAt }) };
   });
   res.json({ status: "success", data: rows });
 });
@@ -9018,11 +9198,14 @@ app.post("/api/training/participants", authenticateToken, transactional((req: an
   // Both judged on the enrolment as made, and a refusal undoes it (the route is one transaction): someone
   // the TDP doesn't identify needs a justification (HSAC RAB 1, 2026-10-28), then someone must stay to
   // man each division. Nobody is asked about a gap for an enrolment that was refused anyway.
-  const tdpPlan = tdpSeatsPlan(prog, created, new Map(), sent);
+  // A seminar outside the TDP held with its own justification covers the new seat (Part C).
+  const seminarCovers = !seminarInTdp(prog) && !!prog.tdpException;
+  const tdpPlan = tdpSeatsPlan(prog, created, new Map(), sent, new Set(), seminarCovers);
   if (refuseOutsideTdp(res, prog, tdpPlan.missing)) return;
   const gaps = addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenBefore },
     { startDate: prog.startDate, endDate: prog.endDate, ids: seminarAwayIds(prog.id) });
   if (refuseDivisionGap(req, res, gaps)) return;
+  coverSeatsBySeminar((req as any).user, prog, tdpPlan.toCover, true);
   for (const r of tdpPlan.toRecord) recordTdpException((req as any).user, r.participant, prog, r.justification, r.newSeat);
   logDivisionOverride(req, gaps, `added ${emp?.fullName || "a participant"} to "${String(prog.title || "").trim()}" (FY ${prog.fiscalYear})`);
   saveDB();

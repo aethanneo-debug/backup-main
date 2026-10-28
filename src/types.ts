@@ -1023,6 +1023,9 @@ export interface TrainingProgram {
   // Archived with nothing on record: its allocation went back to Unallocated in full, its
   // participants were taken off it, and the year's figures leave it out, as a deleted one.
   archivedBeforeUse?: boolean;
+  // Why it is held although the TDP doesn't cover it (none of its needs is in its fiscal year's Plan A;
+  // 12z Part C). It covers everyone seated on it. Only HR and the Administrator ever receive it.
+  tdpException?: SeminarTdpJustification;
 }
 
 // One row of GET /api/training/recommendations — an employee scored for a seminar.
@@ -1104,6 +1107,9 @@ export interface TrainingParticipant {
   // Why someone the TDP doesn't identify for this seminar was seated (HSAC RAB 1, 2026-10-28,
   // known-issues 12z). Only HR and the Administrator ever receive it.
   tdpException?: TdpJustification;
+  // When the seat came under its seminar's own justification (a seminar outside the TDP covers its
+  // roster, 12z Part C). It stays justified if the seminar later covers a need.
+  tdpUnderSeminar?: string;
 }
 
 // Seating someone the TDP doesn't identify (HSAC RAB 1's answer of 2026-10-28): "if hindi identified
@@ -1131,11 +1137,35 @@ export interface TdpJustification extends TdpJustificationInput {
   recordedAt: string;
 }
 // Where an enrolment stands against the TDP, worked out on each request for HR and the
-// Administrator (never stored): identified by the person's Plan A, outside it with a justification,
-// outside it from before the rule, or outside it with none (the plan changed since).
-export type TdpStanding = "identified" | "justified" | "beforeRule" | "missing";
+// Administrator (never stored): identified by the person's Plan A, outside it with a justification of
+// their own or under their seminar's, outside it from before the rule, or outside it with none (the
+// plan changed since).
+export type TdpStanding = "identified" | "justified" | "seminar" | "beforeRule" | "missing";
 // GET /api/training/participants: each enrolment with its standing.
 export interface TrainingParticipantRow extends TrainingParticipant { tdp?: TdpStanding }
+
+// A seminar the TDP doesn't cover is held only with its own justification (HSAC RAB 1, 2026-10-28;
+// 12z Part C): e.g. a training paid by the Central Office, an invitation from another agency, or a new
+// law or issuance.
+export const SEMINAR_TDP_KINDS = ["Central Office training", "Invitation from another agency", "New law or issuance", "Other"] as const;
+export type SeminarTdpKind = (typeof SEMINAR_TDP_KINDS)[number];
+export interface SeminarTdpJustificationInput {
+  kind: SeminarTdpKind;
+  reason: string;
+  approvedBy: TdpPerson;       // who approved holding it
+  referenceNo?: string;        // a memo, invitation or issuance number
+  referenceDate?: string;      // YYYY-MM-DD
+}
+export interface SeminarTdpJustification extends SeminarTdpJustificationInput {
+  recordedBy: { id: string; name: string; role: UserRole };
+  recordedAt: string;
+}
+// Where a seminar stands against the TDP, worked out on each request for HR and the Administrator:
+// it covers a need in its year's Plan A, it is held with a justification, or it is outside the TDP
+// from before the rule (2026-10-29) or since (its needs or the plan changed).
+export type SeminarTdpStanding = "inTdp" | "justified" | "beforeRule" | "missing";
+// GET /api/training/programs: each seminar with its standing.
+export interface TrainingProgramRow extends TrainingProgram { tdp?: SeminarTdpStanding }
 
 // --- OFFICIAL TRAINING & DEVELOPMENT PLAN (Plan A / Plan D) ---
 // The RAB-1 form lists, per employee, the trainings they still need in three

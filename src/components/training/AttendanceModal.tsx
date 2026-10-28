@@ -178,11 +178,11 @@ export default function AttendanceModal({ program, participants, employees, canR
                           </span>
                         )}
                         {tdpText && (
-                          <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${p.tdp === "justified" ? "border-slate-300 bg-slate-50 text-slate-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                          <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${p.tdp === "justified" || p.tdp === "seminar" ? "border-slate-300 bg-slate-50 text-slate-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                             {tdpText}
                           </span>
                         )}
-                        {canJustify && tdpText && justifyId !== p.id && (
+                        {canJustify && tdpText && p.tdp !== "seminar" && justifyId !== p.id && (
                           <button type="button" onClick={() => openJustify(p.id)} disabled={justifying} className="font-semibold text-blue-700 hover:underline disabled:opacity-50">
                             {why ? "Change why" : "Add why"}<span className="sr-only">: {nameOf(p)}</span>
                           </button>

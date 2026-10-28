@@ -25,6 +25,9 @@ export interface PickerProgram {
   notAwayIds?: string[];
   // A saved seminar's enrolments, by Employee.id: where each stands against the TDP (12z).
   roster?: Record<string, { tdp?: TdpStanding; tdpException?: TdpJustification }>;
+  // The seminar is held outside the TDP with its own justification (now, or asked at Save): it covers
+  // everyone on it, so nobody needs one of their own (Part C). The row's guess until the server answers.
+  seminarCovers?: boolean;
 }
 
 interface Props {
@@ -44,6 +47,9 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds ?? []);
   const [reloadKey, setReloadKey] = useState(0);
+  // The server's answer for the seminar as drafted (Part C): its own justification will cover everyone on
+  // it. Null until it arrives; the row's guess stands in meanwhile.
+  const [serverCovers, setServerCovers] = useState<boolean | null>(null);
   // A seminar that covers Plan A needs lists only those whose plan lists one of them; "Show all
   // employees" is for the exceptions (someone with no plan entry, or one HR knows needs it anyway).
   const [showAll, setShowAll] = useState(false);
@@ -78,8 +84,10 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     apiCall(`/api/training/recommendations?${params.toString()}`)
       .then(res => {
         if (cancelled) return;
-        if (res.status === "success") setCandidates(res.data?.candidates ?? []);
-        else setError(res.message || "Unable to load recommendations.");
+        if (res.status === "success") {
+          setCandidates(res.data?.candidates ?? []);
+          if (typeof res.data?.seminarCovers === "boolean") setServerCovers(res.data.seminarCovers);
+        } else setError(res.message || "Unable to load recommendations.");
       })
       .catch(err => { if (!cancelled) setError(err.message || "Unable to load recommendations."); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -132,7 +140,11 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   // Someone not among the candidates (the list didn't load, or they're inactive) counts as outside only
   // when the server named them, so a refusal can always be answered here.
   const outsideTdp = (id: string) => { const c = byId.get(id); return c ? !c.needsThis : required.has(id); };
-  const needsJustification = (id: string) => outsideTdp(id) && !justifications[id] && !saved(id)?.tdpException
+  // The seminar's own justification covers them (Part C); never someone the server named, so a refusal
+  // can be answered here even when this answer turns out wrong.
+  const seminarCovers = serverCovers ?? !!program.seminarCovers;
+  const bySeminar = (id: string) => seminarCovers && !required.has(id);
+  const needsJustification = (id: string) => !bySeminar(id) && outsideTdp(id) && !justifications[id] && !saved(id)?.tdpException
     && (!saved(id) || required.has(id) || saved(id)?.tdp === "identified");
   const pending = selectedIds.filter(needsJustification);
   // "Add all recommended" adds only people the TDP identifies, up to the free seats; anyone else is
@@ -149,8 +161,8 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
       return next;
     });
     // Adding someone off the plan opens the form for them, unless another one is open (what was typed in
-    // it stays; theirs waits behind "Record why").
-    if (ids.length === 1 && formFor === null && selectedIds.length < max && !selectedIds.includes(ids[0]) && outsideTdp(ids[0]) && !justifications[ids[0]]) {
+    // it stays; theirs waits behind "Record why"), or the seminar's own justification covers them.
+    if (ids.length === 1 && !bySeminar(ids[0]) && formFor === null && selectedIds.length < max && !selectedIds.includes(ids[0]) && outsideTdp(ids[0]) && !justifications[ids[0]]) {
       setFormFor(ids[0]);
     }
   };
@@ -185,6 +197,10 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
               {coversNeeds && (
                 <>This seminar covers Plan A needs, so at first only those employees are shown, and their badge says in which column:
                 for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>
+              )}
+              {seminarCovers && (
+                <>This seminar covers no Plan A need, so it is held <strong>outside the TDP</strong> with its own justification, which
+                covers everyone on it.{" "}</>
               )}
               Employees may join more than one seminar a year; only those who already attended this seminar can&rsquo;t be selected.
             </p>
@@ -284,7 +300,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                     <optgroup key={g.label} label={g.label}>
                       {g.items.map(c => (
                         <option key={c.employeeId} value={c.employeeId} disabled={!c.eligible}>
-                          {c.eligible ? optionLabel(c) : `${c.fullName} — ${c.ineligibleReason}`}
+                          {c.eligible ? optionLabel(c, seminarCovers) : `${c.fullName} — ${c.ineligibleReason}`}
                         </option>
                       ))}
                     </optgroup>
@@ -329,10 +345,14 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                   // The justification kept here, else the one on record, else the enrolment's standing; none
                   // for someone the TDP identifies (an edit of the needs can make it so).
                   const badge = !outsideTdp(id) ? null
+                    : bySeminar(id) && !draft && !onRecord?.tdpException ? tdpBadgeText("seminar")
                     : draft ? tdpBadgeText("justified", draft)
                     : onRecord?.tdpException ? tdpBadgeText("justified", onRecord.tdpException)
                     : onRecord && onRecord.tdp !== "identified" ? tdpBadgeText(onRecord.tdp) : null;
-                  const unjustified = !draft && !onRecord?.tdpException;
+                  // Seated under the seminar's justification (Part C) counts as justified, even once the seminar
+                  // covers a need, as the server holds it; it needs no reason of its own.
+                  const underSeminar = !draft && !onRecord?.tdpException && onRecord?.tdp === "seminar";
+                  const unjustified = !bySeminar(id) && !draft && !onRecord?.tdpException && !underSeminar;
                   return (
                     <li key={id} className="p-2 rounded-lg border border-blue-200 bg-blue-50/60">
                       <div className="flex items-center justify-between gap-3">
@@ -347,7 +367,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                           </span>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          {outsideTdp(id) && formFor !== id && (
+                          {outsideTdp(id) && !bySeminar(id) && !underSeminar && formFor !== id && (
                             <button type="button" onClick={() => setFormFor(id)} className="text-xs font-semibold text-blue-700 hover:underline">
                               {waiting ? "Record why" : unjustified ? "Add why" : "Change why"}<span className="sr-only">: {name}</span>
                             </button>

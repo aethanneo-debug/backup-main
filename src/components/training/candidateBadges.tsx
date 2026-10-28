@@ -59,10 +59,11 @@ export function CandidateBadges({ c, selected = false }: { c: TrainingCandidate;
   );
 }
 
-export function optionLabel(c: TrainingCandidate) {
+// `seminarCovers`: the seminar's own justification covers everyone on it (12z Part C).
+export function optionLabel(c: TrainingCandidate, seminarCovers = false) {
   const extras = [c.division || "No division"];
   if (c.needsThis) extras.push(columnsText(c) ? `listed in their plan (${columnsText(c)})` : "listed in their plan");
-  else extras.push("not in their plan: needs a justification");
+  else if (!seminarCovers) extras.push("not in their plan: needs a justification");
   if (c.priority === 1 && c.monthsSinceHire !== null) extras.push(`hired ${c.monthsSinceHire < 1 ? "this month" : `${c.monthsSinceHire} mo ago`}`);
   const trained = (c.trainingsThisYear ?? []).length;
   extras.push(trained === 0 ? "no training yet this FY" : `${trained} training${trained === 1 ? "" : "s"} this FY`);

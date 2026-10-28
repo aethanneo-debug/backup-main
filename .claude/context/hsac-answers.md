@@ -54,6 +54,7 @@ answer is quoted as given, followed by how we read it and what the system does a
      - Legal Ethics: the plan decides, not the division. Plan A lists it for both Legal Assistant II in the Office of the Chief Regional Adjudicator and the HHRO III and HHRO I in the Legal Division, not the attorneys.
    - System (known-issues 12z):
      - Part A (built 2026-10-28): someone the TDP doesn't identify for a seminar (their own Plan A for its year lists none of its needs) is seated only with a recorded justification: the kind (designated to a committee from the list above, identified by the Chief, or another reason), the reason and who identified them. HR and the Administrator alone see it, and the Administrator is told.
-     - Planned: a seminar outside the TDP with its own justification (Part C), and sending a representative in lieu of someone (Part B). Steps 1–3, 5 and 6 are proposals (Part D).
+     - Part C (built 2026-10-29): a seminar the TDP doesn't identify (none of its needs is in its year's Plan A) is held only with its own justification: why (a Central Office training, an invitation from another agency, a new law or issuance, or another reason), the reason and who approved it. It covers everyone seated on it. HR and the Administrator alone see it, and the Administrator is told.
+     - Planned: sending a representative in lieu of someone (Part B). Steps 1–3, 5 and 6 are proposals (Part D).
 
 Still open: the same or a different budget for each employee (ask HSAC again).
