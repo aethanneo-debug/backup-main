@@ -36,8 +36,9 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `src/vehicleWithAdvance.ts` | A vehicle request filed with a seminar's cash advance: its checks (the same on the card and the server) and its prefill |
 | `src/divisionCoverage.ts` | "Someone must stay to man the division": the days a seminar would leave a division with nobody at the office (shared by the server's refusal and the participant picker's warning) |
 | `src/inputText.ts` | `cleanText` (typed text, bounded before normalising) and `isCalendarDate`, shared by names, OR/DV numbers, reasons, file names and trips |
+| `src/tdpRules.ts` | Who the TDP identifies for a seminar (their own Plan A lists a need it covers), and the justification anyone else needs to be seated (12z); shared by the server and the participant picker, tested. Also `normalizeTitle`, the title match used everywhere |
 | `src/server/budgetEnrolments.ts` | The training budget's per-enrolment inputs (cash out, split per group member; spending once settled) |
-| `.claude/context/hsac-answers.md` | HSAC RAB 1's own answers (2026-10-26) that office rules come from: group cash advances, division coverage, Plan A columns, vehicle with the CA |
+| `.claude/context/hsac-answers.md` | HSAC RAB 1's own answers (2026-10-26 and 2026-10-28) that office rules come from: group cash advances, division coverage, Plan A columns, vehicle with the CA, and who may be seated (the TDP, or a justified exception) |
 | `src/App.tsx` | Login, session check, password-change & PDS-upload gates, tab routing via `activeTab` state (no router), global data fetching |
 | `src/components/Sidebar.tsx` | Role-based navigation (visibility only — not security) |
 | `src/components/FinanceView.tsx` | ~830 lines: Financial Tracking (overview via `finance/FinanceOverview.tsx`, Documents Vault via `finance/DocumentsVault.tsx` — every file attached to a liquidation report, Liquidation Desk via `finance/LiquidationDeskView.tsx`) and Budget Monitoring (the annual training budget only). The Transactions Journal was removed on 2026-10-22 |

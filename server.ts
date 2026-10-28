@@ -96,8 +96,11 @@ import {
   CorrectionRequest,
   LiquidationDocument,
   LiquidationSubmission,
-  LiquidationSubmissionView
+  LiquidationSubmissionView,
+  TdpJustificationInput,
+  TrainingParticipantRow
 } from "./src/types";
+import { coveredNeeds, normalizeTitle, readTdpJustification, seatsNeedingJustification, tdpKindText, tdpStanding, type SeatCheck } from "./src/tdpRules";
 
 const app = express();
 const PORT = 3000;
@@ -6441,6 +6444,14 @@ function employeeIdForms(employeeId: string): string[] {
   return emp ? [emp.id, emp.employeeId].filter(Boolean) : [employeeId];
 }
 
+// The staff record a key names: by internal id first, then by staff code. The TDP rule (12z) looks people
+// up this way, so a staff code set to another record's internal id (7j) can't make it judge one person
+// by another's Plan A, or name the wrong one.
+function employeeByKey(key: string): Employee | undefined {
+  const all = db.employees || [];
+  return all.find(e => e.id === key) ?? all.find(e => e.employeeId === key);
+}
+
 // At least one training per year per employee (the user's rule, 2026-10-23; it replaced "at most
 // one seminar per fiscal year"). What counts toward a year is decided in src/trainingCoverage.ts,
 // shared by the participant picker's ranking, auto-enrolment and the coverage panel.
@@ -6495,11 +6506,14 @@ function normalizeFulfillsNeedTitles(raw: any): string[] {
 // the plan's column for each: the same training can be needed for the function itself, or for an
 // additional designation (HSAC RAB 1's answer 6: RA 12009 for the Admin Officer IV vs the BAC TWG).
 function employeeCoveredNeeds(employeeId: string, program: SeminarRef): TrainingNeed[] {
-  const covered = (program.fulfillsNeedTitles || []).map(normalizeTitle).filter(Boolean);
-  if (covered.length === 0) return [];
-  const forms = employeeIdForms(employeeId);
-  return (db.trainingNeeds || [])
-    .filter(n => forms.includes(n.employeeId) && n.fiscalYear === program.fiscalYear && covered.includes(normalizeTitle(n.title)));
+  const emp = employeeByKey(employeeId);
+  return coveredNeeds(db.trainingNeeds || [], emp ? [emp.id, emp.employeeId].filter(Boolean) : [employeeId], program);
+}
+
+// Whether the TDP identifies this employee for the seminar (HSAC RAB 1, 2026-10-28): their own Plan A
+// for its fiscal year lists a need it covers. Anyone else is seated only with a justification (12z).
+function tdpIdentifies(employeeId: string, program: SeminarRef): boolean {
+  return employeeCoveredNeeds(employeeId, program).length > 0;
 }
 
 // "Today" as a calendar date in the Philippines (UTC+8, no DST), so deadlines flip
@@ -6542,12 +6556,6 @@ function liquidationDueDateFor(program: { endDate?: string } | undefined): strin
 
 function participantAllowance(program: TrainingProgram): number {
   return Math.round((Number(program.allocatedBudget || 0) / Math.max(1, program.maxParticipants || 1)) * 100) / 100;
-}
-
-function normalizeTitle(title: string | undefined): string {
-  // A stored title that isn't text (saved before the checks on save) counts as none, rather than
-  // failing every ranking that meets it.
-  return (typeof title === "string" ? title : "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 // Same seminar = same series (a program and its fiscal-year rollover copies) or,
@@ -6664,6 +6672,125 @@ function logDivisionOverride(req: any, gaps: DivisionGap[], what: string) {
   if (gaps.length === 0) return;
   logEvent(req.user.id, req.user.username, req.user.role, "Division Coverage Override",
     `${req.user.fullName} ${what}, confirming it leaves nobody at the office: ${gapText(gaps)}.`);
+}
+
+// HSAC RAB 1 (2026-10-28, known-issues 12z): someone the TDP doesn't identify for a seminar is seated
+// only with a recorded justification. A save sends them as `tdpExceptions: { [employee id]: … }`; read
+// and cleaned here, keyed by Employee.id, or the first problem (the save's 400).
+function readTdpExceptions(raw: unknown): { map: Map<string, TdpJustificationInput> } | { problem: string } {
+  const map = new Map<string, TdpJustificationInput>();
+  if (raw == null) return { map };
+  if (typeof raw !== "object" || Array.isArray(raw)) return { problem: "Send the justifications one per employee." };
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (entries.length > 200) return { problem: "Send at most 200 justifications in one save." };
+  for (const [key, value] of entries) {
+    const emp = employeeByKey(key);
+    if (!emp) continue;
+    const read = readTdpJustification(value, manilaToday());
+    if ("problem" in read) return { problem: `${emp.fullName}: ${read.problem}` };
+    map.set(emp.id, read.value);
+  }
+  return { map };
+}
+
+// Who on the seminar's roster the TDP identified, by enrolment, before a change (its needs may change):
+// a save is held only to the people it seats outside the TDP, or turns outside.
+function tdpRosterBefore(program: TrainingProgram): Map<string, boolean> {
+  return new Map((db.trainingParticipants || [])
+    .filter(p => p.trainingProgramId === program.id && p.status !== "Cancelled" && p.status !== "Archived")
+    .map(p => [p.id, tdpIdentifies(p.employeeId, program)] as [string, boolean]));
+}
+
+// After a save has seated people: the enrolments it leaves outside the TDP with no justification (none
+// sent, none on record), and the justifications to record (on its new seats, or on anyone HR justified
+// with it). `created`: the enrolments the save made; `kept`: those HR unticked but it had to keep.
+function tdpSeatsPlan(program: TrainingProgram, created: TrainingParticipant[], before: Map<string, boolean>,
+  sent: Map<string, TdpJustificationInput>, kept: Set<string> = new Set()) {
+  const createdIds = new Set(created.map(p => p.id));
+  const seats = (db.trainingParticipants || [])
+    .filter(p => p.trainingProgramId === program.id && p.status !== "Cancelled" && p.status !== "Archived")
+    .map(p => {
+      const empId = employeeByKey(p.employeeId)?.id ?? p.employeeId;
+      const check: SeatCheck = {
+        id: p.id,
+        newSeat: createdIds.has(p.id),
+        identifiedBefore: before.get(p.id) ?? false,
+        identifiedAfter: tdpIdentifies(p.employeeId, program),
+        justified: !!p.tdpException || sent.has(empId),
+        keptForHistory: kept.has(p.id)
+      };
+      return { p, empId, check };
+    });
+  const missing = new Set(seatsNeedingJustification(seats.map(s => s.check)));
+  return {
+    missing: seats.filter(s => missing.has(s.p.id)).map(s => s.p),
+    toRecord: seats.filter(s => !s.check.identifiedAfter && sent.has(s.empId))
+      .map(s => ({ participant: s.p, justification: sent.get(s.empId)!, newSeat: s.check.newSeat }))
+  };
+}
+
+// The refusal (409, naming the people, for the screen to ask HR why each is seated) of a save that
+// leaves someone outside the TDP with no justification. True when it refused; in a transaction, the
+// save is then undone.
+function refuseOutsideTdp(res: any, program: TrainingProgram, missing: TrainingParticipant[]): boolean {
+  if (missing.length === 0) return false;
+  const people = missing.map(p => {
+    const emp = employeeByKey(p.employeeId);
+    return { employeeId: emp?.id ?? p.employeeId, fullName: emp?.fullName ?? p.employeeId };
+  });
+  res.status(409).json({
+    status: "error",
+    message: `The TDP doesn't identify ${namesText(people.map(x => x.fullName))} for "${String(program.title || "").trim()}": `
+      + `${people.length === 1 ? "their" : "each one's"} Plan A for FY ${program.fiscalYear} lists none of its needs. `
+      + `Record why ${people.length === 1 ? "they are" : "each is"} seated: designated to do the tasks, identified by the Chief, or another reason.`,
+    data: { code: "OUTSIDE_TDP", people }
+  });
+  return true;
+}
+
+// The Plan A needs a seminar covers, for the audit log: they decide who the TDP identifies on it (12z),
+// so ticking one of someone's own needs is how they become "identified". HR's titles, quoted.
+function seminarNeedsText(titles?: string[]): string {
+  return (titles || []).length > 0 ? (titles || []).map(t => JSON.stringify(t)).join(", ") : "no Plan A need";
+}
+const seminarNeedsKey = (titles?: string[]) => (titles || []).map(normalizeTitle).sort().join("|");
+
+type TdpActor = Pick<User, "id" | "username" | "fullName" | "role"> & { employeeId?: string };
+const TDP_FIELDS = ["kind", "committee", "committeeOther", "reason", "referenceNo", "referenceDate"] as const;
+
+// Records a justification on an enrolment: who recorded it and when, the "TDP Exception" audit entry
+// (its kind and who identified them, HR's own words quoted; the reason stays on the enrolment, as it
+// may mention someone's leave), the Administrator's notice unless they recorded it, and "Self-Approval"
+// for an officer acting on their own seat. `newSeat`: the save seated them just now; otherwise HR is
+// recording (or changing) why someone already on it is there. One that changes nothing records nothing.
+// Callers save; inside a transaction a later refusal undoes all of it. True when it recorded one.
+function recordTdpException(user: TdpActor, p: TrainingParticipant, program: TrainingProgram, j: TdpJustificationInput, newSeat: boolean): boolean {
+  const before = p.tdpException;
+  if (before && TDP_FIELDS.every(f => (before[f] ?? "") === (j[f] ?? ""))
+    && before.identifiedBy.name === j.identifiedBy.name && before.identifiedBy.position === j.identifiedBy.position) return false;
+  const recordedAt = new Date().toISOString();
+  p.tdpException = { ...j, recordedBy: { id: user.id, name: user.fullName, role: user.role }, recordedAt };
+  const who = employeeByKey(p.employeeId)?.fullName || p.employeeId;
+  const title = String(program.title || "").trim();
+  const kind = j.kind === "Designated" && j.committee === "Other" ? `Designated (${JSON.stringify(j.committeeOther ?? "")})` : tdpKindText(j);
+  const what = newSeat ? `seated ${who} in` : before ? `changed why ${who} is seated in` : `recorded why ${who} is seated in`;
+  logEvent(user.id, user.username, user.role, "TDP Exception",
+    `${user.fullName} ${what} "${title}" (FY ${program.fiscalYear}) outside the TDP. Kind: ${kind}. `
+    + `Identified by: ${JSON.stringify(j.identifiedBy.name)}, ${JSON.stringify(j.identifiedBy.position)}.`
+    + `${j.referenceNo ? ` Reference: ${JSON.stringify(j.referenceNo)}${j.referenceDate ? ` (${j.referenceDate})` : ""}.` : ""}`);
+  if (isOwnRecord(user, p.employeeId)) {
+    flagSelfApproval(user, `${newSeat ? "seated themself in" : "recorded why they are seated in"} "${title}" outside the TDP: ${kind}`);
+  }
+  if (user.role !== UserRole.SUPER_ADMIN) {
+    notify({ role: UserRole.SUPER_ADMIN }, {
+      title: newSeat ? "Seated outside the TDP" : before ? "TDP exception changed" : "TDP exception recorded",
+      message: `${user.fullName} ${what} "${title}" (FY ${program.fiscalYear}) outside the TDP: ${kind}, identified by ${j.identifiedBy.name}.`,
+      type: "info",
+      link: { tab: "training_development", record: { kind: "seminar", id: program.id } },
+      dedupeKey: `tdp-exception:${p.id}:${recordedAt}`
+    });
+  }
+  return true;
 }
 
 // A seminar's dates as they will be saved: real dates, the end on or after the start.
@@ -7048,7 +7175,8 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
       trainingProgramId: program.id,
       employeeId: emp.id,
       status: "Assigned",
-      allowanceAllocated: participantAllowance(program)
+      allowanceAllocated: participantAllowance(program),
+      assignedAt: new Date().toISOString()
     };
     if (!db.trainingParticipants) db.trainingParticipants = [];
     db.trainingParticipants.push(participant);
@@ -7219,7 +7347,9 @@ function autoAssignEmployeeToTraining(employee: Employee) {
       !p.archivedAt &&
       ((p.targetDivision && p.targetDivision === employee.division) ||
        (p.targetSpecialization && p.targetSpecialization === employee.fieldOfSpecialization)) &&
-      !employeeAttendedSeminarBefore(employee.id, p)
+      !employeeAttendedSeminarBefore(employee.id, p) &&
+      // Never outside the TDP (12z): an exception needs someone to justify it, and nobody is here to.
+      tdpIdentifies(employee.id, p)
     );
     if (candidates.length === 0) return null;
 
@@ -7283,7 +7413,8 @@ function autoAssignEmployeeToTraining(employee: Employee) {
       trainingProgramId: chosen.id,
       employeeId: employee.id,
       status: "Assigned",
-      allowanceAllocated: participantAllowance(chosen)
+      allowanceAllocated: participantAllowance(chosen),
+      assignedAt: new Date().toISOString()
     };
     if (!db.trainingParticipants) db.trainingParticipants = [];
     db.trainingParticipants.push(part);
@@ -8104,8 +8235,12 @@ app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
 
   const { title, category, remarks, accomplishedOverride } = req.body || {};
   if (title !== undefined) {
-    const cleanTitle = String(title).trim();
+    // As on create: text, at most 300 characters. Every TDP check matches titles (12z), so one far
+    // longer would hold the server up each time.
+    if (typeof title !== "string") return res.status(400).json({ status: "error", message: "Enter the needed training." });
+    const cleanTitle = title.trim();
     if (!cleanTitle) return res.status(400).json({ status: "error", message: "Enter the needed training." });
+    if (cleanTitle.length > 300) return res.status(400).json({ status: "error", message: "Keep the needed training under 300 characters." });
     need.title = cleanTitle;
   }
   if (category !== undefined) {
@@ -8159,6 +8294,8 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
   const textProblem = seminarTextProblem(body.title, body.description, body.category);
   if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
+  const tdpSent = readTdpExceptions(body.tdpExceptions);
+  if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
   // Seminars are planned in the active fiscal year, as the planner does: a closed year's
   // unallocated money was carried over, and a label with no fiscal year is outside every budget.
   const fy = (db.fiscalYears || []).find((f: any) => f.label === body.fiscalYear);
@@ -8217,15 +8354,23 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   db.trainingPrograms.push(newProgram);
 
   let skippedMessages: string[] = [];
+  let created: TrainingParticipant[] = [];
   // Manual assignment from UI
   if (Array.isArray(body.participantIds)) {
-    skippedMessages = enrollTrainingParticipants(newProgram, body.participantIds, (req as any).user, 0).skipped;
+    ({ created, skipped: skippedMessages } = enrollTrainingParticipants(newProgram, body.participantIds, (req as any).user, 0));
   }
 
-  // Someone must stay to man each division (HSAC RAB 1): judged on who was actually enrolled.
+  // Both judged on who was actually enrolled, and a refusal undoes the whole save (one transaction):
+  // anyone the TDP doesn't identify needs a justification (HSAC RAB 1, 2026-10-28), then someone must
+  // stay to man each division.
+  const tdpPlan = tdpSeatsPlan(newProgram, created, new Map(), tdpSent.map);
+  if (refuseOutsideTdp(res, newProgram, tdpPlan.missing)) return;
   const gaps = addedDivisionGaps(newProgram.id, null, { startDate: newProgram.startDate, endDate: newProgram.endDate, ids: seminarAwayIds(newProgram.id) });
   if (refuseDivisionGap(req, res, gaps)) return;
+  for (const r of tdpPlan.toRecord) recordTdpException((req as any).user, r.participant, newProgram, r.justification, r.newSeat);
   logDivisionOverride(req, gaps, `added "${String(newProgram.title || "").trim()}" (FY ${newProgram.fiscalYear})`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Create Training Program",
+    `${(req as any).user.fullName} added "${String(newProgram.title || "").trim()}" (FY ${newProgram.fiscalYear}), covering ${seminarNeedsText(newProgram.fulfillsNeedTitles)}.`);
 
   saveDB();
   res.json({ status: "success", data: newProgram, message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
@@ -8252,6 +8397,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   // Who it took from the office, and when, before this edit: the division check counts only what the
   // edit adds.
   const coverageBefore = { startDate: existingProgram.startDate, endDate: existingProgram.endDate, ids: seminarAwayIds(existingProgram.id) };
+  // Likewise who the TDP identified on it, before its needs may change (12z).
+  const tdpBefore = tdpRosterBefore(existingProgram);
   const allocation = body.allocatedBudget !== undefined ? readAllocation(body.allocatedBudget) : Number(existingProgram.allocatedBudget || 0);
   if (allocation === null) return res.status(400).json({ status: "error", message: ALLOCATION_MESSAGE });
   const newSeats = readSeats(body.maxParticipants);
@@ -8268,6 +8415,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   const category = body.category ?? existingProgram.category;
   const textProblem = seminarTextProblem(title, description, category);
   if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
+  const tdpSent = readTdpExceptions(body.tdpExceptions);
+  if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
   // The times as they will be saved (a value not sent keeps the stored one). A seminar saved before
   // the office-hours rule with times outside it has to be corrected on its next edit.
   const timeProblem = seminarTimeProblem(
@@ -8365,6 +8514,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   }
 
   let skippedMessages: string[] = [];
+  let created: TrainingParticipant[] = [];
+  const keptForHistory = new Set<string>();
   // If participantIds are provided, reconcile the roster against them. Existing
   // enrolments are kept rather than deleted and re-created, so participant ids,
   // statuses and liquidation links survive an edit.
@@ -8383,6 +8534,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
         continue;
       }
       if (!stillSelected) {
+        keptForHistory.add(p.id);
         const emp = (db.employees || []).find(e => forms.includes(e.id));
         const name = emp ? emp.fullName : p.employeeId;
         skippedMessages.push(p.status !== "Assigned"
@@ -8399,15 +8551,26 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     db.trainingParticipants = (db.trainingParticipants || []).filter(p => !removedIds.has(p.id));
 
     const toAdd = [...requested].filter(id => !employeeIdForms(id).some(f => keptForms.has(f)));
-    skippedMessages.push(...enrollTrainingParticipants(program, toAdd, (req as any).user, keptCount).skipped);
+    const enrolled = enrollTrainingParticipants(program, toAdd, (req as any).user, keptCount);
+    created = enrolled.created;
+    skippedMessages.push(...enrolled.skipped);
   }
 
-  // Someone must stay to man each division (HSAC RAB 1): what this edit adds, by its new days or
-  // roster. A refusal undoes the whole edit (the route is one transaction).
+  // What this edit adds, by its roster, needs or days; a refusal undoes the whole edit (the route is
+  // one transaction): anyone it seats outside the TDP, or turns outside, needs a justification (HSAC
+  // RAB 1, 2026-10-28), then someone must stay to man each division.
   const saved = db.trainingPrograms[programIndex];
+  const tdpPlan = tdpSeatsPlan(saved, created, tdpBefore, tdpSent.map, keptForHistory);
+  if (refuseOutsideTdp(res, saved, tdpPlan.missing)) return;
   const gaps = addedDivisionGaps(saved.id, coverageBefore, { startDate: saved.startDate, endDate: saved.endDate, ids: seminarAwayIds(saved.id) });
   if (refuseDivisionGap(req, res, gaps)) return;
+  for (const r of tdpPlan.toRecord) recordTdpException((req as any).user, r.participant, saved, r.justification, r.newSeat);
   logDivisionOverride(req, gaps, `saved "${String(saved.title || "").trim()}" (FY ${saved.fiscalYear})`);
+  if (seminarNeedsKey(existingProgram.fulfillsNeedTitles) !== seminarNeedsKey(saved.fulfillsNeedTitles)) {
+    logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Change Seminar Needs",
+      `${(req as any).user.fullName} changed the Plan A needs "${String(saved.title || "").trim()}" (FY ${saved.fiscalYear}) covers, `
+      + `from ${seminarNeedsText(existingProgram.fulfillsNeedTitles)} to ${seminarNeedsText(saved.fulfillsNeedTitles)}.`);
+  }
 
   saveDB();
   res.json({ status: "success", data: db.trainingPrograms[programIndex], message: skippedMessages.length > 0 ? skippedMessages.join(" ") : undefined });
@@ -8591,10 +8754,46 @@ app.get("/api/training/participants", authenticateToken, (req: any, res: any) =>
   if (!isTrainingRecordsRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Training program details are restricted to HR." });
   }
+  // It carries why each exception is seated (12z): kept out of a shared PC's browser cache.
+  res.set("Cache-Control", "no-store");
   // With each enrolment's cash advance still out (see participantsForBudget), so HR's planner
-  // prices seminars exactly as the server does.
-  res.json({ status: "success", data: participantsForBudget() });
+  // prices seminars exactly as the server does, and where it stands against the TDP (12z; this
+  // route, like the justification itself, is HR's and the Administrator's only).
+  const programs = new Map((db.trainingPrograms || []).map(p => [p.id, p]));
+  const rows: TrainingParticipantRow[] = participantsForBudget().map(p => {
+    const prog = programs.get(p.trainingProgramId);
+    return { ...p, tdp: tdpStanding({ identified: !!prog && tdpIdentifies(p.employeeId, prog), tdpException: p.tdpException, assignedAt: p.assignedAt }) };
+  });
+  res.json({ status: "success", data: rows });
 });
+
+// Why someone the TDP doesn't identify is on a seminar, recorded (or corrected) by HR or the
+// Administrator without saving the seminar itself: for enrolments from before the rule, or seated
+// before the plan changed (12z). Recorded as at seating: the audit entry and the Administrator's notice.
+app.put("/api/training/participants/:id/tdp-exception", authenticateToken, transactional((req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "Only HR and the Administrator record why someone is seated." });
+  }
+  const p = (db.trainingParticipants || []).find(x => x.id === req.params.id);
+  if (!p) return res.status(404).json({ status: "error", message: "Enrolment not found." });
+  if (p.status === "Cancelled" || p.status === "Archived") {
+    return res.status(409).json({ status: "error", message: "This enrolment is no longer on the seminar." });
+  }
+  const prog = (db.trainingPrograms || []).find(x => x.id === p.trainingProgramId);
+  if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
+  if (prog.archivedAt) {
+    return res.status(409).json({ status: "error", message: `"${String(prog.title || "").trim()}" is archived. Restore it first.` });
+  }
+  if (tdpIdentifies(p.employeeId, prog)) {
+    return res.status(409).json({ status: "error", message: "The TDP identifies them for this seminar, so no justification is needed." });
+  }
+  const read = readTdpJustification(req.body, manilaToday());
+  if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
+  const recorded = recordTdpException((req as any).user, p, prog, read.value, false);
+  saveDB();
+  res.set("Cache-Control", "no-store");
+  res.json({ status: "success", message: recorded ? undefined : "Nothing changed.", data: { ...p, tdp: "justified" } });
+}));
 
 // Attendance: HR records it per participant once the seminar has started. It is stored
 // apart from the liquidation status, and only "Attended" opens the liquidation form
@@ -8603,6 +8802,7 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   if (req.user.role !== UserRole.HR_OFFICER) {
     return res.status(403).json({ status: "error", message: "Only HR records seminar attendance." });
   }
+  res.set("Cache-Control", "no-store");   // the reply carries the enrolment, its justification included (12z)
   const participant = (db.trainingParticipants || []).find((p: any) => p.id === req.params.id);
   if (!participant) return res.status(404).json({ status: "error", message: "Enrolment not found." });
   const attendance = req.body?.attendance;
@@ -8771,10 +8971,11 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   });
 }));
 
-app.post("/api/training/participants", authenticateToken, (req: any, res: any) => {
+app.post("/api/training/participants", authenticateToken, transactional((req: any, res: any) => {
   if (!isTrainingRecordsRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Only HR can enroll training participants." });
   }
+  res.set("Cache-Control", "no-store");   // the reply carries a justification (12z)
   const { trainingProgramId, employeeId } = req.body;
   const prog = db.trainingPrograms.find(p => p.id === trainingProgramId);
   if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
@@ -8800,24 +9001,33 @@ app.post("/api/training/participants", authenticateToken, (req: any, res: any) =
     });
   }
 
-  // Someone must stay to man each division (HSAC RAB 1), checked before anything is written, and only
-  // for someone the enrolment below would take, by its own tests (not someone already on it or who
-  // attended it before, whom it refuses anyway: nobody is asked to confirm a gap and then refused).
+  // Why they are seated, if the TDP doesn't identify them (12z): one justification, for this person.
   const emp = (db.employees || []).find(e => e.id === employeeId || e.employeeId === employeeId);
-  const takenNow = seminarAwayIds(prog.id);
-  const gaps = emp && !onSeminarRoster(prog.id, emp) && !trainingEnrollmentBlock(emp.id, prog)
-    ? addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenNow }, { startDate: prog.startDate, endDate: prog.endDate, ids: [...takenNow, emp.id] })
-    : [];
-  if (refuseDivisionGap(req, res, gaps)) return;
+  const sent = new Map<string, TdpJustificationInput>();
+  if (req.body?.tdpException != null) {
+    const read = readTdpJustification(req.body.tdpException, manilaToday());
+    if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
+    if (emp) sent.set(emp.id, read.value);
+  }
 
+  const takenBefore = seminarAwayIds(prog.id);
   const { created, skipped } = enrollTrainingParticipants(prog, [employeeId], (req as any).user, enrolledCount);
   if (created.length === 0) {
     return res.status(400).json({ status: "error", message: skipped[0] || "Employee could not be enrolled." });
   }
+  // Both judged on the enrolment as made, and a refusal undoes it (the route is one transaction): someone
+  // the TDP doesn't identify needs a justification (HSAC RAB 1, 2026-10-28), then someone must stay to
+  // man each division. Nobody is asked about a gap for an enrolment that was refused anyway.
+  const tdpPlan = tdpSeatsPlan(prog, created, new Map(), sent);
+  if (refuseOutsideTdp(res, prog, tdpPlan.missing)) return;
+  const gaps = addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenBefore },
+    { startDate: prog.startDate, endDate: prog.endDate, ids: seminarAwayIds(prog.id) });
+  if (refuseDivisionGap(req, res, gaps)) return;
+  for (const r of tdpPlan.toRecord) recordTdpException((req as any).user, r.participant, prog, r.justification, r.newSeat);
   logDivisionOverride(req, gaps, `added ${emp?.fullName || "a participant"} to "${String(prog.title || "").trim()}" (FY ${prog.fiscalYear})`);
   saveDB();
   res.json({ status: "success", data: created[0] });
-});
+}));
 
 app.get("/api/training/liquidations", authenticateToken, (req: any, res: any) => {
   if (!isTrainingRecordsRole((req as any).user.role)) {

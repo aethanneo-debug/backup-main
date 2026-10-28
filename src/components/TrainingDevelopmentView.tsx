@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { UserRole, TrainingProgram, TrainingParticipant, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus } from "../types";
+import { UserRole, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
-import { apiCall, apiErrorCode, formatCurrency } from "../utils";
+import { apiCall, apiErrorCode, formatCurrency, type ApiError } from "../utils";
+import { tdpBadgeText } from "../tdpRules";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck, Archive } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
@@ -79,7 +80,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   const [trainingBudgets, setTrainingBudgets] = useState<any[]>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [newAnnualBudget, setNewAnnualBudget] = useState("");
-  const [participants, setParticipants] = useState<TrainingParticipant[]>([]);
+  const [participants, setParticipants] = useState<TrainingParticipantRow[]>([]);
   const [liquidations, setLiquidations] = useState<TrainingLiquidationExpense[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   // The seminar whose attendance roster is open (only attendees get a liquidation form).
@@ -110,7 +111,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   const [editingRows, setEditingRows] = useState<{ [key: string]: any }>({});
   const [newRows, setNewRows] = useState<any[]>([]);
   const [showParticipantModal, setShowParticipantModal] = useState<string | null>(null); // row id or "new-index"
-  const [participantModalData, setParticipantModalData] = useState<{ program: PickerProgram; selectedIds: string[] } | null>(null);
+  const [participantModalData, setParticipantModalData] = useState<{
+    program: PickerProgram; selectedIds: string[];
+    // Why each person outside the TDP is seated (12z), kept with the draft row and sent on Save; and
+    // anyone the server asked one for.
+    justifications: Record<string, TdpJustificationInput>; mustJustify?: string[];
+  } | null>(null);
 
   // Set by handleAddFromPlan: the draft row to bring into view and focus once it renders.
   const focusRowOnRender = useRef<string | null>(null);
@@ -351,6 +357,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       method = "PUT";
     }
 
+    // Someone the TDP doesn't identify was seated with no justification (12z): the picker opens on
+    // them, so HR can record why each one is seated (or take them off), then save again.
+    const askWhy = (err: ApiError) => {
+      const people = ((err.data as { people?: { employeeId: string }[] } | undefined)?.people ?? []).map(x => x.employeeId);
+      alert(`${err.message}\n\nThe participant list opens on them: record why each one is seated, or remove them, then save again.`);
+      openParticipantModal(id, isNew, people);
+    };
     let res;
     try {
       res = await apiCall(endpoint, {
@@ -358,6 +371,10 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         body: JSON.stringify(row)
       });
     } catch (err: any) {
+      if (apiErrorCode(err) === "OUTSIDE_TDP") {
+        askWhy(err);
+        return;
+      }
       if (apiErrorCode(err) !== "DIVISION_GAP") {
         alert("Error saving training program: " + err.message);
         return;
@@ -367,7 +384,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       try {
         res = await apiCall(endpoint, { method, body: JSON.stringify({ ...row, allowDivisionGap: true }) });
       } catch (err2: any) {
-        alert("Error saving training program: " + err2.message);
+        if (apiErrorCode(err2) === "OUTSIDE_TDP") askWhy(err2);
+        else alert("Error saving training program: " + err2.message);
         return;
       }
     }
@@ -457,12 +475,16 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     }
   };
 
+  // An enrolment's person by internal id, as the picker and the server name them (an older enrolment may
+  // store the staff code): internal id first, then staff code.
+  const staffIdOf = (key: string) => (employees.find(e => e.id === key) ?? employees.find(e => e.employeeId === key))?.id ?? key;
+
   const startEditing = (p: TrainingProgram) => {
     setEditingRows({
       ...editingRows,
       [p.id]: {
         ...p,
-        participantIds: participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).map(part => part.employeeId)
+        participantIds: participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).map(part => staffIdOf(part.employeeId))
       }
     });
   };
@@ -497,7 +519,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     }
   };
 
-  const openParticipantModal = (rowId: string, isNew: boolean) => {
+  // `mustJustify`: people the server refused to seat without a justification (OUTSIDE_TDP).
+  const openParticipantModal = (rowId: string, isNew: boolean, mustJustify?: string[]) => {
     let row = isNew ? newRows.find(r => r.id === rowId) : (editingRows[rowId] || programs.find(p => p.id === rowId));
     if (!row) return;
     // Either source will do: the ticked plan need names the seminar when the title
@@ -524,9 +547,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       startDate: row.startDate,
       endDate: row.endDate,
       // Those HR marked "Did not attend" are at the office: the warning leaves them out, as the server does.
-      notAwayIds: participants.filter(part => part.trainingProgramId === rowId && onRoster(part) && part.attendance === "Did not attend").map(part => part.employeeId)
+      notAwayIds: participants.filter(part => part.trainingProgramId === rowId && onRoster(part) && part.attendance === "Did not attend").map(part => staffIdOf(part.employeeId)),
+      // A saved seminar's enrolments and where each stands against the TDP (12z).
+      roster: isNew ? undefined : Object.fromEntries(participants
+        .filter(part => part.trainingProgramId === rowId && onRoster(part))
+        .map(part => [staffIdOf(part.employeeId), { tdp: part.tdp, tdpException: part.tdpException }]))
     };
-    setParticipantModalData({ program, selectedIds: row.participantIds || [] });
+    setParticipantModalData({ program, selectedIds: row.participantIds || [], justifications: row.tdpExceptions || {}, mustJustify });
     setShowParticipantModal(rowId);
   };
 
@@ -575,10 +602,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     setCoverageModalData(null);
   };
 
-  const handleSaveParticipants = (selectedIds: string[]) => {
+  const handleSaveParticipants = (selectedIds: string[], justifications: Record<string, TdpJustificationInput>) => {
     if (!participantModalData) return;
     const { program } = participantModalData;
-    updateRow(program.id, "participantIds", selectedIds, program.isNew);
+    // The roster and its justifications in one functional update (two updateRow calls on an edited
+    // row would lose the first).
+    const patch = { participantIds: selectedIds, tdpExceptions: justifications };
+    if (program.isNew) setNewRows(prev => prev.map(r => (r.id === program.id ? { ...r, ...patch } : r)));
+    else setEditingRows(prev => ({ ...prev, [program.id]: { ...prev[program.id], ...patch } }));
     setShowParticipantModal(null);
     setParticipantModalData(null);
   };
@@ -775,9 +806,18 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                      const chip = part.attendance === "Attended" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                        : part.attendance === "Did not attend" ? "bg-rose-50 text-rose-700 border-rose-200"
                        : "bg-blue-50 text-blue-700 border-blue-100";
+                     // Seated outside the TDP (12z): a dot, and the badge in the tooltip (amber while it has
+                     // no justification). The attendance list shows it in full.
+                     const tdpText = tdpBadgeText(part.tdp, part.tdpException);
                      return emp ? (
-                       <span key={part.id} className={`inline-block px-1.5 py-0.5 text-[10px] rounded border truncate max-w-[120px] ${chip}`} title={`${emp.fullName} · ${part.attendance || "attendance not recorded"}`}>
+                       <span key={part.id} className={`inline-block px-1.5 py-0.5 text-[10px] rounded border truncate max-w-[120px] ${chip}`} title={`${emp.fullName} · ${part.attendance || "attendance not recorded"}${tdpText ? ` · ${tdpText}` : ""}`}>
                          {emp.fullName.split(' ')[0]}
+                         {tdpText && (
+                           <>
+                             <span aria-hidden="true" className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${part.tdp === "justified" ? "bg-slate-400" : "bg-amber-500"}`} />
+                             <span className="sr-only">: {tdpText}</span>
+                           </>
+                         )}
                        </span>
                      ) : null;
                    })}
@@ -1107,6 +1147,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id && onRoster(part))}
           employees={employees}
           canRecord={user.role === UserRole.HR_OFFICER}
+          canJustify={user.role === UserRole.HR_OFFICER || user.role === UserRole.SUPER_ADMIN}
           currentEmployeeId={user.employeeId}
           onClose={() => setAttendanceProgram(null)}
           onChanged={fetchData}
@@ -1125,8 +1166,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
 
       {showParticipantModal && participantModalData && (
         <ParticipantPickerModal
+          // One picker per row: a refusal arriving for another row (askWhy) remounts it rather than
+          // carrying this row's choices into that one.
+          key={participantModalData.program.id}
           program={participantModalData.program}
           initialSelectedIds={participantModalData.selectedIds}
+          initialJustifications={participantModalData.justifications}
+          mustJustify={participantModalData.mustJustify}
           onConfirm={handleSaveParticipants}
           onClose={() => { setShowParticipantModal(null); setParticipantModalData(null); }}
         />

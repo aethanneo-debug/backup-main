@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Sparkles, UserPlus, Users, X } from "lucide-react";
-import { TRAINING_NEED_COLUMN_LABELS, TrainingCandidate, type TrainingNeedCategory } from "../../types";
+import { TrainingCandidate, type TdpJustification, type TdpJustificationInput, type TdpStanding } from "../../types";
 import { apiCall, getLocalTodayString } from "../../utils";
 import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
+import { tdpBadgeText } from "../../tdpRules";
+import { BADGE, CandidateBadges, optionLabel } from "./candidateBadges";
+import TdpJustificationForm from "./TdpJustificationForm";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.
 export interface PickerProgram {
@@ -20,82 +23,22 @@ export interface PickerProgram {
   endDate?: string;
   // On its roster but marked "Did not attend", so at the office: left out of the division warning.
   notAwayIds?: string[];
+  // A saved seminar's enrolments, by Employee.id: where each stands against the TDP (12z).
+  roster?: Record<string, { tdp?: TdpStanding; tdpException?: TdpJustification }>;
 }
 
 interface Props {
   program: PickerProgram;
   initialSelectedIds: string[];
-  onConfirm: (ids: string[]) => void;
+  /** Justifications kept with the draft row, by Employee.id (saved with the seminar). */
+  initialJustifications?: Record<string, TdpJustificationInput>;
+  /** People the server asked a justification for (OUTSIDE_TDP), by Employee.id. */
+  mustJustify?: string[];
+  onConfirm: (ids: string[], justifications: Record<string, TdpJustificationInput>) => void;
   onClose: () => void;
 }
 
-const BADGE = "px-1.5 py-0.5 rounded border text-[10px] font-semibold whitespace-nowrap";
-
-// The Plan A column a need is listed under, as the badge names it (the form's own words, shortened).
-// The same training can be needed for the function or for an additional designation (HSAC RAB 1's
-// answer 6: RA 12009 for the Admin Officer IV, and for Budget staff on the BAC TWG).
-const COLUMN_NAME: Record<TrainingNeedCategory, string> = {
-  "Function": "Function",
-  "Additional Function": "Additional Function/Designation",
-  "Career Advancement": "Career Advancement"
-};
-const columnsText = (c: TrainingCandidate) => (c.needCategories ?? []).map(k => COLUMN_NAME[k]).join(", ");
-// The official column names, for the badge's tooltip.
-const columnLabels = (c: TrainingCandidate) => (c.needCategories ?? []).map(k => TRAINING_NEED_COLUMN_LABELS[k]).join("; ");
-
-// `selected`: they are already on this seminar's list, and the server counts only their other
-// trainings, so this seminar would be their first of the year, or one more.
-function CandidateBadges({ c, selected = false }: { c: TrainingCandidate; selected?: boolean }) {
-  // Their other trainings this fiscal year: at least one each year, so none yet is worth seeing.
-  const thisYear = c.trainingsThisYear ?? [];
-  return (
-    <span className="flex flex-wrap gap-1">
-      {!c.eligible && <span className={`${BADGE} bg-rose-50 text-rose-700 border-rose-200`}>{c.ineligibleReason}</span>}
-      {c.eligible && thisYear.length === 0 && (
-        <span className={`${BADGE} bg-blue-50 text-blue-700 border-blue-200`}>{selected ? "First training this FY" : "No training yet this FY"}</span>
-      )}
-      {thisYear.length > 0 && (
-        <span className={`${BADGE} bg-slate-50 text-slate-700 border-slate-200`} title={`This fiscal year: ${thisYear.join("; ")}`}>
-          {thisYear.length} {selected ? "other " : ""}training{thisYear.length === 1 ? "" : "s"} this FY
-          {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
-          <span className="sr-only">: {thisYear.join("; ")}</span>
-        </span>
-      )}
-      {c.needsThis && (
-        <span
-          className={`${BADGE} bg-emerald-50 text-emerald-800 border-emerald-300`}
-          title={`Plan A${columnLabels(c) ? `, ${columnLabels(c)}` : ""}: ${c.needMatches.join("; ")}`}
-        >
-          Needs this{columnsText(c) ? `: ${columnsText(c)}` : ""}
-          {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
-          <span className="sr-only"> ({c.needMatches.join("; ")})</span>
-        </span>
-      )}
-      {c.priority === 1 && (
-        <span className={`${BADGE} bg-emerald-50 text-emerald-700 border-emerald-200`}>
-          New hire{c.monthsSinceHire !== null ? ` · ${c.monthsSinceHire < 1 ? "<1" : c.monthsSinceHire} mo` : ""}
-        </span>
-      )}
-      {c.matchesTarget && <span className={`${BADGE} bg-slate-50 text-slate-700 border-slate-200`}>Target match</span>}
-      {(c.awayOn ?? []).length > 0 && (
-        <span className={`${BADGE} bg-amber-50 text-amber-700 border-amber-200`}>At another seminar on {datesText(c.awayOn!)}</span>
-      )}
-    </span>
-  );
-}
-
-function optionLabel(c: TrainingCandidate) {
-  const extras = [c.division || "No division"];
-  if (c.needsThis) extras.push(columnsText(c) ? `listed in their plan (${columnsText(c)})` : "listed in their plan");
-  if (c.priority === 1 && c.monthsSinceHire !== null) extras.push(`hired ${c.monthsSinceHire < 1 ? "this month" : `${c.monthsSinceHire} mo ago`}`);
-  const trained = (c.trainingsThisYear ?? []).length;
-  extras.push(trained === 0 ? "no training yet this FY" : `${trained} training${trained === 1 ? "" : "s"} this FY`);
-  if (c.matchesTarget) extras.push("target match");
-  if ((c.awayOn ?? []).length > 0) extras.push(`at another seminar on ${datesText(c.awayOn!)}`);
-  return `${c.fullName} — ${extras.join(" · ")}`;
-}
-
-export default function ParticipantPickerModal({ program, initialSelectedIds, onConfirm, onClose }: Props) {
+export default function ParticipantPickerModal({ program, initialSelectedIds, initialJustifications, mustJustify, onConfirm, onClose }: Props) {
   const [candidates, setCandidates] = useState<TrainingCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -178,6 +121,24 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
   ];
   const choices = groups.filter(g => g.items.length > 0);
 
+  // Someone the TDP doesn't identify is seated only with a justification (HSAC RAB 1, 2026-10-28,
+  // 12z): their Plan A for the seminar's year lists none of its needs. The server checks it again on
+  // Save. Like it, only what a change adds needs one: a new seat, someone this edit of the seminar's
+  // needs turns outside the TDP, or someone the server named. An older enrolment keeps its badge.
+  const [justifications, setJustifications] = useState<Record<string, TdpJustificationInput>>(initialJustifications ?? {});
+  const [formFor, setFormFor] = useState<string | null>(null);
+  const required = new Set(mustJustify ?? []);
+  const saved = (id: string) => program.roster?.[id];
+  // Someone not among the candidates (the list didn't load, or they're inactive) counts as outside only
+  // when the server named them, so a refusal can always be answered here.
+  const outsideTdp = (id: string) => { const c = byId.get(id); return c ? !c.needsThis : required.has(id); };
+  const needsJustification = (id: string) => outsideTdp(id) && !justifications[id] && !saved(id)?.tdpException
+    && (!saved(id) || required.has(id) || saved(id)?.tdp === "identified");
+  const pending = selectedIds.filter(needsJustification);
+  // "Add all recommended" adds only people the TDP identifies, up to the free seats; anyone else is
+  // added one at a time.
+  const bulk = available.filter(c => c.needsThis).slice(0, freeSlots);
+
   const add = (ids: string[]) => {
     setSelectedIds(prev => {
       const next = [...prev];
@@ -187,8 +148,21 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
       }
       return next;
     });
+    // Adding someone off the plan opens the form for them, unless another one is open (what was typed in
+    // it stays; theirs waits behind "Record why").
+    if (ids.length === 1 && formFor === null && selectedIds.length < max && !selectedIds.includes(ids[0]) && outsideTdp(ids[0]) && !justifications[ids[0]]) {
+      setFormFor(ids[0]);
+    }
   };
-  const remove = (id: string) => setSelectedIds(prev => prev.filter(x => x !== id));
+  const remove = (id: string) => {
+    setSelectedIds(prev => prev.filter(x => x !== id));
+    setJustifications(prev => { const next = { ...prev }; delete next[id]; return next; });
+    if (formFor === id) setFormFor(null);
+  };
+  const keep = (id: string, value: TdpJustificationInput) => {
+    setJustifications(prev => ({ ...prev, [id]: value }));
+    setFormFor(null);
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="participant-picker-title">
@@ -255,12 +229,12 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">Recommended for this seminar</h4>
-                  {recommended.length > 1 && (
+                  {bulk.length > 1 && (
                     <button
-                      onClick={() => add(recommended.map(c => c.employeeId))}
+                      onClick={() => add(bulk.map(c => c.employeeId))}
                       className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-100"
                     >
-                      Add all recommended ({recommended.length})
+                      Add all recommended ({bulk.length})
                     </button>
                   )}
                 </div>
@@ -348,15 +322,44 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
               <ul className="space-y-1.5">
                 {selectedIds.map(id => {
                   const c = byId.get(id);
+                  const name = c ? c.fullName : id;
+                  const draft = justifications[id];
+                  const onRecord = saved(id);
+                  const waiting = needsJustification(id);
+                  // The justification kept here, else the one on record, else the enrolment's standing; none
+                  // for someone the TDP identifies (an edit of the needs can make it so).
+                  const badge = !outsideTdp(id) ? null
+                    : draft ? tdpBadgeText("justified", draft)
+                    : onRecord?.tdpException ? tdpBadgeText("justified", onRecord.tdpException)
+                    : onRecord && onRecord.tdp !== "identified" ? tdpBadgeText(onRecord.tdp) : null;
+                  const unjustified = !draft && !onRecord?.tdpException;
                   return (
-                    <li key={id} className="flex items-center justify-between gap-3 p-2 rounded-lg border border-blue-200 bg-blue-50/60">
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-medium text-slate-800 truncate">{c ? c.fullName : id}</p>
-                        {c && <CandidateBadges c={c} selected />}
+                    <li key={id} className="p-2 rounded-lg border border-blue-200 bg-blue-50/60">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-medium text-slate-800 truncate">{name}</p>
+                          <span className="flex flex-wrap gap-1">
+                            {c && <CandidateBadges c={c} selected />}
+                            {waiting && <span className={`${BADGE} bg-amber-50 text-amber-800 border-amber-300`}>Not in their TDP: needs a justification</span>}
+                            {!waiting && badge && (
+                              <span className={`${BADGE} ${unjustified ? "bg-amber-50 text-amber-800 border-amber-200" : "bg-slate-50 text-slate-700 border-slate-300"}`}>{badge}</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {outsideTdp(id) && formFor !== id && (
+                            <button type="button" onClick={() => setFormFor(id)} className="text-xs font-semibold text-blue-700 hover:underline">
+                              {waiting ? "Record why" : unjustified ? "Add why" : "Change why"}<span className="sr-only">: {name}</span>
+                            </button>
+                          )}
+                          <button onClick={() => remove(id)} aria-label={`Remove ${name}`} className="text-slate-400 hover:text-rose-600">
+                            <X size={16} />
+                          </button>
+                        </div>
                       </div>
-                      <button onClick={() => remove(id)} aria-label={`Remove ${c ? c.fullName : id}`} className="shrink-0 text-slate-400 hover:text-rose-600">
-                        <X size={16} />
-                      </button>
+                      {formFor === id && (
+                        <TdpJustificationForm employeeName={name} initial={draft ?? onRecord?.tdpException} onSave={v => keep(id, v)} onCancel={() => setFormFor(null)} />
+                      )}
                     </li>
                   );
                 })}
@@ -365,9 +368,18 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, on
           </section>
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 shrink-0">
+        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-end gap-3 shrink-0">
+          {pending.length > 0 && (
+            <p role="status" className="mr-auto text-xs text-amber-800">
+              {pending.length === 1 ? "1 person needs" : `${pending.length} people need`} a justification: record why, or remove them.
+            </p>
+          )}
           <button onClick={onClose} className="px-4 py-2 text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
-          <button onClick={() => onConfirm(selectedIds)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <button
+            onClick={() => onConfirm(selectedIds, Object.fromEntries(selectedIds.filter(id => justifications[id]).map(id => [id, justifications[id]])))}
+            disabled={(loading && !error) || pending.length > 0}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Confirm Participants ({selectedIds.length})
           </button>
         </div>

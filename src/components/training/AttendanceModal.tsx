@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { CalendarCheck, CheckCircle2, Loader2, UserX } from "lucide-react";
-import { AttendanceStatus, Employee, TrainingParticipant, TrainingProgram } from "../../types";
+import { AttendanceStatus, Employee, TrainingParticipant, TrainingParticipantRow, TrainingProgram, type TdpJustificationInput } from "../../types";
 import { apiCall, formatDate } from "../../utils";
+import { tdpBadgeText } from "../../tdpRules";
 import ModalDialog from "../ui/ModalDialog";
+import TdpJustificationForm from "./TdpJustificationForm";
 
 /**
  * HR's attendance roster for one seminar (Training Plan & Budget). Only attendees get a
@@ -13,11 +15,13 @@ import ModalDialog from "../ui/ModalDialog";
 
 interface AttendanceModalProps {
   program: TrainingProgram;
-  /** This seminar's enrolments. */
-  participants: TrainingParticipant[];
+  /** This seminar's enrolments, with where each stands against the TDP. */
+  participants: TrainingParticipantRow[];
   employees: Employee[];
   /** Only HR records attendance; everyone else sees the roster read-only. */
   canRecord: boolean;
+  /** HR and the Administrator record why someone outside the TDP is seated (12z). */
+  canJustify?: boolean;
   /** The signed-in officer's staff code: recording their own attendance is allowed but flagged. */
   currentEmployeeId?: string;
   onClose: () => void;
@@ -35,10 +39,14 @@ const BADGE: Record<AttendanceStatus | "none", string> = {
 const ACTION =
   "inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-export default function AttendanceModal({ program, participants, employees, canRecord, currentEmployeeId, onClose, onChanged }: AttendanceModalProps) {
+export default function AttendanceModal({ program, participants, employees, canRecord, canJustify = false, currentEmployeeId, onClose, onChanged }: AttendanceModalProps) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // The enrolment whose TDP justification form is open (12z), its save, and its own error (shown by the form).
+  const [justifyId, setJustifyId] = useState<string | null>(null);
+  const [justifying, setJustifying] = useState(false);
+  const [justifyError, setJustifyError] = useState("");
 
   const start = String(program.startDate || "").slice(0, 10);
   const started = !!start && start <= manilaToday();
@@ -80,13 +88,35 @@ export default function AttendanceModal({ program, participants, employees, canR
     }
   }
 
+  // Why someone outside the TDP is on the seminar, saved at once (the seminar itself isn't saved).
+  async function justify(p: TrainingParticipant, value: TdpJustificationInput) {
+    setJustifying(true);
+    setJustifyError("");
+    setNotice("");
+    try {
+      const res = await apiCall(`/api/training/participants/${encodeURIComponent(p.id)}/tdp-exception`, {
+        method: "PUT",
+        body: JSON.stringify(value)
+      });
+      if (res?.status !== "success") throw new Error(res?.message || "The justification could not be saved.");
+      setNotice(res.message === "Nothing changed." ? "Nothing changed." : `Recorded why ${nameOf(p)} is seated.`);
+      setJustifyId(null);
+      onChanged();
+    } catch (err: any) {
+      setJustifyError(err?.message || "The justification could not be saved.");
+    } finally {
+      setJustifying(false);
+    }
+  }
+  const openJustify = (id: string | null) => { setJustifyId(id); setJustifyError(""); };
+
   return (
     <ModalDialog
       title="Attendance"
       subtitle={`${String(program.title || "").trim()} · ${formatDate(program.startDate)}${program.endDate && program.endDate !== program.startDate ? ` to ${formatDate(program.endDate)}` : ""}`}
       icon={<CalendarCheck size={16} aria-hidden="true" />}
       onClose={onClose}
-      busy={!!savingId}
+      busy={!!savingId || justifying}
       size="lg"
       footer={
         <button
@@ -127,46 +157,80 @@ export default function AttendanceModal({ program, participants, employees, canR
               const state: AttendanceStatus | "none" = p.attendance ?? "none";
               const saving = savingId === p.id;
               const locked = !canRecord || !started || !!savingId;
+              const tdpText = tdpBadgeText(p.tdp, p.tdpException);
+              const why = p.tdpException;
               return (
-                <li key={p.id} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-slate-800">{nameOf(p)}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${BADGE[state]}`}>
-                        {state === "none" ? "Not recorded" : state}
-                      </span>
-                      {p.attendanceBy && p.attendanceAt && (
-                        <span>by {p.attendanceBy}, {formatDate(p.attendanceAt)}</span>
-                      )}
-                      {hasFiled(p) && <span>· liquidation report filed</span>}
-                      {canRecord && isOwn(p) && (
-                        <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
-                          You: flagged as self-approved if you record it
+                <li key={p.id} className="px-3 py-2.5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-800">{nameOf(p)}</p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                        <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${BADGE[state]}`}>
+                          {state === "none" ? "Not recorded" : state}
                         </span>
+                        {p.attendanceBy && p.attendanceAt && (
+                          <span>by {p.attendanceBy}, {formatDate(p.attendanceAt)}</span>
+                        )}
+                        {hasFiled(p) && <span>· liquidation report filed</span>}
+                        {canRecord && isOwn(p) && (
+                          <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                            You: flagged as self-approved if you record it
+                          </span>
+                        )}
+                        {tdpText && (
+                          <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${p.tdp === "justified" ? "border-slate-300 bg-slate-50 text-slate-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                            {tdpText}
+                          </span>
+                        )}
+                        {canJustify && tdpText && justifyId !== p.id && (
+                          <button type="button" onClick={() => openJustify(p.id)} disabled={justifying} className="font-semibold text-blue-700 hover:underline disabled:opacity-50">
+                            {why ? "Change why" : "Add why"}<span className="sr-only">: {nameOf(p)}</span>
+                          </button>
+                        )}
+                      </p>
+                      {/* The justification itself: HR and the Administrator only (this list is theirs). */}
+                      {why && (
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          {why.reason} · identified by {why.identifiedBy.name} ({why.identifiedBy.position})
+                          {why.referenceNo ? ` · ${why.referenceNo}${why.referenceDate ? `, ${formatDate(why.referenceDate)}` : ""}` : ""}
+                        </p>
                       )}
-                    </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => record(p, "Attended")}
+                        disabled={locked || p.attendance === "Attended"}
+                        className={`${ACTION} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 focus-visible:ring-emerald-500`}
+                      >
+                        {saving ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <CheckCircle2 size={12} aria-hidden="true" />}
+                        Attended<span className="sr-only">: {nameOf(p)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => record(p, "Did not attend")}
+                        disabled={locked || p.attendance === "Did not attend" || hasFiled(p)}
+                        title={hasFiled(p) ? "They already filed a liquidation report" : undefined}
+                        className={`${ACTION} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 focus-visible:ring-rose-500`}
+                      >
+                        <UserX size={12} aria-hidden="true" />
+                        Did not attend<span className="sr-only">: {nameOf(p)}</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => record(p, "Attended")}
-                      disabled={locked || p.attendance === "Attended"}
-                      className={`${ACTION} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 focus-visible:ring-emerald-500`}
-                    >
-                      {saving ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <CheckCircle2 size={12} aria-hidden="true" />}
-                      Attended<span className="sr-only">: {nameOf(p)}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => record(p, "Did not attend")}
-                      disabled={locked || p.attendance === "Did not attend" || hasFiled(p)}
-                      title={hasFiled(p) ? "They already filed a liquidation report" : undefined}
-                      className={`${ACTION} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 focus-visible:ring-rose-500`}
-                    >
-                      <UserX size={12} aria-hidden="true" />
-                      Did not attend<span className="sr-only">: {nameOf(p)}</span>
-                    </button>
-                  </div>
+                  {justifyId === p.id && (
+                    <>
+                      <TdpJustificationForm
+                        employeeName={nameOf(p)}
+                        initial={why}
+                        saveLabel="Save"
+                        saving={justifying}
+                        onSave={value => justify(p, value)}
+                        onCancel={() => openJustify(null)}
+                      />
+                      {justifyError && <p role="alert" className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">{justifyError}</p>}
+                    </>
+                  )}
                 </li>
               );
             })}

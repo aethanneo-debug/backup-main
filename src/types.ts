@@ -1098,7 +1098,44 @@ export interface TrainingParticipant {
   // Set when the enrolment was archived with its seminar (status "Archived"); restoring the
   // seminar puts it back to "Assigned".
   archivedWithSeminarAt?: string;
+  // When the enrolment was made. Set on every enrolment since the TDP rule (2026-10-28), so one
+  // without it was made before the rule.
+  assignedAt?: string;
+  // Why someone the TDP doesn't identify for this seminar was seated (HSAC RAB 1, 2026-10-28,
+  // known-issues 12z). Only HR and the Administrator ever receive it.
+  tdpException?: TdpJustification;
 }
+
+// Seating someone the TDP doesn't identify (HSAC RAB 1's answer of 2026-10-28): "if hindi identified
+// sa TDP … hindi pwede. Pero di naman tayo strict doon. Case to case basis", with a justification.
+// The committees are HSAC's own list of designations that call for training.
+export const TDP_COMMITTEES = [
+  "BAC", "BAC Secretariat", "BAC TWG", "IQA/QMS Team", "GAD Focal Point System", "OSH Committee",
+  "Discipline, Grievance or Fact-Finding Committee", "Other"
+] as const;
+export type TdpCommittee = (typeof TDP_COMMITTEES)[number];
+export type TdpExceptionKind = "Designated" | "Identified by the Chief" | "Other";
+export interface TdpPerson { name: string; position: string }
+// What HR fills in; the server adds who recorded it and when.
+export interface TdpJustificationInput {
+  kind: TdpExceptionKind;
+  committee?: TdpCommittee;    // Designated
+  committeeOther?: string;     // Designated, committee "Other"
+  reason: string;
+  identifiedBy: TdpPerson;     // who identified them (HSAC: the Chief or head of agency may)
+  referenceNo?: string;        // the SO or Office Order number
+  referenceDate?: string;      // YYYY-MM-DD
+}
+export interface TdpJustification extends TdpJustificationInput {
+  recordedBy: { id: string; name: string; role: UserRole };
+  recordedAt: string;
+}
+// Where an enrolment stands against the TDP, worked out on each request for HR and the
+// Administrator (never stored): identified by the person's Plan A, outside it with a justification,
+// outside it from before the rule, or outside it with none (the plan changed since).
+export type TdpStanding = "identified" | "justified" | "beforeRule" | "missing";
+// GET /api/training/participants: each enrolment with its standing.
+export interface TrainingParticipantRow extends TrainingParticipant { tdp?: TdpStanding }
 
 // --- OFFICIAL TRAINING & DEVELOPMENT PLAN (Plan A / Plan D) ---
 // The RAB-1 form lists, per employee, the trainings they still need in three

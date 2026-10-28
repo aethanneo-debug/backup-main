@@ -106,6 +106,8 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Open Liquidation Document">Documents Vault downloads</option>
             <option value="Self-Approval">Self-approvals (flagged)</option>
             <option value="Division Coverage Override">Division coverage overrides</option>
+            <option value="TDP Exception">TDP exceptions</option>
+            <option value="Change Seminar Needs">Seminar needs changed</option>
             <option value="Register Asset">Asset Register</option>
             <option value="Assign Accountability">Accountability (PAR)</option>
             <option value="Act on Request">Filing Actions</option>
