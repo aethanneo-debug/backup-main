@@ -110,6 +110,7 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="TDP Exception (seminar)">Seminars held outside the TDP</option>
             <option value="Change Seminar Needs">Seminar needs changed</option>
             <option value="Rename Training Program">Seminars renamed</option>
+            <option value="Send Representative">Representatives sent</option>
             <option value="Register Asset">Asset Register</option>
             <option value="Assign Accountability">Accountability (PAR)</option>
             <option value="Act on Request">Filing Actions</option>

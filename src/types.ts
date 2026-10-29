@@ -636,6 +636,9 @@ export interface CashAdvance {
   refundOrDate?: string;          // YYYY-MM-DD
   refundedBy?: string;            // the Financial Officer who recorded it
   refundedAt?: string;            // ISO timestamp
+  // Handed back before its seminar started, with no attendance recorded (12z Part B), rather than by
+  // someone who did not attend. Kept as recorded: attendance can change later.
+  refundedBeforeSeminar?: boolean;
   // A group advance: every enrolment it pays for, all in one seminar, the holder's first (the one
   // `activityId` names; the holder is `employeeId`, who receives the cash and files the one report).
   // Absent on an individual advance, which pays for `activityId` alone.
@@ -1110,6 +1113,10 @@ export interface TrainingParticipant {
   // When the seat came under its seminar's own justification (a seminar outside the TDP covers its
   // roster, 12z Part C). It stays justified if the seminar later covers a need.
   tdpUnderSeminar?: string;
+  // A representative sent in lieu of someone (HSAC RAB 1, 2026-10-28, 12z Part B): the original's
+  // enrolment is "Cancelled" with `replacedBy`, and the representative's new one `replaces` it (its id).
+  replacedBy?: { participantId: string; employeeId: string; fullName: string; at: string; by: string };
+  replaces?: string;
 }
 
 // Seating someone the TDP doesn't identify (HSAC RAB 1's answer of 2026-10-28): "if hindi identified
@@ -1120,7 +1127,8 @@ export const TDP_COMMITTEES = [
   "Discipline, Grievance or Fact-Finding Committee", "Other"
 ] as const;
 export type TdpCommittee = (typeof TDP_COMMITTEES)[number];
-export type TdpExceptionKind = "Designated" | "Identified by the Chief" | "Other";
+// "In lieu of" is set only when HR sends a representative (Part B), never chosen on its own.
+export type TdpExceptionKind = "Designated" | "Identified by the Chief" | "Other" | "In lieu of";
 export interface TdpPerson { name: string; position: string }
 // What HR fills in; the server adds who recorded it and when.
 export interface TdpJustificationInput {
@@ -1133,6 +1141,8 @@ export interface TdpJustificationInput {
   referenceDate?: string;      // YYYY-MM-DD
 }
 export interface TdpJustification extends TdpJustificationInput {
+  // "In lieu of" (Part B): whose seat they took, set by the server.
+  inLieuOf?: { participantId: string; employeeId: string; fullName: string };
   recordedBy: { id: string; name: string; role: UserRole };
   recordedAt: string;
 }

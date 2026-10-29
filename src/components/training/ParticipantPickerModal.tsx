@@ -367,7 +367,8 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                           </span>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          {outsideTdp(id) && !bySeminar(id) && !underSeminar && formFor !== id && (
+                          {/* (A representative's "In lieu of" is changed from the attendance list, Part B.) */}
+                          {outsideTdp(id) && !bySeminar(id) && !underSeminar && onRecord?.tdpException?.kind !== "In lieu of" && formFor !== id && (
                             <button type="button" onClick={() => setFormFor(id)} className="text-xs font-semibold text-blue-700 hover:underline">
                               {waiting ? "Record why" : unjustified ? "Add why" : "Change why"}<span className="sr-only">: {name}</span>
                             </button>

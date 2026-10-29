@@ -108,6 +108,17 @@ test("Part C: a seminar is in the TDP when one of its titles is a need in its ye
   assert.equal(seminarCoversPlan(needs, { fiscalYear: "2027", fulfillsNeedTitles: ["typed in", "Legal Ethics"] }), true, "one real need is enough");
 });
 
+test("Part B: \"In lieu of\" is read only for a representative, who still needs a reason and who identified them", () => {
+  const ok = { reason: "In place of the accountant, on leave", identifiedBy: { name: "Test Chief", position: "Regional Adjudicator" } };
+  assert.equal("problem" in readTdpJustification({ ...ok, kind: "In lieu of" }, "2026-10-29"), true, "never chosen on its own");
+  const read = readTdpJustification({ ...ok, kind: "Other" }, "2026-10-29", { inLieu: true });
+  assert.equal("value" in read && read.value.kind, "In lieu of", "a representative's is always In lieu of");
+  assert.equal("problem" in readTdpJustification({ kind: "In lieu of" }, "2026-10-29", { inLieu: true }), true, "the reason is still required");
+  const j = { kind: "In lieu of" as const, inLieuOf: { fullName: "Test Officer" } };
+  assert.equal(tdpBadgeText("justified", j), "In lieu of Test Officer");
+  assert.equal(tdpKindText(j), "In lieu of Test Officer");
+});
+
 test("Part C: a save gives the seminar's justification only when it takes it outside the TDP", () => {
   const s = (o: object) => ({ isNew: false, inTdpBefore: false, inTdpAfter: false, justified: false, ...o });
   assert.equal(seminarNeedsJustification(s({ isNew: true })), true, "a new seminar outside the TDP");

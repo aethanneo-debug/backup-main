@@ -97,6 +97,7 @@ import {
   LiquidationDocument,
   LiquidationSubmission,
   LiquidationSubmissionView,
+  TdpJustification,
   TdpJustificationInput,
   TrainingParticipantRow,
   SeminarTdpJustificationInput,
@@ -106,6 +107,7 @@ import {
   coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
   seminarNeedsJustification, seminarTdpStanding, tdpKindText, tdpStanding, type SeatCheck
 } from "./src/tdpRules";
+import { swapAdvanceStep } from "./src/representative";
 
 const app = express();
 const PORT = 3000;
@@ -5647,7 +5649,11 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
   };
 
   for (const p of (db.trainingParticipants || [])) {
-    if (p.status === "Cancelled" || p.status === "Archived") continue;
+    if (p.status === "Archived") continue;
+    // A representative went in their place (12z Part B): listed only for the refund their own advance
+    // needed first, so it stays on Finance's record. A cancelled enrolment is never funded.
+    const replaced = p.status === "Cancelled" && !!p.replacedBy;
+    if (p.status === "Cancelled" && !replaced) continue;
     const emp = (db.employees || []).find((e: any) => e.id === p.employeeId || e.employeeId === p.employeeId);
     if (!emp) continue;
     // Someone a co-participant's group advance covers isn't listed apart (nor funded twice): the
@@ -5660,6 +5666,7 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
     const facts = liquidationActivityFacts(p.id);
     const forms = employeeIdForms(p.employeeId);
     const advance = advanceFor(p.id, forms);
+    if (replaced && advance?.status !== "Refunded") continue;
     // Someone who did not attend gets no new advance and no liquidation form. One already
     // released stays listed, flagged, so Finance collects it back in full and records the
     // refund; a refunded one is listed as such.
@@ -5678,6 +5685,13 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       groupAllAbsent: !!group && group.covers!.every(c =>
         (db.trainingParticipants || []).find((x: any) => x && x.id === c.participantId)?.attendance === "Did not attend"),
       didNotAttend,
+      // Their own advance can still be handed back in full: released to them, the seminar still to
+      // come, no attendance recorded (a representative goes in their place only once it is back).
+      refundBeforeSeminar: !!advance && advance.status === "Released" && !isGroupAdvance(advance) && !p.attendance && seminarNotStarted(p.trainingProgramId),
+      // Handed back before the seminar, as recorded then.
+      refundedBeforeSeminar: !!advance && advance.status === "Refunded" && !!advance.refundedBeforeSeminar,
+      // (Finance needs only that a representative took the seat, not who: RA 10173.)
+      replaced,
       advanceId: advance ? advance.id : null,
       refundOrNo: advance?.status === "Refunded" ? advance.refundOrNo : null,
       refundOrDate: advance?.status === "Refunded" ? advance.refundOrDate : null,
@@ -6104,6 +6118,16 @@ app.get("/api/cash-advances/group-options", authenticateToken, (req: any, res: a
   });
 });
 
+// Takes one co-participant off a group request Finance hasn't released (they leave it, or a
+// representative is sent in their place, 12z Part B): the rest stay covered, and with only the holder
+// left it is their own request. Callers notify, log and save.
+function removeFromGroupRequest(request: CashAdvance, participantId: string) {
+  const rest = (request.covers || []).filter(c => c.participantId !== participantId);
+  if (rest.length <= 1) delete request.covers;
+  else request.covers = rest;
+  request.amount = request.covers ? coversTotal(request.covers) : round2(Number(rest[0]?.amount || 0));
+}
+
 // A covered member leaves a group request Finance hasn't released yet (the user's decision,
 // 2026-10-26): they'd rather have their own advance. The request is re-priced without them; with
 // only the holder left, it is the holder's own request. Once released, the cash is with the holder.
@@ -6127,10 +6151,7 @@ app.post("/api/cash-advances/:id/leave", authenticateToken, transactional((req: 
         : `This request was already ${String(request.status).toLowerCase()}.`
     });
   }
-  const rest = request.covers.filter((c: any) => c.participantId !== me.participantId);
-  if (rest.length <= 1) delete request.covers;
-  else request.covers = rest;
-  request.amount = request.covers ? coversTotal(request.covers) : round2(Number(rest[0]?.amount || 0));
+  removeFromGroupRequest(request, me.participantId);
   const title = request.activityTitle || "the seminar";
   notifyEmployee(request.employeeId, {
     title: "A participant left your group's request",
@@ -6343,6 +6364,13 @@ function declineAdvanceRequest(request: CashAdvance, reason: string, by: string,
   }
 }
 
+// Whether a seminar is still to come (its first day after Manila's today): its attendance can't be
+// recorded yet, and someone's own cash advance can still be handed back in full (12z Part B).
+function seminarNotStarted(programId: string): boolean {
+  const prog = (db.trainingPrograms || []).find((p: any) => p.id === programId);
+  return !!prog && isIsoDate(prog.startDate) && String(prog.startDate).slice(0, 10) > manilaToday();
+}
+
 // Recording a refund (requirement 6; the user's decision of 2026-10-10): someone HR marked
 // "Did not attend" gives their whole cash advance back. Until it is recorded their share
 // stays held in the seminar's budget, so the same money can't fund another seminar while it
@@ -6371,13 +6399,21 @@ app.post("/api/cash-advances/:id/refund", authenticateToken, transactional((req:
   const group = isGroupAdvance(advance)
     ? advance.covers!.map((c: any) => (db.trainingParticipants || []).find((p: any) => p && p.id === c.participantId))
     : null;
-  if (group ? group.some((p: any) => !p || p.attendance !== "Did not attend") : (!enrolment || enrolment.attendance !== "Did not attend")) {
+  // Or someone's own advance handed back before the seminar starts, with no attendance recorded: e.g. a
+  // representative goes in their place, which waits for their cash to come back (12z Part B).
+  const beforeSeminar = !group && !!enrolment && !enrolment.attendance && seminarNotStarted(enrolment.trainingProgramId);
+  if (group ? group.some((p: any) => !p || p.attendance !== "Did not attend") : (!enrolment || (enrolment.attendance !== "Did not attend" && !beforeSeminar))) {
     return res.status(409).json({
       status: "error",
       message: group
         ? `${advance.advanceNo} is settled by the group's liquidation report, which ${advance.employeeName} files. A group's advance is refunded in full here only when nobody it covers attended.`
-        : `${advance.advanceNo} is settled by the employee's liquidation report. Only an advance to someone who did not attend is refunded in full here.`
+        : `${advance.advanceNo} is settled by the employee's liquidation report. Only an advance to someone who did not attend, or one returned before the seminar starts, is refunded in full here.`
     });
+  }
+  // Before the seminar, the whole advance comes back only if none of it was spent: HR's hand-entered
+  // expenses for them would make the full refund untrue (12z Part B review).
+  if (beforeSeminar && (db.trainingLiquidations || []).some((r: any) => r && r.trainingParticipantId === enrolment.id)) {
+    return res.status(409).json({ status: "error", message: `HR has entered expenses for ${advance.employeeName} on this seminar, so ${advance.advanceNo} can't come back in full before it. It is settled by their liquidation report.` });
   }
   const orNo = signatoryText(req.body?.orNo);
   const orDate = req.body?.orDate;
@@ -6404,6 +6440,8 @@ app.post("/api/cash-advances/:id/refund", authenticateToken, transactional((req:
   advance.refundOrDate = orDate;
   advance.refundedBy = (req as any).user.fullName;
   advance.refundedAt = new Date().toISOString();
+  // Kept as recorded, since attendance can change later (the desk lists it as returned before the seminar).
+  if (beforeSeminar) advance.refundedBeforeSeminar = true;
   const freed = prog ? round2(heldBefore - seminarBudget(prog, participantsForBudget()).committed) : 0;
   const fy = prog ? (db.fiscalYears || []).find((f: any) => f.label === prog.fiscalYear) : null;
   const note = freed > 0
@@ -6414,9 +6452,27 @@ app.post("/api/cash-advances/:id/refund", authenticateToken, transactional((req:
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Record Advance Refund",
     `${advance.advanceNo}: ${advance.employeeName} refunded ${pesoText(advance.amount)} (OR ${orNo}, ${orDate}) for ${advance.activityTitle || "a seminar"}, ${group
-      ? `the whole group advance: nobody it covered attended (${namesText(advance.covers!.map((c: any) => c.employeeName))})` : "which they did not attend"}.${note}`);
+      ? `the whole group advance: nobody it covered attended (${namesText(advance.covers!.map((c: any) => c.employeeName))})`
+      : beforeSeminar ? "returned before the seminar" : "which they did not attend"}.${note}`);
+  // A refund before the seminar has no "Did not attend" from HR behind it, so one Financial Officer's
+  // record would close the advance alone: the employee and HR are told, so a refund nobody made is seen
+  // (the security review, 2026-10-29).
+  if (beforeSeminar) {
+    notifyEmployee(advance.employeeId, {
+      title: "Cash advance returned",
+      message: `Finance recorded that you returned your ${pesoText(advance.amount)} cash advance ${advance.advanceNo} for ${advance.activityTitle || "the seminar"} before it started (OR ${orNo}, ${orDate}).`,
+      type: "info",
+      link: { tab: "employee_portal", record: { kind: "assignment", id: advance.activityId } }
+    });
+    notify({ role: UserRole.HR_OFFICER }, {
+      title: "Cash advance returned before the seminar",
+      message: `${(req as any).user.fullName} recorded that ${advance.employeeName} returned ${advance.advanceNo} (${pesoText(advance.amount)}) for ${advance.activityTitle || "a seminar"} before it started (OR ${orNo}).`,
+      type: "info",
+      link: { tab: "training_development", record: { kind: "seminar", id: enrolment.trainingProgramId } }
+    });
+  }
   saveDB();
-  res.json({ status: "success", message: `Refund of ${pesoText(advance.amount)} from ${advance.employeeName}${group ? ` for the group's advance` : ""} recorded (OR ${orNo}).${note}`, data: advance });
+  res.json({ status: "success", message: `Refund of ${pesoText(advance.amount)} from ${advance.employeeName}${group ? ` for the group's advance` : ""} recorded (OR ${orNo})${beforeSeminar ? ", returned before the seminar" : ""}.${note}`, data: advance });
 }));
 
 app.put("/api/liquidation-submissions/:id/chief-action", authenticateToken, (req: any, res) => {
@@ -6854,8 +6910,11 @@ const TDP_FIELDS = ["kind", "committee", "committeeOther", "reason", "referenceN
 // for an officer acting on their own seat. `newSeat`: the save seated them just now; otherwise HR is
 // recording (or changing) why someone already on it is there. One that changes nothing records nothing.
 // Callers save; inside a transaction a later refusal undoes all of it. True when it recorded one.
-function recordTdpException(user: TdpActor, p: TrainingParticipant, program: TrainingProgram, j: TdpJustificationInput, newSeat: boolean): boolean {
+function recordTdpException(user: TdpActor, p: TrainingParticipant, program: TrainingProgram, j: TdpJustificationInput & Pick<TdpJustification, "inLieuOf">, newSeat: boolean): boolean {
   const before = p.tdpException;
+  // A representative's stays "In lieu of" whichever route sends a new one (Part B): a seminar save's
+  // `tdpExceptions` can correct its reason, never turn it into another kind.
+  if (before?.kind === "In lieu of") j = { ...j, kind: "In lieu of", committee: undefined, committeeOther: undefined, inLieuOf: before.inLieuOf };
   if (before && TDP_FIELDS.every(f => (before[f] ?? "") === (j[f] ?? ""))
     && before.identifiedBy.name === j.identifiedBy.name && before.identifiedBy.position === j.identifiedBy.position) return false;
   const recordedAt = new Date().toISOString();
@@ -7236,7 +7295,9 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
   let enrolled = alreadyEnrolled;
 
   for (const rawId of employeeIds) {
-    const emp = (db.employees || []).find(e => e.id === rawId || e.employeeId === rawId);
+    // By internal id first, as the TDP checks look people up (12z), so a staff code equal to another
+    // record's id (7j) can't seat a different person than the one checked and named.
+    const emp = employeeByKey(rawId);
     if (!emp) {
       skipped.push(`${rawId} skipped: employee record not found.`);
       continue;
@@ -8578,7 +8639,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     const staying = (db.trainingParticipants || []).filter(p => p.trainingProgramId === existingProgram.id
       && p.status !== "Cancelled" && p.status !== "Archived" && p.attendance !== "Did not attend"
       && (!requested || employeeIdForms(p.employeeId).some(f => requested.has(f))
-        || p.status !== "Assigned" || !!p.attendance || withAdvance.has(p.id) || evaluated.has(p.id))).length;
+        || p.status !== "Assigned" || !!p.attendance || withAdvance.has(p.id) || evaluated.has(p.id) || !!p.replaces)).length;
     if (newSeats! < staying) {
       return res.status(400).json({
         status: "error",
@@ -8668,8 +8729,9 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
       if (p.status === "Cancelled") continue;
       const forms = employeeIdForms(p.employeeId);
       const stillSelected = forms.some(f => requested.has(f));
-      // An enrolment with attendance on record is history, so editing the roster keeps it.
-      if (!stillSelected && p.status === "Assigned" && !p.attendance && !withAdvance.has(p.id) && !evaluated.has(p.id)) {
+      // An enrolment with attendance on record is history, so editing the roster keeps it. So is a
+      // representative's (12z Part B): deleting it would leave the one they replaced pointing nowhere.
+      if (!stillSelected && p.status === "Assigned" && !p.attendance && !withAdvance.has(p.id) && !evaluated.has(p.id) && !p.replaces) {
         removedIds.add(p.id);
         continue;
       }
@@ -8683,7 +8745,9 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
             ? `${name} was kept: their attendance is already recorded.`
             : withAdvance.has(p.id)
               ? `${name} was kept: ${pendingRequestCovering(p.id) ? "a cash advance for them is waiting for Finance" : "Finance has released a cash advance for them for this seminar"}.`
-              : `${name} was kept: their training evaluation is on record.`);
+              : evaluated.has(p.id)
+                ? `${name} was kept: their training evaluation is on record.`
+                : `${name} was kept: they were sent in someone's place. To change who goes, send a representative from the attendance list.`);
       }
       forms.forEach(f => keptForms.add(f));
       keptCount++;
@@ -8967,12 +9031,161 @@ app.put("/api/training/participants/:id/tdp-exception", authenticateToken, trans
   if (tdpIdentifies(p.employeeId, prog)) {
     return res.status(409).json({ status: "error", message: "The TDP identifies them for this seminar, so no justification is needed." });
   }
-  const read = readTdpJustification(req.body, manilaToday());
+  // A representative's stays "In lieu of" the person they replaced (Part B): only its reason, who
+  // identified them and its reference can be corrected.
+  const inLieuOf = p.tdpException?.kind === "In lieu of" ? p.tdpException.inLieuOf : undefined;
+  const read = readTdpJustification(req.body, manilaToday(), { inLieu: !!inLieuOf });
   if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
-  const recorded = recordTdpException((req as any).user, p, prog, read.value, false);
+  const recorded = recordTdpException((req as any).user, p, prog, inLieuOf ? { ...read.value, inLieuOf } : read.value, false);
   saveDB();
   res.set("Cache-Control", "no-store");
   res.json({ status: "success", message: recorded ? undefined : "Nothing changed.", data: { ...p, tdp: "justified" } });
+}));
+
+// Sending a representative in lieu of someone enrolled (HSAC RAB 1, 2026-10-28: "naka-leave si
+// accountant, at may paid training by central office, need mag-identify ng representative in lieu of
+// the accountant. Kasi sayang yung budget allotted"; 12z Part B). The original's enrolment is closed
+// ("Cancelled", with `replacedBy`) and the representative gets a new one with the same allowance,
+// linked back (`replaces`), and a justification "In lieu of" the original whether or not their own
+// plan lists the training. A cash advance belongs to its enrolment, so the original's is settled first
+// (src/representative.ts): their own request is closed, a group request covering them leaves them out,
+// anything else waits for Finance. One transaction: a refusal undoes all of it.
+app.post("/api/training/participants/:id/replace", authenticateToken, transactional((req: any, res: any) => {
+  const user = (req as any).user;
+  if (!isTrainingRecordsRole(user.role)) {
+    return res.status(403).json({ status: "error", message: "Only HR and the Administrator send a representative." });
+  }
+  res.set("Cache-Control", "no-store");   // the reply carries the justification
+  const original = (db.trainingParticipants || []).find(p => p.id === req.params.id);
+  if (!original) return res.status(404).json({ status: "error", message: "Enrolment not found." });
+  const prog = (db.trainingPrograms || []).find(p => p.id === original.trainingProgramId);
+  if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  const title = String(prog.title || "").trim();
+  if (prog.archivedAt) return res.status(409).json({ status: "error", message: `"${title}" is archived. Restore it first.` });
+  if (original.status === "Cancelled" || original.status === "Archived") {
+    return res.status(409).json({ status: "error", message: "This enrolment is no longer on the seminar." });
+  }
+  const originalEmp = employeeByKey(original.employeeId);
+  const originalName = originalEmp?.fullName || original.employeeId;
+  if (original.attendance) {
+    return res.status(409).json({ status: "error", message: `${originalName}'s attendance is already recorded (${original.attendance}), so a representative can't take their place now.` });
+  }
+  // A report needs attendance today, but older code liquidated enrolments without it: anything past
+  // "Assigned", or covered by a report, has history, and stays.
+  if (original.status !== "Assigned" || reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], original.id)) {
+    return res.status(409).json({ status: "error", message: `${originalName}'s liquidation is already ${original.status === "Liquidated" ? "complete" : "under way"}, so a representative can't take their place.` });
+  }
+  // A representative goes in someone's place before or during the training, not after it.
+  if (isIsoDate(prog.endDate) && String(prog.endDate).slice(0, 10) < manilaToday()) {
+    return res.status(409).json({ status: "error", message: `"${title}" is over, so no representative can be sent: record ${originalName}'s attendance instead.` });
+  }
+  // HR's hand-entered expenses for them would stay on a closed enrolment, no longer netted against the
+  // seat's cash (12z Part B review).
+  if ((db.trainingLiquidations || []).some((r: any) => r && r.trainingParticipantId === original.id)) {
+    return res.status(409).json({ status: "error", message: `HR has entered expenses for ${originalName} on this seminar, which stay with their enrolment, so a representative can't take their place.` });
+  }
+  const repEmp = typeof req.body?.employeeId === "string" ? employeeByKey(req.body.employeeId) : undefined;
+  if (!repEmp) return res.status(400).json({ status: "error", message: "Choose the employee to send." });
+  if (originalEmp && repEmp.id === originalEmp.id) return res.status(400).json({ status: "error", message: "Choose someone else to send in their place." });
+  // Their staff record, or their login archived: the same test as for paying an advance.
+  if (repEmp.isActive === false || !payeeIsActive(repEmp.id)) return res.status(409).json({ status: "error", message: `${repEmp.fullName} is no longer active.` });
+  if (onSeminarRoster(prog.id, repEmp)) return res.status(409).json({ status: "error", message: `${repEmp.fullName} is already on this seminar.` });
+  const read = readTdpJustification(req.body, manilaToday(), { inLieu: true });
+  if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
+
+  // The original's cash advance first (the user's decision 4).
+  const step = swapAdvanceStep(db.cashAdvances || [], original.id);
+  if (step.action === "wait") {
+    const a = (db.cashAdvances || []).find(x => x.id === step.advanceId)!;
+    return res.status(409).json({
+      status: "error",
+      message: step.why === "ownAdvanceOut"
+        ? seminarNotStarted(prog.id)
+          ? `${originalName}'s cash advance ${a.advanceNo} (DV ${a.dvNo}) is out. Finance records its refund first (it can be handed back before the seminar starts), then send the representative.`
+          : `${originalName}'s cash advance ${a.advanceNo} (DV ${a.dvNo}) is out, and the seminar has started, so it can't be handed back before it now. Record their attendance: if they didn't attend, Finance collects it back.`
+        : step.why === "holdsGroupRequest"
+          ? `${originalName} asked Finance for a cash advance that covers others too. Finance declines it first, then send the representative.`
+          : a.activityId === original.id
+            ? `${originalName} holds the group's cash advance ${a.advanceNo}, which the group's liquidation report or refund settles. A representative can't take their place before that.`
+            : `${originalName} is covered by ${a.employeeName}'s group cash advance ${a.advanceNo}, which the group's liquidation report or refund settles. A representative can't take their place before that.`,
+      data: { code: "ADVANCE_OPEN" }
+    });
+  }
+
+  const takenBefore = seminarAwayIds(prog.id);
+  // The original's seat is freed first, then the representative takes one (the usual checks: already
+  // attended a seminar by this title, or a training HR recorded with it).
+  original.status = "Cancelled";
+  const enrolledCount = (db.trainingParticipants || []).filter(p => p.trainingProgramId === prog.id && p.status !== "Cancelled").length;
+  const { created, skipped } = enrollTrainingParticipants(prog, [repEmp.id], user, enrolledCount);
+  const rep = created[0];
+  if (!rep) return res.status(409).json({ status: "error", message: skipped[0] || `${repEmp.fullName} could not be enrolled.` });
+  const at = new Date().toISOString();
+  rep.allowanceAllocated = original.allowanceAllocated;
+  rep.replaces = original.id;
+  const inLieuOf = { participantId: original.id, employeeId: originalEmp?.id ?? original.employeeId, fullName: originalName };
+  rep.tdpException = { ...read.value, inLieuOf, recordedBy: { id: user.id, name: user.fullName, role: user.role }, recordedAt: at };
+  original.replacedBy = { participantId: rep.id, employeeId: repEmp.id, fullName: repEmp.fullName, at, by: user.fullName };
+
+  let advanceNote = "";
+  if (step.action === "closeRequest") {
+    const request = (db.cashAdvances || []).find(a => a.id === step.advanceId)!;
+    declineAdvanceRequest(request, "A representative is going to the seminar in your place.", user.fullName);
+    advanceNote = ` Their ${pesoText(request.amount)} cash advance request was closed, and they were told why.`;
+  } else if (step.action === "leaveGroup") {
+    const request = (db.cashAdvances || []).find(a => a.id === step.advanceId)!;
+    removeFromGroupRequest(request, original.id);
+    notifyEmployee(request.employeeId, {
+      title: "A participant left your group's request",
+      message: `${originalName} is no longer going to ${request.activityTitle || "the seminar"} (HR is sending a representative in their place), so your group cash advance request no longer covers them. It is now ${pesoText(request.amount)}${request.covers ? ` for ${request.covers.length} participants` : ", for you alone"}.`,
+      type: "info",
+      link: { tab: "employee_portal", record: { kind: "assignment", id: request.activityId } }
+    });
+    advanceNote = ` They were taken off ${request.employeeName}'s group cash advance request, now ${pesoText(request.amount)}${request.covers
+      ? ` for ${namesText(request.covers.map(c => c.employeeName))}` : ` for ${request.employeeName} alone`}, and ${request.employeeName} was told.`;
+  }
+
+  // Someone must stay to man each division (12x): the swap may take the last one of the representative's.
+  const gaps = addedDivisionGaps(prog.id, { startDate: prog.startDate, endDate: prog.endDate, ids: takenBefore },
+    { startDate: prog.startDate, endDate: prog.endDate, ids: seminarAwayIds(prog.id) });
+  if (refuseDivisionGap(req, res, gaps)) return;
+
+  const j = read.value;
+  // A vehicle request filed with the original's cash advance (12v Part B) stays standing: the Division
+  // Chief, who decides vehicles, is told it no longer has its passenger on the seminar.
+  const vehicle = vehicleRequestFor(original.id);
+  const vehicleNote = vehicle ? ` Their vehicle request ${vehicle.vrsNo} (${vehicle.status}) still stands; the Division Chief decides it.` : "";
+  // Names and the title quoted (HR's and the Administrator's own words, as in Part C's entries).
+  const [repQ, originalQ, titleQ] = [JSON.stringify(repEmp.fullName), JSON.stringify(originalName), JSON.stringify(title)];
+  logEvent(user.id, user.username, user.role, "Send Representative",
+    `${user.fullName} sent ${repQ} to ${titleQ} (FY ${prog.fiscalYear}) in lieu of ${originalQ}. `
+    + `Identified by: ${JSON.stringify(j.identifiedBy.name)}, ${JSON.stringify(j.identifiedBy.position)}.`
+    + `${j.referenceNo ? ` Reference: ${JSON.stringify(j.referenceNo)}${j.referenceDate ? ` (${j.referenceDate})` : ""}.` : ""}${advanceNote}${vehicleNote}`);
+  if (isOwnRecord(user, repEmp.id)) flagSelfApproval(user, `sent themself to ${titleQ} in lieu of ${originalQ}`);
+  if (isOwnRecord(user, original.employeeId)) flagSelfApproval(user, `sent ${repQ} to ${titleQ} in their own place`);
+  logDivisionOverride(req, gaps, `sent ${repQ} to ${titleQ} (FY ${prog.fiscalYear}) in lieu of ${originalQ}`);
+  if (user.role !== UserRole.SUPER_ADMIN) {
+    notify({ role: UserRole.SUPER_ADMIN }, {
+      title: "Representative sent",
+      message: `${user.fullName} sent ${repQ} to ${titleQ} (FY ${prog.fiscalYear}) in lieu of ${originalQ}, identified by ${JSON.stringify(j.identifiedBy.name)}.${vehicleNote}`,
+      type: "info",
+      link: { tab: "training_development", record: { kind: "seminar", id: prog.id } },
+      dedupeKey: `representative:${original.id}`
+    });
+  }
+  // The original is told their place went to someone else (the user's decision 8), never why.
+  const dates = !isIsoDate(prog.startDate) ? ""
+    : prog.startDate === prog.endDate || !isIsoDate(prog.endDate) ? ` on ${formatLongDate(prog.startDate)}`
+    : ` from ${formatLongDate(prog.startDate)} to ${formatLongDate(prog.endDate)}`;
+  notifyEmployee(original.employeeId, {
+    title: `No longer enrolled: ${title}`,
+    message: `HR is sending a representative to "${title}"${dates} in your place, so your enrolment was closed.`,
+    type: "info",
+    link: { tab: "employee_portal" },
+    dedupeKey: `replaced:${original.id}`
+  });
+  saveDB();
+  res.json({ status: "success", message: `${repEmp.fullName} goes to "${title}" in lieu of ${originalName}.${advanceNote}${vehicleNote}`, data: { replaced: original, representative: rep } });
 }));
 
 // Attendance: HR records it per participant once the seminar has started. It is stored

@@ -5,6 +5,7 @@ import { apiCall, formatDate } from "../../utils";
 import { tdpBadgeText } from "../../tdpRules";
 import ModalDialog from "../ui/ModalDialog";
 import TdpJustificationForm from "./TdpJustificationForm";
+import SendRepresentativePanel from "./SendRepresentativePanel";
 
 /**
  * HR's attendance roster for one seminar (Training Plan & Budget). Only attendees get a
@@ -15,12 +16,13 @@ import TdpJustificationForm from "./TdpJustificationForm";
 
 interface AttendanceModalProps {
   program: TrainingProgram;
-  /** This seminar's enrolments, with where each stands against the TDP. */
+  /** This seminar's enrolments, with where each stands against the TDP; cancelled ones too, so whoever a
+   * representative replaced stays listed. */
   participants: TrainingParticipantRow[];
   employees: Employee[];
   /** Only HR records attendance; everyone else sees the roster read-only. */
   canRecord: boolean;
-  /** HR and the Administrator record why someone outside the TDP is seated (12z). */
+  /** HR and the Administrator record why someone outside the TDP is seated, and send a representative (12z). */
   canJustify?: boolean;
   /** The signed-in officer's staff code: recording their own attendance is allowed but flagged. */
   currentEmployeeId?: string;
@@ -47,12 +49,22 @@ export default function AttendanceModal({ program, participants, employees, canR
   const [justifyId, setJustifyId] = useState<string | null>(null);
   const [justifying, setJustifying] = useState(false);
   const [justifyError, setJustifyError] = useState("");
+  // The enrolment a representative is being sent for (Part B), by id, and whether its send is in flight.
+  const [repFor, setRepFor] = useState<string | null>(null);
+  const [sendingRep, setSendingRep] = useState(false);
 
   const start = String(program.startDate || "").slice(0, 10);
   const started = !!start && start <= manilaToday();
   const roster = (participants ?? []).filter(p => p.status !== "Cancelled" && p.status !== "Archived");
-  const nameOf = (p: TrainingParticipant) =>
-    (employees ?? []).find(e => e.id === p.employeeId || e.employeeId === p.employeeId)?.fullName || p.employeeId;
+  // Whoever a representative replaced: their enrolment is closed, and kept on record.
+  const replaced = (participants ?? []).filter(p => p.status === "Cancelled" && p.replacedBy);
+  const staffOf = (p: TrainingParticipant) => (employees ?? []).find(e => e.id === p.employeeId || e.employeeId === p.employeeId);
+  const nameOf = (p: TrainingParticipant) => staffOf(p)?.fullName || p.employeeId;
+  // The one a representative took the place of, by name.
+  const inLieuName = (p: TrainingParticipantRow) => {
+    const original = (participants ?? []).find(x => x.id === p.replaces);
+    return original ? nameOf(original) : p.tdpException?.inLieuOf?.fullName;
+  };
   // Filing a report moves the enrolment to Liquidation Pending; it stays attended from then on.
   const hasFiled = (p: TrainingParticipant) => p.status === "Liquidation Pending" || p.status === "Liquidated";
   // The officer's own enrolment: they may record it, but it is flagged in the audit log (the
@@ -116,13 +128,13 @@ export default function AttendanceModal({ program, participants, employees, canR
       subtitle={`${String(program.title || "").trim()} · ${formatDate(program.startDate)}${program.endDate && program.endDate !== program.startDate ? ` to ${formatDate(program.endDate)}` : ""}`}
       icon={<CalendarCheck size={16} aria-hidden="true" />}
       onClose={onClose}
-      busy={!!savingId || justifying}
+      busy={!!savingId || justifying || sendingRep}
       size="lg"
       footer={
         <button
           type="button"
           onClick={onClose}
-          disabled={!!savingId}
+          disabled={!!savingId || sendingRep}
           className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Close
@@ -159,6 +171,12 @@ export default function AttendanceModal({ program, participants, employees, canR
               const locked = !canRecord || !started || !!savingId;
               const tdpText = tdpBadgeText(p.tdp, p.tdpException);
               const why = p.tdpException;
+              // A representative: whose place they took, unless their badge already says so (the TDP
+              // identifies some for the training anyway, and they show no badge).
+              const lieu = p.replaces ? inLieuName(p) : undefined;
+              const lieuInBadge = !!tdpText && why?.kind === "In lieu of";
+              // Before attendance is recorded, someone can be sent in their place (Part B).
+              const canSend = canJustify && !p.attendance && p.status === "Assigned" && repFor !== p.id && !sendingRep;
               return (
                 <li key={p.id} className="px-3 py-2.5">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -182,9 +200,17 @@ export default function AttendanceModal({ program, participants, employees, canR
                             {tdpText}
                           </span>
                         )}
+                        {lieu && !lieuInBadge && (
+                          <span className="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">In lieu of {lieu}</span>
+                        )}
                         {canJustify && tdpText && p.tdp !== "seminar" && justifyId !== p.id && (
                           <button type="button" onClick={() => openJustify(p.id)} disabled={justifying} className="font-semibold text-blue-700 hover:underline disabled:opacity-50">
                             {why ? "Change why" : "Add why"}<span className="sr-only">: {nameOf(p)}</span>
+                          </button>
+                        )}
+                        {canSend && (
+                          <button type="button" onClick={() => { setRepFor(p.id); setNotice(""); }} className="font-semibold text-blue-700 hover:underline">
+                            Send a representative<span className="sr-only">: in lieu of {nameOf(p)}</span>
                           </button>
                         )}
                       </p>
@@ -223,6 +249,8 @@ export default function AttendanceModal({ program, participants, employees, canR
                       <TdpJustificationForm
                         employeeName={nameOf(p)}
                         initial={why}
+                        // A representative's stays "In lieu of" (the server keeps it so).
+                        inLieuOf={why?.kind === "In lieu of" ? (lieu || why.inLieuOf?.fullName || "another participant") : undefined}
                         saveLabel="Save"
                         saving={justifying}
                         onSave={value => justify(p, value)}
@@ -231,10 +259,34 @@ export default function AttendanceModal({ program, participants, employees, canR
                       {justifyError && <p role="alert" className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">{justifyError}</p>}
                     </>
                   )}
+                  {repFor === p.id && (
+                    <SendRepresentativePanel
+                      program={program}
+                      original={{ id: p.id, employeeId: staffOf(p)?.id ?? p.employeeId, name: nameOf(p) }}
+                      // (Not anyone marked "Did not attend": they are at the office, as the server counts them.)
+                      rosterIds={roster.filter(x => x.attendance !== "Did not attend").map(x => staffOf(x)?.id ?? x.employeeId)}
+                      onBusy={setSendingRep}
+                      onClose={() => setRepFor(null)}
+                      onSent={message => { setRepFor(null); setNotice(message); onChanged(); }}
+                    />
+                  )}
                 </li>
               );
             })}
           </ul>
+        )}
+        {/* Whoever a representative went in lieu of: their enrolment is closed, and kept on record. */}
+        {replaced.length > 0 && (
+          <div>
+            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Replaced by a representative</h3>
+            <ul className="mt-1 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-slate-50/60">
+              {replaced.map(p => (
+                <li key={p.id} className="px-3 py-2 text-[11px] text-slate-500">
+                  <span className="font-semibold text-slate-600">{nameOf(p)}</span>: replaced by {p.replacedBy!.fullName} on {formatDate(p.replacedBy!.at)}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     </ModalDialog>

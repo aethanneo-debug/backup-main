@@ -45,6 +45,13 @@ interface FundableRow {
   groupNames?: string[] | null;
   /** Nobody the group covers attended: only then is its advance refunded in full. */
   groupAllAbsent?: boolean;
+  /** Their own advance, with the seminar still to come and no attendance recorded: it can be handed back
+   * in full (e.g. a representative goes in their place, which waits for it; 12z Part B). */
+  refundBeforeSeminar?: boolean;
+  /** Handed back before the seminar (as recorded then). */
+  refundedBeforeSeminar?: boolean;
+  /** A representative went in their place (their enrolment is closed): listed only for the refund. */
+  replaced?: boolean;
 }
 
 // Whether the row's advance is collected back in full: a non-attendee's own, or a group's that
@@ -123,13 +130,18 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
   // (Someone who did not attend is never funded; their refunded advance is listed apart.)
   // Each list newest first, by its own event: the assignment, the release, the settlement,
   // the refund. So the five settled ones shown are the latest five.
-  const unfunded = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled)
+  // (Someone a representative replaced is never funded: their row is only the record of their refund.
+  // Nor is an advance handed back before the seminar released again from here: HR is sending someone in
+  // their place, and if they go after all, their new request comes through Cash Advance Requests.)
+  const unfunded = useMemo(() => rows.filter(r => !r.didNotAttend && !r.replaced && !r.refundedBeforeSeminar && !r.funded && r.advanceStatus !== "Liquidated" && !r.liquidationFiled)
     .sort(newestFirst(r => [r.assignedAt])), [rows]);
-  const filedWithoutAdvance = useMemo(() => rows.filter(r => !r.didNotAttend && !r.funded && r.advanceStatus !== "Liquidated" && r.liquidationFiled), [rows]);
+  const filedWithoutAdvance = useMemo(() => rows.filter(r => !r.didNotAttend && !r.replaced && !r.refundedBeforeSeminar && !r.funded && r.advanceStatus !== "Liquidated" && r.liquidationFiled), [rows]);
   const open = useMemo(() => rows.filter(r => r.funded).sort(newestFirst(r => [r.advanceIssuedAt, r.assignedAt])), [rows]);
   const settled = useMemo(() => rows.filter(r => !r.funded && r.advanceStatus === "Liquidated")
     .sort(newestFirst(r => [r.advanceSettledAt, r.advanceIssuedAt])), [rows]);
   const refunded = useMemo(() => rows.filter(r => r.didNotAttend && r.advanceStatus === "Refunded")
+    .sort(newestFirst(r => [r.advanceRefundedAt, r.advanceIssuedAt])), [rows]);
+  const returnedEarly = useMemo(() => rows.filter(r => r.refundedBeforeSeminar && r.advanceStatus === "Refunded")
     .sort(newestFirst(r => [r.advanceRefundedAt, r.advanceIssuedAt])), [rows]);
   const outstanding = useMemo(
     () => open.reduce((sum, r) => sum + Number(r.advanceAmount || 0), 0),
@@ -428,12 +440,27 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                         )}
                       </span>
                     )}
-                    {refundDue(row) && row.advanceId && refundingId === row.advanceId && (
+                    {/* Their own advance, the seminar still to come: it can come back in full before it, e.g.
+                        when a representative will go in their place (HR's swap waits for the refund). */}
+                    {!refundDue(row) && row.refundBeforeSeminar && row.advanceId && refundingId !== row.advanceId && (
+                      <span className="w-full flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+                        Handed back before the seminar (e.g. a representative goes in their place)?
+                        <button
+                          type="button"
+                          onClick={() => { setNotice(""); setRefundingId(row.advanceId!); }}
+                          className="cursor-pointer rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        >
+                          Record refund<span className="sr-only">: {row.employeeName}, {row.advanceNo}, before the seminar</span>
+                        </button>
+                      </span>
+                    )}
+                    {(refundDue(row) || row.refundBeforeSeminar) && row.advanceId && refundingId === row.advanceId && (
                       <AdvanceRefundForm
                         advanceId={row.advanceId}
                         advanceNo={row.advanceNo}
                         employeeName={row.employeeName}
                         amount={Number(row.advanceAmount || 0)}
+                        beforeSeminar={!refundDue(row)}
                         groupNames={row.groupNames && row.groupNames.length > 1 ? row.groupNames : undefined}
                         onCancel={() => setRefundingId(null)}
                         onRecorded={async message => {
@@ -485,6 +512,30 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                       <BadgeCheck size={13} className="text-emerald-600 shrink-0" aria-hidden="true" />
                       <AdvanceRef row={row} />
                       <span className="text-slate-700 truncate">{row.employeeName}</span>
+                    </span>
+                    <span className="font-mono text-slate-500 shrink-0">
+                      {formatCurrency(Number(row.advanceAmount || 0))} · refunded, OR {row.refundOrNo}
+                      {row.refundOrDate ? ` (${formatDate(row.refundOrDate)})` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {returnedEarly.length > 0 && (
+            <div className="border-t border-slate-200 pt-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider mb-2">
+                Returned Before the Seminar ({returnedEarly.length})
+              </h3>
+              <ul className="divide-y divide-slate-100">
+                {returnedEarly.map(row => (
+                  <li key={row.activityId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <BadgeCheck size={13} className="text-emerald-600 shrink-0" aria-hidden="true" />
+                      <AdvanceRef row={row} />
+                      <span className="text-slate-700 truncate">{row.employeeName}</span>
+                      {row.replaced && <span className="text-slate-400 truncate">· a representative went in their place</span>}
                     </span>
                     <span className="font-mono text-slate-500 shrink-0">
                       {formatCurrency(Number(row.advanceAmount || 0))} · refunded, OR {row.refundOrNo}

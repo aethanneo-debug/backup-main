@@ -111,3 +111,9 @@ export function datesText(dates: string[]): string {
 export function gapText(gaps: DivisionGap[]): string {
   return (gaps ?? []).map(g => `${g.division} on ${datesText(g.dates)}`).join("; ");
 }
+
+/** What HR is asked when the server refuses a change with DIVISION_GAP: its reason, then whether to go
+ * ahead knowingly, which is recorded. Shared by Programs & Budget and the representative dialog. */
+export function divisionGapQuestion(reason: string, action: "Save" | "Restore" | "Send"): string {
+  return `${reason}\n\n${action} anyway? It will be recorded in the audit log as a Division Coverage Override.`;
+}

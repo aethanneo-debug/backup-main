@@ -9,6 +9,9 @@ interface Props {
   amount: number;
   /** A group advance nobody it covers attended: everyone it covered, the holder first. */
   groupNames?: string[];
+  /** Their own advance handed back before the seminar starts (12z Part B): their seat stays until HR
+   * sends a representative or takes them off, so their share isn't released by this. */
+  beforeSeminar?: boolean;
   /** Called with the server's account of what was recorded (and what returned to Unallocated). */
   onRecorded: (message: string) => void;
   onCancel: () => void;
@@ -27,7 +30,7 @@ const INPUT =
  * training budget, so the money can't fund another seminar while it is still out; once
  * recorded, it returns to Unallocated and the advance is closed.
  */
-export default function AdvanceRefundForm({ advanceId, advanceNo, employeeName, amount, groupNames, onRecorded, onCancel }: Props) {
+export default function AdvanceRefundForm({ advanceId, advanceNo, employeeName, amount, groupNames, beforeSeminar = false, onRecorded, onCancel }: Props) {
   const [orNo, setOrNo] = useState("");
   const [orDate, setOrDate] = useState(manilaToday());
   const [saving, setSaving] = useState(false);
@@ -66,8 +69,13 @@ export default function AdvanceRefundForm({ advanceId, advanceNo, employeeName, 
         Refund of <strong className="font-mono text-slate-800">{formatCurrency(amount)}</strong> from{" "}
         <strong className="text-slate-800">{employeeName}</strong>
         {advanceNo ? <> on <span className="font-mono">{advanceNo}</span></> : null}
-        {groupNames ? <>, the group&rsquo;s whole advance (nobody it covered attended: {groupNames.join(", ")})</> : null}. Recording it closes
-        the advance and returns {groupNames ? "everyone’s share" : "their share"} of the seminar to Unallocated.
+        {groupNames ? <>, the group&rsquo;s whole advance (nobody it covered attended: {groupNames.join(", ")})</> : null}
+        {beforeSeminar ? (
+          <>, handed back before the seminar. Recording it closes the advance; their place on the seminar stays until HR sends a
+          representative or takes them off.</>
+        ) : (
+          <>. Recording it closes the advance and returns {groupNames ? "everyone’s share" : "their share"} of the seminar to Unallocated.</>
+        )}
       </p>
       <div className="grid max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1">

@@ -3,6 +3,10 @@ import { UserRole, TrainingProgram, TrainingParticipantRow, TrainingLiquidationE
 import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, apiErrorCode, formatCurrency, type ApiError } from "../utils";
 import { normalizeTitle, seminarTdpBadgeText, tdpBadgeText } from "../tdpRules";
+// Someone must stay to man each division (HSAC RAB 1's answer 1). The server refuses a save or
+// restore that would leave a division with nobody at the office (409, code DIVISION_GAP) and says
+// which; HR may go ahead knowingly, and it is recorded.
+import { divisionGapQuestion } from "../divisionCoverage";
 import SeminarTdpForm from "./training/SeminarTdpForm";
 import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck, Archive } from "lucide-react";
@@ -52,11 +56,6 @@ function seminarTimeProblem(row: { startDate?: string; endDate?: string; startTi
   return null;
 }
 
-// Someone must stay to man each division (HSAC RAB 1's answer 1). The server refuses a save or
-// restore that would leave a division with nobody at the office (409, code DIVISION_GAP) and says
-// which; HR may go ahead knowingly, and it is recorded.
-const divisionGapQuestion = (reason: string, action: "Save" | "Restore") =>
-  `${reason}\n\n${action} anyway? It will be recorded in the audit log as a Division Coverage Override.`;
 
 // A row's title box, so a row added from the plan can take focus once it renders.
 const titleInputId = (rowId: string) => `tdp-title-${rowId}`;
@@ -920,8 +919,10 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                      // Seated outside the TDP (12z): a dot, and the badge in the tooltip (amber while it has
                      // no justification). The attendance list shows it in full.
                      const tdpText = tdpBadgeText(part.tdp, part.tdpException);
+                     // A representative (Part B): whose place they took, when the badge doesn't say it.
+                     const lieu = part.replaces && part.tdpException?.kind === "In lieu of" && !tdpText ? ` · in lieu of ${part.tdpException.inLieuOf?.fullName ?? "another participant"}` : "";
                      return emp ? (
-                       <span key={part.id} className={`inline-block px-1.5 py-0.5 text-[10px] rounded border truncate max-w-[120px] ${chip}`} title={`${emp.fullName} · ${part.attendance || "attendance not recorded"}${tdpText ? ` · ${tdpText}` : ""}`}>
+                       <span key={part.id} className={`inline-block px-1.5 py-0.5 text-[10px] rounded border truncate max-w-[120px] ${chip}`} title={`${emp.fullName} · ${part.attendance || "attendance not recorded"}${tdpText ? ` · ${tdpText}` : ""}${lieu}`}>
                          {emp.fullName.split(' ')[0]}
                          {tdpText && (
                            <>
@@ -1255,7 +1256,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       {attendanceProgram && (
         <AttendanceModal
           program={attendanceProgram}
-          participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id && onRoster(part))}
+          // (Cancelled ones too: whoever a representative replaced stays listed. The list leaves out the rest.)
+          participants={participants.filter(part => part.trainingProgramId === attendanceProgram.id)}
           employees={employees}
           canRecord={user.role === UserRole.HR_OFFICER}
           canJustify={user.role === UserRole.HR_OFFICER || user.role === UserRole.SUPER_ADMIN}

@@ -93,11 +93,15 @@ export const TDP_NAME_MAX = 100;       // a name, a position, or a committee nam
 export const TDP_REFERENCE_MAX = 50;
 
 /** A justification as sent, checked and cleaned, or why it can't be saved. `today` is Manila's
- * date: a reference can't be dated later. */
-export function readTdpJustification(raw: unknown, today: string): { value: TdpJustificationInput } | { problem: string } {
+ * date: a reference can't be dated later. "In lieu of" is never chosen: it is read only for a
+ * representative (`inLieu`, Part B), whose reason and who identified them are still required. */
+export function readTdpJustification(raw: unknown, today: string, opts: { inLieu?: boolean } = {}): { value: TdpJustificationInput } | { problem: string } {
   const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
-  const kind = r.kind;
-  if (kind !== "Designated" && kind !== "Identified by the Chief" && kind !== "Other") {
+  const kind = opts.inLieu ? "In lieu of" : r.kind;
+  if (kind !== "Designated" && kind !== "Identified by the Chief" && kind !== "Other" && kind !== "In lieu of") {
+    return { problem: "Choose why they are seated: designated to do the tasks, identified by the Chief, or another reason." };
+  }
+  if (kind === "In lieu of" && !opts.inLieu) {
     return { problem: "Choose why they are seated: designated to do the tasks, identified by the Chief, or another reason." };
   }
   let committee: TdpCommittee | undefined;
@@ -169,12 +173,13 @@ function readReference(r: Record<string, unknown>, today: string): { value: { re
   return { value };
 }
 
-type KindOnly = Pick<TdpJustificationInput, "kind" | "committee" | "committeeOther">;
+type KindOnly = Pick<TdpJustificationInput, "kind" | "committee" | "committeeOther"> & { inLieuOf?: { fullName: string } };
 
 /** The kind as a label, for the audit entry and the Administrator's notice. */
 export function tdpKindText(j: KindOnly): string {
   if (j.kind === "Designated") return `Designated (${j.committee === "Other" ? j.committeeOther || "another committee" : j.committee})`;
   if (j.kind === "Identified by the Chief") return "Identified by the Chief";
+  if (j.kind === "In lieu of") return `In lieu of ${j.inLieuOf?.fullName || "another participant"}`;
   return "Other reason";
 }
 
@@ -186,6 +191,7 @@ export function tdpBadgeText(standing: TdpStanding | undefined, j?: KindOnly): s
   if (standing === "missing" || !j) return "Outside the TDP: no justification";
   if (j.kind === "Designated") return `Designated: ${j.committee === "Other" ? j.committeeOther || "other committee" : j.committee}`;
   if (j.kind === "Identified by the Chief") return "Identified by the Chief";
+  if (j.kind === "In lieu of") return `In lieu of ${j.inLieuOf?.fullName || "another participant"}`;
   return "Outside the TDP: other reason";
 }
 

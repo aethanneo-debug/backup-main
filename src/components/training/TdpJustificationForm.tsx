@@ -9,6 +9,9 @@ import { getLocalTodayString } from "../../utils";
 interface Props {
   employeeName: string;
   initial?: TdpJustificationInput;
+  /** A representative (Part B): the name of the one whose place they take. The kind is then always
+   * "In lieu of"; the reason and who identified them are still asked. */
+  inLieuOf?: string;
   /** "Keep" in the participant picker (saved with the seminar), "Save" where it is saved at once. */
   saveLabel?: string;
   saving?: boolean;
@@ -25,7 +28,7 @@ const INPUT = "w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 te
 const LABEL = "block text-[11px] font-semibold text-slate-700 mb-0.5";
 const BUTTON = "rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50";
 
-export default function TdpJustificationForm({ employeeName, initial, saveLabel = "Keep", saving = false, onSave, onCancel }: Props) {
+export default function TdpJustificationForm({ employeeName, initial, inLieuOf, saveLabel = "Keep", saving = false, onSave, onCancel }: Props) {
   const id = useId();
   const [kind, setKind] = useState<TdpExceptionKind | "">(initial?.kind ?? "");
   const [committee, setCommittee] = useState<TdpCommittee | "">(initial?.committee ?? "");
@@ -40,7 +43,8 @@ export default function TdpJustificationForm({ employeeName, initial, saveLabel 
   const submit = () => {
     const read = readTdpJustification(
       { kind, committee, committeeOther, reason, identifiedBy: { name, position }, referenceNo, referenceDate },
-      getLocalTodayString()
+      getLocalTodayString(),
+      { inLieu: inLieuOf !== undefined }
     );
     if ("problem" in read) {
       setProblem(read.problem);
@@ -53,20 +57,26 @@ export default function TdpJustificationForm({ employeeName, initial, saveLabel 
   return (
     <fieldset className="mt-2 space-y-2.5 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-xs">
       <legend className="px-1 text-[11px] font-bold text-amber-900">
-        Why is {employeeName} seated? Their TDP doesn't list this training.
+        {inLieuOf !== undefined
+          ? <>Why is {employeeName} going in lieu of {inLieuOf}?</>
+          : <>Why is {employeeName} seated? Their TDP doesn&rsquo;t list this training.</>}
       </legend>
-      <div className="space-y-1">
-        {KINDS.map((k, i) => (
-          <label key={k.kind} className="flex cursor-pointer items-start gap-2">
-            {/* The form opens where HR was working: focus moves to its first choice. */}
-            <input type="radio" name={`${id}-kind`} className="mt-0.5" checked={kind === k.kind} onChange={() => setKind(k.kind)} autoFocus={i === 0} />
-            <span>
-              <span className="font-semibold text-slate-800">{k.label}</span>
-              <span className="text-slate-500">: {k.hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
+      {inLieuOf !== undefined ? (
+        <p className="text-slate-700"><span className="font-semibold text-slate-800">In lieu of {inLieuOf}</span>: a representative takes their place.</p>
+      ) : (
+        <div className="space-y-1">
+          {KINDS.map((k, i) => (
+            <label key={k.kind} className="flex cursor-pointer items-start gap-2">
+              {/* The form opens where HR was working: focus moves to its first choice. */}
+              <input type="radio" name={`${id}-kind`} className="mt-0.5" checked={kind === k.kind} onChange={() => setKind(k.kind)} autoFocus={i === 0} />
+              <span>
+                <span className="font-semibold text-slate-800">{k.label}</span>
+                <span className="text-slate-500">: {k.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
       {kind === "Designated" && (
         <div className="grid gap-2 sm:grid-cols-2">
           <div>
@@ -86,7 +96,8 @@ export default function TdpJustificationForm({ employeeName, initial, saveLabel 
       )}
       <div>
         <label htmlFor={`${id}-reason`} className={LABEL}>Reason</label>
-        <textarea id={`${id}-reason`} className={INPUT} rows={2} value={reason} maxLength={TDP_REASON_MAX} onChange={e => setReason(e.target.value)} />
+        {/* A representative's form opens on its reason, as the other one opens on its first choice. */}
+        <textarea id={`${id}-reason`} className={INPUT} rows={2} value={reason} maxLength={TDP_REASON_MAX} onChange={e => setReason(e.target.value)} autoFocus={inLieuOf !== undefined} />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <div>
