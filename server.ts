@@ -7239,8 +7239,16 @@ function buildTrainingPlan(fiscalYear: string, asOf: string): TrainingPlanOffice
     });
   }
 
+  // Newest first within each office (LIFO, as the user asked on 2026-10-29). Employees carry no date of
+  // their own, but a new id holds the moment it was added (`emp-<Date.now()>`), and records are appended
+  // as they are added, so the seeded ones (emp-1 …) are the oldest and the stored order breaks ties.
+  const stored = new Map((db.employees || []).map((e, i) => [e.id, i]));
+  const addedAt = (id: string) => Number(/^emp-(\d{12,})$/.exec(id)?.[1] ?? 0);
+  const newestFirst = (a: TrainingPlanEmployee, b: TrainingPlanEmployee) =>
+    addedAt(b.employeeId) - addedAt(a.employeeId) || (stored.get(b.employeeId) ?? 0) - (stored.get(a.employeeId) ?? 0);
+
   return [...byOffice.entries()]
-    .map(([office, employees]) => ({ office, employees: employees.sort((a, b) => a.fullName.localeCompare(b.fullName)) }))
+    .map(([office, employees]) => ({ office, employees: employees.sort(newestFirst) }))
     .sort((a, b) => {
       const ai = TDP_OFFICE_ORDER.indexOf(a.office);
       const bi = TDP_OFFICE_ORDER.indexOf(b.office);
