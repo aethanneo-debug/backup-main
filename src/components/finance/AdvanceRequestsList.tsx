@@ -4,6 +4,13 @@ import { CashAdvance } from "../../types";
 import { apiCall, firstTimestamp, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import { useRecordHighlight } from "../ui/useRecordHighlight";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
+import { dvNumberFrom, dvPrefix, dvPrefixIn, dvSerialInput, readDvNumber } from "../../dvNumber";
+
+/** The voucher number the form would send, when the server would take it ("" otherwise). */
+function validDv(dvDate: string, serial: string): string {
+  const number = dvNumberFrom(dvDate, serial);
+  return number && !("problem" in readDvNumber(number, dvDate)) ? number : "";
+}
 
 interface Props {
   /** From a notification: the request to show, scrolled to and outlined once loaded. */
@@ -32,7 +39,12 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
 
   // The request being acted on, and its form.
   const [acting, setActing] = useState<{ id: string; kind: "release" | "decline" } | null>(null);
-  const [dvNo, setDvNo] = useState("");
+  // The voucher's date and its serial: the number is YYYY-MM-NNNN, its year and month the date's.
+  const [dvSerial, setDvSerial] = useState("");
+  // An amount the server said has changed since the request (HR re-priced it, or someone left a
+  // group), once shown to Finance: the release then goes out at that amount.
+  const [amountSeen, setAmountSeen] = useState<Record<string, number>>({});
+  const amountOf = (r: CashAdvance) => amountSeen[r.id] ?? Number(r.amount);
   const [dvDate, setDvDate] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
@@ -79,7 +91,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
 
   function open(id: string, kind: "release" | "decline") {
     setActing({ id, kind });
-    setDvNo("");
+    setDvSerial("");
     setDvDate(getLocalTodayString());
     setReason("");
     setFormError("");
@@ -90,9 +102,14 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
   async function submit(request: CashAdvance) {
     if (!acting) return;
     setFormError("");
-    if (acting.kind === "release" && (!dvNo.trim() || !dvDate)) {
-      setFormError("Enter the disbursement voucher number and its date.");
-      return;
+    const dvNo = dvNumberFrom(dvDate, dvSerial);
+    if (acting.kind === "release") {
+      if (!dvPrefix(dvDate)) { setFormError("Choose the voucher's date first."); return; }
+      const read = readDvNumber(dvNo, dvDate);
+      if ("problem" in read) {
+        setFormError(dvSerial ? read.problem : "Type the voucher's serial number, the digits after its year and month.");
+        return;
+      }
     }
     if (acting.kind === "decline" && !reason.trim()) {
       setFormError("Say why the request is declined; the employee sees it.");
@@ -100,12 +117,12 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
     }
     setSaving(true);
     try {
-      // A group's total can change while the form is open (someone leaves): the server releases only
-      // the amount shown here, and otherwise says what it is now, so the voucher matches the record.
-      const groupTotal = (request.covers ?? []).length > 1 ? { expectedAmount: Number(request.amount) } : {};
+      // The amount can change while the form is open (HR re-prices the allowance, someone leaves a group):
+      // the server releases only the amount shown here, and otherwise says what it is now, so the voucher
+      // matches the record.
       const res = await apiCall(`/api/cash-advances/${encodeURIComponent(request.id)}/${acting.kind}`, {
         method: "POST",
-        body: JSON.stringify(acting.kind === "release" ? { dvNo: dvNo.trim(), dvDate, ...groupTotal } : { reason: reason.trim() })
+        body: JSON.stringify(acting.kind === "release" ? { dvNo, dvDate, expectedAmount: amountOf(request) } : { reason: reason.trim() })
       });
       if (res?.status !== "success") throw new Error(res?.message || "That didn't go through.");
       setActing(null);
@@ -116,6 +133,8 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
       // apiCall throws with the server's reason (e.g. the employee was since marked absent).
       const message = err?.message || "That didn't go through.";
       setFormError(message);
+      // A changed amount comes with the new figure: now shown, it is the one the next try releases.
+      if (typeof err?.data?.amount === "number") setAmountSeen(prev => ({ ...prev, [request.id]: err.data.amount }));
       const waiting = await load();
       if (waiting && !waiting.some(r => r.id === request.id)) {
         setActing(null);
@@ -220,17 +239,21 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                     </div>
                     {!form && (
                       <>
+                        {/* (Off while another request is being released or declined, so its answer can't
+                            land on this one's form.) */}
                         <button
                           type="button"
                           onClick={() => open(r.id, "decline")}
-                          className="cursor-pointer rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                          disabled={saving}
+                          className="cursor-pointer rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Decline<span className="sr-only"> {r.employeeName}&rsquo;s request</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => open(r.id, "release")}
-                          className="cursor-pointer rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                          disabled={saving}
+                          className="cursor-pointer rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Release<span className="sr-only"> {r.employeeName}&rsquo;s advance</span>
                         </button>
@@ -248,15 +271,41 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                       </p>
                     )}
                     {form === "release" ? (
+                      // The date first: the number's year and month are the voucher date's (YYYY-MM-NNNN), so
+                      // only the serial is typed, as digits. The line under it shows the number as it will be saved.
                       <div className="grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="space-y-1">
-                          <label htmlFor={`rq-dv-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Disbursement Voucher No.</label>
-                          <input id={`rq-dv-${r.id}`} type="text" value={dvNo} maxLength={50} disabled={saving} onChange={e => setDvNo(e.target.value)} placeholder="e.g. 2026-08-336" aria-describedby={`rq-dv-hint-${r.id}`} className={INPUT} />
-                          <p id={`rq-dv-hint-${r.id}`} className="font-mono text-[9px] text-slate-400">Type the number on the voucher</p>
-                        </div>
                         <div className="space-y-1">
                           <label htmlFor={`rq-dvd-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Voucher Date</label>
                           <input id={`rq-dvd-${r.id}`} type="date" value={dvDate} max={getLocalTodayString()} disabled={saving} onChange={e => setDvDate(e.target.value)} className={INPUT} />
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor={`rq-dv-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Disbursement Voucher No.</label>
+                          <div className="flex items-center gap-1">
+                            <span className="shrink-0 rounded-lg border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-xs text-slate-600" aria-hidden="true">
+                              {dvPrefix(dvDate) || "YYYY-MM"}-
+                            </span>
+                            {/* No maxLength: the whole number typed or pasted out of habit ("2026-10-0101")
+                                gives its serial (dvSerialInput), instead of being cut to "2026". */}
+                            <input id={`rq-dv-${r.id}`} type="text" inputMode="numeric" autoComplete="off" value={dvSerial} disabled={saving}
+                              onChange={e => {
+                                const typed = e.target.value;
+                                setDvSerial(dvSerialInput(typed));
+                                // A pasted whole number from another month than the voucher date's is said at once.
+                                const pasted = dvPrefixIn(typed), month = dvPrefix(dvDate);
+                                setFormError(pasted && pasted !== month
+                                  ? month ? `That number is from ${pasted}, but the voucher date is in ${month}: check the date, or the number.` : "Choose the voucher's date first."
+                                  : "");
+                              }}
+                              placeholder="0101" aria-describedby={`rq-dv-hint-${r.id}`} className={INPUT} />
+                          </div>
+                          {/* The number as it will be saved, only once it is one the server takes. */}
+                          <p id={`rq-dv-hint-${r.id}`} className="font-mono text-[11px] text-slate-600">
+                            {validDv(dvDate, dvSerial)
+                              ? `DV ${validDv(dvDate, dvSerial)}`
+                              : /^0+$/.test(dvSerial)
+                                ? "The voucher's serial can't be 0000."
+                                : `Serial on the voucher, up to 4 digits: the number reads ${dvPrefix(dvDate) || "YYYY-MM"}-NNNN.`}
+                          </p>
                         </div>
                       </div>
                     ) : (
@@ -283,7 +332,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                       >
                         {saving && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
                         {form === "release"
-                          ? saving ? "Releasing…" : `Release ${formatCurrency(Number(r.amount))}`
+                          ? saving ? "Releasing…" : `Release ${formatCurrency(amountOf(r))}`
                           : saving ? "Declining…" : "Decline request"}
                       </button>
                       <button

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, Banknote, Loader2, RefreshCw } from "lucide-react";
-import { apiCall, firstTimestamp, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
+import { apiCall, firstTimestamp, formatCurrency, formatDate } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
 import AdvanceRefundForm from "./AdvanceRefundForm";
 
 interface Props {
   /** Bumped by the parent so a liquidation elsewhere refreshes the funding state here. */
   refreshKey?: number;
-  /** Lets the parent reload its own liquidation lists after an advance is released. */
+  /** Lets the parent reload its own liquidation lists after a refund is recorded here (advances are
+   * released under Cash Advance Requests now). */
   onReleased?: () => void;
 }
 
@@ -31,6 +32,8 @@ interface FundableRow {
   refundOrDate?: string | null;
   /** The employee asked for this advance themself: it is released from Cash Advance Requests. */
   pendingRequestId?: string | null;
+  /** Why no request can come yet (no Personnel login, no allowance, another advance out), or null. */
+  requestBlocked?: string | null;
   requestedAt?: string | null;
   /** The voucher the advance went out on. */
   advanceDvNo?: string | null;
@@ -73,38 +76,35 @@ function GroupLine({ row }: { row: FundableRow }) {
 const newestFirst = (when: (r: FundableRow) => Array<string | null | undefined>) =>
   (a: FundableRow, b: FundableRow) => firstTimestamp(...when(b)) - firstTimestamp(...when(a));
 
-/** "CA-2026-10-001 · DV 2026-10-0101 (Oct 20, 2026)": an advance and the voucher it went out on. */
+/** "CA-2026-10-001  DV No. 2026-10-0101 · dated Oct 20, 2026": an advance and the voucher it went out
+ * on, which Finance releases it by, so the voucher stands out. */
 function AdvanceRef({ row }: { row: FundableRow }) {
   return (
     <span className="font-mono text-slate-500">
       {row.advanceNo}
-      {row.advanceDvNo && <>{" · DV "}{row.advanceDvNo}{row.advanceDvDate ? ` (${formatDate(row.advanceDvDate)})` : ""}</>}
+      {row.advanceDvNo && (
+        <span className="ml-1.5 inline-block rounded border border-blue-200 bg-blue-50 px-1.5 py-px font-semibold text-blue-700">
+          DV No. {row.advanceDvNo}{row.advanceDvDate ? ` · dated ${formatDate(row.advanceDvDate)}` : ""}
+        </span>
+      )}
     </span>
   );
 }
 
-// (Today's date on this computer. The UTC date was a day behind before 8 AM in Manila.)
-const todayIso = () => getLocalTodayString();
-
 /**
- * Releasing the cash advance — the money-out half of the liquidation cycle.
+ * Each assignment's cash advance — the money-out half of the liquidation cycle — from the
+ * employee's request to its settlement, and its refunds.
  *
- * The COA form's "AMOUNT OF CASH ADVANCE PER DV NO. __ DTD __" refers to a voucher
- * Finance issues here. Recording it is what makes the claimant's later report checkable:
- * with an advance on file the server overrides whatever they type, and with none the
- * report is genuinely a reimbursement claim.
+ * The COA form's "AMOUNT OF CASH ADVANCE PER DV NO. __ DTD __" refers to the voucher an
+ * advance was released on, under Cash Advance Requests (only on the employee's request).
+ * Recording it is what makes the claimant's later report checkable: with an advance on file
+ * the server overrides whatever they type, and with none the report is a reimbursement claim.
  */
 export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
   const [rows, setRows] = useState<FundableRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [amount, setAmount] = useState("");
-  const [dvNo, setDvNo] = useState("");
-  const [dvDate, setDvDate] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
   // Recording a non-attendee's refund: which advance, and what the server said it did.
   const [refundingId, setRefundingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -148,64 +148,6 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
     [open]
   );
 
-  function openForm(row: FundableRow) {
-    setOpenId(row.activityId);
-    // HR's allocation is the ceiling and the usual amount, so start there.
-    setAmount(row.allocated > 0 ? String(row.allocated) : "");
-    setDvNo("");
-    setDvDate(todayIso());
-    setFormError("");
-  }
-
-  async function release(row: FundableRow) {
-    setFormError("");
-    const value = Number(amount);
-    if (!isFinite(value) || value <= 0) {
-      setFormError("Enter the amount released, greater than zero.");
-      return;
-    }
-    // Mirrors the server's ceiling so the officer is told before submitting.
-    if (row.allocated > 0 && value > row.allocated) {
-      setFormError(`That exceeds the ${formatCurrency(row.allocated)} HR allocated. Ask HR to raise the allocation first.`);
-      return;
-    }
-    if (!dvNo.trim()) {
-      setFormError("Enter the disbursement voucher number.");
-      return;
-    }
-    if (!dvDate) {
-      setFormError("Enter the voucher date.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const res = await apiCall("/api/cash-advances", {
-        method: "POST",
-        body: JSON.stringify({
-          activityId: row.activityId,
-          employeeId: row.employeeId,
-          amount: value,
-          dvNo: dvNo.trim(),
-          dvDate,
-          purpose: row.activityTitle
-        })
-      });
-      if (res.status === "success") {
-        setOpenId(null);
-        await load();
-        onReleased?.();
-      } else {
-        setFormError(res.message || "Could not release the advance.");
-      }
-    } catch (err: any) {
-      // apiCall throws on a non-2xx, so the server's message only reaches here.
-      setFormError(err.message || "Could not release the advance.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <SectionCard
       icon={<Banknote size={12} className="text-blue-600" aria-hidden="true" />}
@@ -215,9 +157,10 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-[11px] text-slate-500 max-w-2xl">
-          Release the disbursement voucher for an assignment before it happens. Recording it
-          here is what makes the later liquidation checkable &mdash; the claimant&rsquo;s report
-          takes its advance figure and DV reference from this record, not from what they type.
+          Each assignment&rsquo;s cash advance, from the employee&rsquo;s request to its settlement. An advance is
+          released only on the employee&rsquo;s request (their own, for a group, or with a vehicle), under Cash Advance
+          Requests, with its disbursement voucher. The claimant&rsquo;s report takes its advance figure and DV from that
+          record, not from what they type.
         </p>
         <div className="flex items-center gap-2 shrink-0">
           {open.length > 0 && (
@@ -282,9 +225,7 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
               Every current assignment has been funded or settled.
             </p>
           ) : (
-            unfunded.map(row => {
-              const isOpen = openId === row.activityId;
-              return (
+            unfunded.map(row => (
                 <div key={row.activityId} className="p-4 border border-slate-200 rounded-xl bg-slate-50/40 space-y-3">
                   <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
                     <div className="space-y-2 flex-1 min-w-0">
@@ -302,99 +243,27 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
                       </div>
                     </div>
 
-                    {/* An employee's own request is released (or declined) from the request
-                        list above, so the assignment keeps one record; the server agrees. */}
+                    {/* Released only on the employee's request (their own, a group's, or one filed with a
+                        vehicle), under Cash Advance Requests above; the server refuses any other. */}
                     {row.pendingRequestId ? (
                       <p className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
                         {row.groupNames && row.groupNames.length > 1 ? `Requested for a group of ${row.groupNames.length}` : "Requested"}
                         {row.requestedAt ? ` on ${formatDate(row.requestedAt)}` : ""}: see Cash Advance Requests
                       </p>
-                    ) : !isOpen && (
-                      <button
-                        onClick={() => openForm(row)}
-                        className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
-                      >
-                        Release Advance
-                      </button>
+                    ) : row.requestBlocked ? (
+                      // No request can come yet (no Personnel login, no allowance, another advance out):
+                      // said, rather than only "waiting".
+                      <p className="shrink-0 max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600">
+                        <span className="font-semibold">No request can come yet.</span> {row.requestBlocked}
+                      </p>
+                    ) : (
+                      <p className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600">
+                        Waiting for the employee&rsquo;s request
+                      </p>
                     )}
                   </div>
-
-                  {isOpen && !row.pendingRequestId && (
-                    <div className="border-t border-slate-200 pt-3 space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
-                        <div className="space-y-1">
-                          <label htmlFor={`amt-${row.activityId}`} className="text-[10px] font-bold text-slate-400 uppercase font-mono">Amount Released (₱)</label>
-                          <input
-                            id={`amt-${row.activityId}`}
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={amount}
-                            disabled={saving}
-                            onChange={e => setAmount(e.target.value)}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
-                          />
-                          <p className="text-[9px] text-slate-400 font-mono">Ceiling {formatCurrency(row.allocated)}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <label htmlFor={`dv-${row.activityId}`} className="text-[10px] font-bold text-slate-400 uppercase font-mono">Disbursement Voucher No.</label>
-                          <input
-                            id={`dv-${row.activityId}`}
-                            type="text"
-                            value={dvNo}
-                            maxLength={50}
-                            disabled={saving}
-                            onChange={e => setDvNo(e.target.value)}
-                            placeholder="e.g. 2026-08-336"
-                            aria-describedby={`dv-hint-${row.activityId}`}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
-                          />
-                          {/* The voucher is Accounting's document, so its number is typed, not made up here. */}
-                          <p id={`dv-hint-${row.activityId}`} className="text-[9px] text-slate-400 font-mono">Type the number on the voucher</p>
-                        </div>
-                        <div className="space-y-1">
-                          <label htmlFor={`dvd-${row.activityId}`} className="text-[10px] font-bold text-slate-400 uppercase font-mono">Voucher Date</label>
-                          <input
-                            id={`dvd-${row.activityId}`}
-                            type="date"
-                            value={dvDate}
-                            max={getLocalTodayString()}
-                            disabled={saving}
-                            onChange={e => setDvDate(e.target.value)}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
-                          />
-                        </div>
-                      </div>
-
-                      {formError && (
-                        <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                          <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                          {formError}
-                        </p>
-                      )}
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => release(row)}
-                          disabled={saving}
-                          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
-                        >
-                          {saving && <Loader2 size={12} className="animate-spin" />}
-                          {saving ? "Releasing…" : "Confirm Release"}
-                        </button>
-                        <button
-                          onClick={() => { setOpenId(null); setFormError(""); }}
-                          disabled={saving}
-                          className="bg-white border border-slate-300 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-60"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
-              );
-            })
+            ))
           )}
 
           {open.length > 0 && (

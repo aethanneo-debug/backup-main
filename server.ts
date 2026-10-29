@@ -110,6 +110,7 @@ import {
 } from "./src/tdpRules";
 import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
+import { dvKey, readDvNumber } from "./src/dvNumber";
 
 const app = express();
 const PORT = 3000;
@@ -5645,6 +5646,19 @@ function createdAtFromId(id: unknown): string {
 // the minimum needed to do that - name, what it is for, HR's allocated ceiling, and the
 // funding state - all derived server-side. It is not a window onto the HR module: no
 // training needs, recommendations, plan entries or PDS history are exposed.
+// Why no request can come yet for an unfunded seat, said to Finance: an advance is released only on the
+// employee's request, made from their seminar card in the portal (Personnel only). Null while one can.
+function noRequestReason(p: any, emp: any): string | null {
+  if (!payeeIsActive(emp.employeeId || emp.id)) return "No longer active, so no cash advance can be asked for.";
+  const login = (db.users || []).some((u: any) => u && u.role === UserRole.EMPLOYEE && u.status !== "Archived" && u.status !== "Deactivated"
+    && employeeByKey(String(u.employeeId || ""))?.id === emp.id);
+  if (!login) return "No Personnel login, so they can't ask from the portal. The Administrator can create one, or a colleague's group request can include them.";
+  if (!(round2(Number(p.allowanceAllocated || 0)) > 0)) return "HR has set no allowance for them on this seminar, so there is nothing to ask for yet.";
+  const elsewhere = openAdvanceElsewhere(p.employeeId, p.id);
+  if (elsewhere) return `Their cash advance ${openAdvanceText(elsewhere)} isn't settled yet. COA rules allow a new one only after it is.`;
+  return null;
+}
+
 app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
   if (!isCashAdvanceRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Cash advances are restricted to the Financial Officer." });
@@ -5707,6 +5721,9 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       refundOrDate: advance?.status === "Refunded" ? advance.refundOrDate : null,
       pendingRequestId: request ? request.id : null,
       requestedAt: request ? request.requestedAt : null,
+      // An advance is released only on the employee's request: when none can come yet, why, so the desk
+      // doesn't only say it is waiting.
+      requestBlocked: !request && !advance ? noRequestReason(p, emp) : null,
       activityId: p.id,
       activityTitle: facts ? facts.title : "Seminar",
       employeeId: emp.employeeId,
@@ -5757,6 +5774,8 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       advanceSettledAt: advance ? advance.liquidatedAt || null : null,
       advanceRefundedAt: advance ? advance.refundedAt || null : null,
       advanceStatus: advance ? advance.status : null,
+      // (No request can come for a general activity: the request is a seminar's. None exists, 13c.)
+      requestBlocked: !advance ? "Only a seminar's cash advance can be requested." : null,
       liquidationFiled: (db.liquidationSubmissions || []).some((l: any) => l.activityId === a.id)
     });
   }
@@ -5769,147 +5788,28 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
   res.json({ status: "success", data: rows });
 });
 
-app.post("/api/cash-advances", authenticateToken, transactional((req: any, res: any) => {
+// Finance's old direct release. A cash advance is released only on the employee's request: their own,
+// a group's ("For my group…") or one filed with a vehicle, each made from their seminar card and
+// released (or declined) under Cash Advance Requests through /:id/release. Releasing one nobody asked
+// for put Finance's choice in place of the employee's (the user, 2026-10-29), so this only refuses.
+app.post("/api/cash-advances", authenticateToken, (req: any, res: any) => {
   if (!isCashAdvanceRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Only the Financial Officer can release a cash advance." });
   }
-
-  const { activityId, employeeId, amount, dvNo, dvDate, purpose } = req.body;
-  if (!activityId || !employeeId) {
-    return res.status(400).json({ status: "error", message: "Choose the employee and the assignment this advance funds." });
-  }
-
-  const emp = (db.employees || []).find((e: any) => e.id === employeeId || e.employeeId === employeeId);
-  if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
-  if (isOwnRecord(req.user, emp.employeeId || emp.id)) {
-    return res.status(403).json({ status: "error", message: "You can't release a cash advance to yourself: another Financial Officer or the Administrator has to." });
-  }
-
-  const released = round2(Number(amount));
-  if (!isFinite(released) || released <= 0) {
-    return res.status(400).json({ status: "error", message: "Enter the amount released, greater than zero." });
-  }
-  // The same voucher checks as releasing an employee's request.
-  const voucherNo = signatoryText(dvNo);
-  if (!voucherNo || voucherNo.length > 50 || !isCalendarDate(dvDate) || dvDate > manilaToday()) {
-    return res.status(400).json({ status: "error", message: "A disbursement voucher number (up to 50 characters) and its date (YYYY-MM-DD, no later than today) are required." });
-  }
-
-  const facts = liquidationActivityFacts(activityId);
-  if (!facts) {
-    return res.status(404).json({ status: "error", message: "That assignment no longer exists." });
-  }
-  const enrolment = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
-  // The money goes to the person on the assignment (known issue 12c): the enrolled employee,
-  // or the activity's assignee.
-  const assignee = enrolment
-    ? employeeIdForms(enrolment.employeeId).includes(emp.id)
-    : liquidationActivityOwnedByUser(activityId, { employeeId: emp.employeeId, fullName: emp.fullName }) !== false;
-  if (!assignee) {
-    return res.status(400).json({ status: "error", message: `${emp.fullName} isn't the person on this assignment.` });
-  }
-  if (enrolment && (enrolment.status === "Cancelled" || enrolment.status === "Archived" || enrolment.status === "Liquidated")) {
-    return res.status(409).json({ status: "error", message: `This enrolment is ${String(enrolment.status).toLowerCase()}, so no cash advance can be released for it.` });
-  }
-  if (enrolment?.attendance === "Did not attend") {
-    return res.status(400).json({ status: "error", message: "HR recorded that this participant did not attend the seminar, so no cash advance can be released." });
-  }
-  if (!payeeIsActive(emp.employeeId || emp.id)) {
-    return res.status(409).json({ status: "error", message: `${emp.fullName} is no longer active, so no cash advance can be released.` });
-  }
-  // HR's allocation is a ceiling. Releasing more than was set aside has to go back to HR
-  // rather than be quietly absorbed here. A seminar participant with no allowance gets none.
-  if (enrolment && !(facts.allocated > 0)) {
-    return res.status(409).json({ status: "error", message: "HR has set no allowance for this participant, so no cash advance can be released. Ask HR to set one." });
-  }
-  if (facts.allocated > 0 && released > facts.allocated) {
-    return res.status(400).json({
-      status: "error",
-      message: `That exceeds the PHP ${facts.allocated.toFixed(2)} HR allocated. Ask HR to raise the allocation first.`
-    });
-  }
-
-  // One advance out per assignment, whoever it was released to (a group's covers it too).
-  const existing = releasedAdvanceForAssignment(activityId);
-  if (existing) {
-    return res.status(400).json({
-      status: "error",
-      message: existing.activityId !== activityId
-        ? `${existing.employeeName}'s group cash advance ${existing.advanceNo} (DV ${existing.dvNo}) already covers this participant.`
-        : `${existing.employeeName} already has an open advance for this assignment (${existing.advanceNo}, DV ${existing.dvNo}).`
-    });
-  }
-  // No second advance while the employee has another one out (COA Circular No. 97-002).
-  const elsewhere = openAdvanceElsewhere(emp.employeeId || emp.id, activityId);
-  if (elsewhere) {
-    return res.status(409).json({
-      status: "error",
-      message: `${emp.fullName} still has cash advance ${openAdvanceText(elsewhere)} not liquidated or refunded. COA rules allow no new cash advance until it is settled.`
-    });
-  }
-  // The employee asked for it themself: that request is released (or declined) instead, so
-  // the assignment keeps one record.
-  const asked = pendingRequestCovering(activityId);
-  if (asked) {
-    return res.status(409).json({
-      status: "error",
-      message: asked.activityId !== activityId
-        ? `${asked.employeeName} asked on ${manilaLongDate(asked.requestedAt)} for a group cash advance that covers this participant. Release or decline it under Cash Advance Requests instead.`
-        : `${asked.employeeName} asked for this advance on ${manilaLongDate(asked.requestedAt)}. Release or decline their request under Cash Advance Requests instead.`
-    });
-  }
-  // Once a report has been filed for the assignment, a new advance could never be settled
-  // (one report per assignment) and would pay twice for one activity. If the employee did
-  // receive an advance, their report is corrected to a Liquidation instead.
-  const filed = reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], activityId);
-  if (filed) {
-    return res.status(409).json({
-      status: "error",
-      message: `${filed.submissionNo} has already been filed for this assignment, so no advance can be released for it. If the employee did receive one, return the report so they can correct it to a Liquidation.`
-    });
-  }
-
-  const now = new Date();
-  const advance = {
-    id: `ca-${Date.now()}`,
-    advanceNo: nextCashAdvanceNo(now),
-    employeeId: emp.employeeId,
-    employeeName: emp.fullName,
-    activityId,
-    activityTitle: facts.title,
-    amount: released,
-    dvNo: voucherNo,
-    dvDate,
-    purpose: purpose || facts.title,
-    issuedBy: (req as any).user.fullName,
-    issuedAt: now.toISOString(),
-    status: "Released"
-  };
-
-  db.cashAdvances.push(advance);
-
-  notifyEmployee(emp.employeeId, {
-    title: "Cash advance released",
-    message: `PHP ${released.toFixed(2)} was released to you on DV ${advance.dvNo} dated ${formatLongDate(dvDate)} for ${facts.title}. Liquidate it within ${LIQUIDATION_DUE_DAYS} days of the activity.`,
-    type: "info",
-    link: { tab: "employee_portal", record: { kind: "assignment", id: advance.activityId } },
-    dedupeKey: `ca-released:${advance.id}`
+  res.status(409).json({
+    status: "error",
+    message: "A cash advance is released only on the employee's request: their own, a group request or one filed with a vehicle. They ask for it from their seminar card; it then waits under Cash Advance Requests, where you release it with its disbursement voucher."
   });
-
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Release Cash Advance",
-    `Released PHP ${released.toFixed(2)} to ${emp.fullName} for ${facts.title} via DV ${advance.dvNo} (${advance.advanceNo})`);
-  saveDB();
-  res.json({ status: "success", data: advance });
-}));
+});
 
 // An attendee asks Finance for their seminar's cash advance (the seminar budget flow). The
 // amount is their allowance (allocation ÷ seats, HR's ceiling), set here and never typed.
-// Only for seminars: Finance releases a general activity's advance directly, as before.
+// Only for seminars, the only assignments there are (general activities can't be created, 13c).
 app.post("/api/cash-advances/request", authenticateToken, transactional((req: any, res: any) => {
   const activityId = typeof req.body?.activityId === "string" ? req.body.activityId : "";
   const enrolment = activityId ? (db.trainingParticipants || []).find((p: any) => p && p.id === activityId) : null;
   if (!enrolment) {
-    return res.status(404).json({ status: "error", message: "That seminar enrolment was not found. Cash advances for other activities are released by Finance." });
+    return res.status(404).json({ status: "error", message: "That seminar enrolment was not found. A cash advance is asked for from the seminar's card, for a seminar you are on." });
   }
   // Only the person enrolled, as with their liquidation report.
   if (!req.user.employeeId || !employeeIdForms(enrolment.employeeId).includes(req.user.employeeId)) {
@@ -6226,20 +6126,31 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
       message: request.status === "Released" ? `This request was already released (${request.advanceNo}, DV ${request.dvNo}).` : `This request was already ${String(request.status).toLowerCase()}.`
     });
   }
-  const dvNo = signatoryText(req.body?.dvNo);
+  // A request that has to be declined anyway is said so first, before Finance fixes a voucher for it.
+  const problem = requestReleaseProblem(request);
+  if (problem) return res.status(409).json({ status: "error", message: problem });
   const dvDate = req.body?.dvDate;
-  if (!dvNo || dvNo.length > 50) {
-    return res.status(400).json({ status: "error", message: "Enter the disbursement voucher (DV) number, up to 50 characters." });
-  }
   if (!isCalendarDate(dvDate) || dvDate > manilaToday()) {
     return res.status(400).json({ status: "error", message: "Enter the DV date as YYYY-MM-DD, no later than today." });
   }
+  // HSAC's voucher numbers: YYYY-MM-NNNN, in the voucher date's month (src/dvNumber.ts).
+  const dv = readDvNumber(req.body?.dvNo, dvDate);
+  if ("problem" in dv) return res.status(400).json({ status: "error", message: dv.problem });
+  const dvNo = dv.value;
   const asked = manilaDateOf(request.requestedAt);
   if (asked && dvDate < asked) {
     return res.status(400).json({ status: "error", message: `The DV can't be dated before the request (${formatLongDate(asked)}).` });
   }
-  const problem = requestReleaseProblem(request);
-  if (problem) return res.status(409).json({ status: "error", message: problem });
+  // Each voucher has its own number: one already on another advance is a typing slip, or the same
+  // voucher paying twice. Compared as the same voucher however it was typed (dvKey): an earlier
+  // advance's number was free text ("2026-10-101").
+  const sameDv = (db.cashAdvances || []).find((a: any) => a && a.id !== request.id && a.dvNo && dvKey(a.dvNo) === dvKey(dvNo));
+  if (sameDv) {
+    return res.status(409).json({
+      status: "error",
+      message: `DV ${dvNo} is already on cash advance ${sameDv.advanceNo} (${sameDv.employeeName}). Each voucher has its own number: check the one on this voucher.`
+    });
+  }
 
   // The allowance as it is now: HR may have changed it since the request. A group is re-priced the
   // same way, person by person, and anyone who no longer qualifies (marked absent, left the
@@ -6261,15 +6172,17 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
     else request.covers = kept;
   }
   const total = request.covers ? coversTotal(request.covers) : allowance;
-  // The amount Finance saw when they opened the request (a group's screen sends it): the voucher was
-  // prepared for it, so a total that has changed since (someone left or no longer qualifies, or HR
-  // re-priced) is shown to Finance first instead of being recorded against that voucher.
+  // The amount Finance saw when they opened the request (the screen sends it): the voucher was prepared
+  // for it, so a total that has changed since (someone left or no longer qualifies, or HR re-priced) is
+  // shown to Finance first instead of being recorded against that voucher. The reply carries the new
+  // amount, so the form releases that one once Finance has seen it.
   const expected = req.body?.expectedAmount;
   if (expected !== undefined && expected !== null && centavos(total) !== centavos(expected)) {
     return res.status(409).json({
       status: "error",
       message: `The amount changed since you opened this request: it is now ${pesoText(total)}${dropped.length > 0
-        ? ` (left out: ${dropped.map(d => `${d.name}, ${d.why}`).join("; ")})` : ""}. Check the voucher, then release it again.`
+        ? ` (left out: ${dropped.map(d => `${d.name}, ${d.why}`).join("; ")})` : ""}. Check the voucher, then release it again.`,
+      data: { amount: total }
     });
   }
   // Finance's reply and the audit entry give each reason; the holder's notice gives no more than the
