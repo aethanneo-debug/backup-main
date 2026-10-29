@@ -153,6 +153,8 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
                           <span className="min-w-0">
                             <span className="block text-sm text-slate-800 leading-snug">{need.title}</span>
                             <span className="block text-[10px] text-slate-500 mt-0.5">
+                              {/* The law or a rule requires it (HSAC RAB 1's step 5): listed first. */}
+                              {need.mandate && <span className="font-semibold text-blue-700">Mandated: {need.mandate.basis} · </span>}
                               Listed by {need.employeeCount} employee{need.employeeCount === 1 ? "" : "s"} · {need.categories.join(", ")}
                             </span>
                           </span>

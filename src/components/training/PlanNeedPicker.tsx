@@ -269,6 +269,10 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
                         )}
                       </span>
                       <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
+                        {/* The law or a rule requires it (HSAC RAB 1's step 5): such trainings are listed first. */}
+                        {need.mandate && (
+                          <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700">Mandated: {need.mandate.basis}</span>
+                        )}
                         <span>{need.employeeCount} employee{need.employeeCount === 1 ? "" : "s"}</span>
                         {columns.map(c => (
                           <span key={c} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-semibold text-slate-600">{c}</span>

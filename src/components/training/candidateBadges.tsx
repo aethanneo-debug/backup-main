@@ -1,6 +1,7 @@
 // The participant picker's badges and dropdown labels for a candidate: eligibility, trainings this fiscal
 // year, the Plan A columns that list the seminar, new hires, target matches and other seminars on the
 // same days. Moved out of ParticipantPickerModal.tsx when it grew (Part A of the TDP exceptions, 12z).
+import { Scale } from "lucide-react";
 import { TRAINING_NEED_COLUMN_LABELS, TrainingCandidate, type TrainingNeedCategory } from "../../types";
 import { datesText } from "../../divisionCoverage";
 
@@ -46,6 +47,16 @@ export function CandidateBadges({ c, selected = false }: { c: TrainingCandidate;
           <span className="sr-only"> ({c.needMatches.join("; ")})</span>
         </span>
       )}
+      {/* A need the law requires (HSAC RAB 1's step 5): such listers come first. The scale (the panel's
+          icon) sets it apart from the blue "No training yet" badge beside it. */}
+      {(c.mandatedNeeds ?? []).length > 0 && (
+        <span className={`${BADGE} inline-flex items-center gap-1 bg-blue-50 text-blue-700 border-blue-200`} title={c.mandatedNeeds!.map(m => `${m.title}: ${m.basis}`).join("; ")}>
+          <Scale size={10} aria-hidden="true" />
+          Mandated: {[...new Set(c.mandatedNeeds!.map(m => m.basis))].join(", ")}
+          {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
+          <span className="sr-only"> ({c.mandatedNeeds!.map(m => m.title).join("; ")})</span>
+        </span>
+      )}
       {c.priority === 1 && (
         <span className={`${BADGE} bg-emerald-50 text-emerald-700 border-emerald-200`}>
           New hire{c.monthsSinceHire !== null ? ` · ${c.monthsSinceHire < 1 ? "<1" : c.monthsSinceHire} mo` : ""}
@@ -62,8 +73,11 @@ export function CandidateBadges({ c, selected = false }: { c: TrainingCandidate;
 // `seminarCovers`: the seminar's own justification covers everyone on it (12z Part C).
 export function optionLabel(c: TrainingCandidate, seminarCovers = false) {
   const extras = [c.division || "No division"];
-  if (c.needsThis) extras.push(columnsText(c) ? `listed in their plan (${columnsText(c)})` : "listed in their plan");
-  else if (!seminarCovers) extras.push("not in their plan: needs a justification");
+  if (c.needsThis) {
+    extras.push(columnsText(c) ? `listed in their plan (${columnsText(c)})` : "listed in their plan");
+    // One of those needs is required by law (12z Part D); it comes only from their own plan.
+    if ((c.mandatedNeeds ?? []).length > 0) extras.push("mandated");
+  } else if (!seminarCovers) extras.push("not in their plan: needs a justification");
   if (c.priority === 1 && c.monthsSinceHire !== null) extras.push(`hired ${c.monthsSinceHire < 1 ? "this month" : `${c.monthsSinceHire} mo ago`}`);
   const trained = (c.trainingsThisYear ?? []).length;
   extras.push(trained === 0 ? "no training yet this FY" : `${trained} training${trained === 1 ? "" : "s"} this FY`);

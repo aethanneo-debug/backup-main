@@ -120,7 +120,8 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   const hiddenCount = offPlan.length;
   const hiddenEligible = offPlan.filter(c => c.eligible).length;
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
-  // come first. Each group keeps the server's order (Plan A listers, then new hires, first).
+  // come first. Each group keeps the server's order (Plan A listers, a mandated need first among them,
+  // then new hires, first).
   const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
   const groups: { label: string; items: TrainingCandidate[] }[] = [
     { label: `No training yet in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length === 0) },
@@ -193,7 +194,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
             <p>
               Every employee should have <strong>at least one training a year</strong>, so those with <strong>no training yet in {fyText}</strong> come first
               (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t). Within each group, employees whose{" "}
-              <strong>Plan A</strong> lists this training come first, then <strong>new hires</strong>.{" "}
+              <strong>Plan A</strong> lists this training come first (those whose need the law requires ahead of the others), then <strong>new hires</strong>.{" "}
               {coversNeeds && (
                 <>This seminar covers Plan A needs, so at first only those employees are shown, and their badge says in which column:
                 for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>

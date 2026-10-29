@@ -111,6 +111,7 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Change Seminar Needs">Seminar needs changed</option>
             <option value="Rename Training Program">Seminars renamed</option>
             <option value="Send Representative">Representatives sent</option>
+            <option value="Mandated Training">Mandated trainings</option>
             <option value="Register Asset">Asset Register</option>
             <option value="Assign Accountability">Accountability (PAR)</option>
             <option value="Act on Request">Filing Actions</option>

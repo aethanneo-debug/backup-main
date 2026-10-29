@@ -7,6 +7,7 @@ import {
   TRAINING_NEED_COLUMN_LABELS
 } from "../../types";
 import { apiCall, formatDate, getLocalTodayString } from "../../utils";
+import { unmetMandatedFirst } from "../../trainingMandates";
 import PlanHeader from "./PlanHeader";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -29,6 +30,10 @@ function NeedStatusRow({ need, onOverride, busy }: {
   return (
     <li className="border-b border-slate-100 last:border-0 pb-1.5 last:pb-0 space-y-1">
       <p className="text-slate-700 leading-snug">{need.title}</p>
+      {/* The law or a rule requires it (HSAC RAB 1's step 5): listed first while unmet. */}
+      {need.mandate && (
+        <p className="text-[9px] font-semibold text-blue-700 leading-snug">Mandated: {need.mandate.basis}</p>
+      )}
       <div className="flex items-center justify-between gap-2">
         <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wide ${
           accomplished ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
@@ -109,11 +114,12 @@ export default function TrainingMonitoringPlanD() {
         for (const n of emp.needs[c] ?? []) {
           acc.total++;
           if (n.status.accomplished) acc.done++;
+          if (n.mandate && !n.status.accomplished) acc.mandatedOpen++;
         }
       }
       return acc;
     },
-    { total: 0, done: 0 }
+    { total: 0, done: 0, mandatedOpen: 0 }
   );
 
   if (loading) {
@@ -146,6 +152,11 @@ export default function TrainingMonitoringPlanD() {
           <span className="text-[11px] font-semibold text-slate-600">
             {totals.done} of {totals.total} accomplished
           </span>
+          {totals.mandatedOpen > 0 && (
+            <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">
+              {totals.mandatedOpen} mandated need{totals.mandatedOpen === 1 ? "" : "s"} not yet accomplished
+            </span>
+          )}
           <label className="text-[11px] text-slate-600 flex items-center gap-1.5">
             As of
             <input
@@ -183,7 +194,9 @@ export default function TrainingMonitoringPlanD() {
                     <td className="p-2 font-semibold text-slate-800 border-r border-slate-100">{emp.fullName}</td>
                     <td className="p-2 text-slate-500 border-r border-slate-100">{emp.position || "—"}</td>
                     {TRAINING_NEED_CATEGORIES.map(category => {
-                      const rows = emp.needs[category] ?? [];
+                      // Unmet mandated needs first (HSAC RAB 1's step 5), the rest as entered. The printed
+                      // sheet and its CSV (planD/planDRows.ts) keep the plan's own order: the official form.
+                      const rows = unmetMandatedFirst(emp.needs[category] ?? [], n => !!n.mandate, n => n.status.accomplished);
                       return (
                         <td key={category} className="p-2 border-r border-slate-100 last:border-r-0 min-w-[220px]">
                           {rows.length === 0 ? (

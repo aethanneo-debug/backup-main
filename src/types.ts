@@ -1052,6 +1052,9 @@ export interface TrainingCandidate {
    * needed for the function, for an additional designation, or for career advancement (HSAC RAB 1's
    * answer 6). Empty when the plan doesn't list it. */
   needCategories?: TrainingNeedCategory[];
+  /** Those of their matched needs whose title HR marked as mandated, with the law or rule: among the
+   * plan's listers, they come first (HSAC RAB 1's step 5). */
+  mandatedNeeds?: { title: string; basis: string }[];
   /** Their other trainings that count toward the seminar's fiscal year (seminars and
    * HR-recorded trainings), by title. Empty: none yet, so they are offered first. */
   trainingsThisYear: string[];
@@ -1219,6 +1222,23 @@ export interface TrainingNeedStatus {
 
 export interface TrainingNeedRow extends TrainingNeed {
   status: TrainingNeedStatus;
+  /** DERIVED: the law or rule that makes this training mandatory, when HR marked its title. */
+  mandate?: { basis: string };
+}
+
+// A training the law requires (HSAC RAB 1's step 5, "Prioritization – statutory/legal mandates"),
+// marked per title by HR or the Administrator, for every year. Its unmet needs come first in Plan D,
+// in planning and in the participant picker. The plan words one law several ways ("Orientation on RA
+// 6713 …", "RA 6713 (Code of Conduct …)"), so several titles may share one basis.
+export interface TrainingMandate {
+  id: string;
+  title: string;          // the plan title HR chose, cleaned (cleanText): what is shown and logged
+  // normalizeTitle of the title as sent, which is the plan's own key. Never recompute it from `title`:
+  // cleaning first would miss plan titles with a soft hyphen, a ligature or an invisible character.
+  key: string;
+  basis: string;          // the law or rule, e.g. "R.A. 6713 (Code of Conduct)"
+  markedBy: { id: string; name: string; role: UserRole };
+  markedAt: string;
 }
 
 // One employee's block in the plan, with their needs split by column.
@@ -1235,6 +1255,8 @@ export interface TrainingNeedCatalogItem {
   title: string;
   employeeCount: number;
   categories: TrainingNeedCategory[];
+  /** The law or rule that makes it mandatory, when HR marked its title (listed first). */
+  mandate?: { basis: string };
 }
 
 export interface TrainingPlanOffice {

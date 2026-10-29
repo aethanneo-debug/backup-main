@@ -71,6 +71,7 @@ import {
   TrainingNeedStatus,
   TrainingNeedRow,
   TrainingNeedCatalogItem,
+  TrainingMandate,
   TrainingPlanEmployee,
   TrainingPlanOffice,
   TRAINING_NEED_CATEGORIES,
@@ -108,6 +109,7 @@ import {
   seminarNeedsJustification, seminarTdpStanding, tdpKindText, tdpStanding, type SeatCheck
 } from "./src/tdpRules";
 import { swapAdvanceStep } from "./src/representative";
+import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
 
 const app = express();
 const PORT = 3000;
@@ -147,6 +149,8 @@ interface DBStructure {
   trainingParticipants: TrainingParticipant[];
   trainingLiquidations: TrainingLiquidationExpense[];
   trainingNeeds: TrainingNeed[];
+  // Training titles the law requires (HSAC RAB 1's step 5): their needs come first (12z Part D).
+  trainingMandates: TrainingMandate[];
   signatories: Signatory[];
 }
 
@@ -479,6 +483,11 @@ function getInitialData(): DBStructure {
       }
       if (!loaded.trainingNeeds) {
         loaded.trainingNeeds = [];
+        changed = true;
+      }
+      // Mandated training titles (12z Part D). Starts empty: HR marks them, nothing is presumed.
+      if (!Array.isArray(loaded.trainingMandates)) {
+        loaded.trainingMandates = [];
         changed = true;
       }
       if (!loaded.cashAdvances) {
@@ -1096,6 +1105,7 @@ function getInitialData(): DBStructure {
     trainingParticipants: [],
     trainingLiquidations: [],
     trainingNeeds: [],
+    trainingMandates: [],
     // Entered through Utilities → Manage Signatories; no names in code.
     signatories: []
   };
@@ -6988,6 +6998,7 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
   const today = manilaToday();
   // Their other trainings in the seminar's fiscal year (this seminar left out).
   const yearTrainings = yearTrainingCounter(trainingCoverageData(), coverageFiscalYear(program.fiscalYear), program.id);
+  const mandates = trainingMandateIndex();
   const candidates: TrainingCandidate[] = (db.employees || [])
     .filter(emp => emp.isActive !== false)
     .map(emp => {
@@ -7005,6 +7016,8 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
         needMatches,
         // The plan's columns those entries are under (in the form's order).
         needCategories: TRAINING_NEED_CATEGORIES.filter(c => covered.some(n => n.category === c)),
+        // Those the law requires (12z Part D): such listers come first among the listers.
+        mandatedNeeds: needMatches.flatMap(title => { const m = mandateFor(title, mandates); return m ? [{ title, basis: m.basis }] : []; }),
         employeeId: emp.id,
         fullName: emp.fullName,
         position: emp.position || "",
@@ -7024,11 +7037,14 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
 
   // Everyone should have at least one training a year, so those with none yet in the seminar's
   // fiscal year come first. Among them, and among the rest, the plan listing this training is the
-  // strongest reason for a seat, then the new-hire preference.
+  // strongest reason for a seat (a need the law requires ahead of the others), then the new-hire
+  // preference.
   candidates.sort((a, b) =>
     Number(b.eligible) - Number(a.eligible) ||
     Number(a.trainingsThisYear.length > 0) - Number(b.trainingsThisYear.length > 0) ||
     Number(b.needsThis) - Number(a.needsThis) ||
+    // Among the plan's listers, a training the law requires first (HSAC RAB 1's step 5).
+    Number((b.mandatedNeeds ?? []).length > 0) - Number((a.mandatedNeeds ?? []).length > 0) ||
     a.priority - b.priority ||
     Number(b.matchesTarget) - Number(a.matchesTarget) ||
     b.dateHired.localeCompare(a.dateHired) ||
@@ -7197,6 +7213,8 @@ function officeHeading(division?: string): string {
 // no needs listed yet.
 function buildTrainingPlan(fiscalYear: string, asOf: string): TrainingPlanOffice[] {
   const byOffice = new Map<string, TrainingPlanEmployee[]>();
+  // Each need says whether the law requires it (12z Part D); Plan D lists the unmet ones first.
+  const mandates = trainingMandateIndex();
 
   for (const emp of (db.employees || []).filter(e => e.isActive !== false)) {
     const forms = [emp.id, emp.employeeId].filter(Boolean);
@@ -7204,7 +7222,8 @@ function buildTrainingPlan(fiscalYear: string, asOf: string): TrainingPlanOffice
     for (const n of db.trainingNeeds || []) {
       if (n.fiscalYear !== fiscalYear || !forms.includes(n.employeeId)) continue;
       if (!needs[n.category]) continue;
-      needs[n.category].push({ ...n, status: needAccomplishment(n, asOf) });
+      const mandate = mandateFor(n.title, mandates);
+      needs[n.category].push({ ...n, status: needAccomplishment(n, asOf), ...(mandate ? { mandate } : {}) });
     }
     for (const c of TRAINING_NEED_CATEGORIES) {
       needs[c].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
@@ -8291,9 +8310,12 @@ app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) =
     entry.categories.add(need.category);
   }
 
-  const data: TrainingNeedCatalogItem[] = [...byTitle.values()]
-    .map(e => ({ title: e.title, employeeCount: e.employees.size, categories: [...e.categories] }))
-    .sort((a, b) => b.employeeCount - a.employeeCount || a.title.localeCompare(b.title));
+  // Mandated trainings first (12z Part D), then by how many people list them.
+  const mandates = trainingMandateIndex();
+  const data: TrainingNeedCatalogItem[] = catalogOrder([...byTitle.values()].map(e => {
+    const mandate = mandateFor(e.title, mandates);
+    return { title: e.title, employeeCount: e.employees.size, categories: [...e.categories], ...(mandate ? { mandate } : {}) };
+  }));
 
   res.json({ status: "success", data: { fiscalYear, needs: data } });
 });
@@ -8374,6 +8396,13 @@ function createTrainingNeed(
   return { need, code: null, message: "" };
 }
 
+// A Plan A title as the audit lines quote it. It is stored as typed (only trimmed), so it is cleaned for
+// the log, where a direction mark would turn the rest of the line around, and quoted as JSON, where a
+// quote would pass for more of the line.
+function auditNeedTitle(title: unknown): string {
+  return JSON.stringify(cleanText(String(title ?? "").slice(0, 300)));
+}
+
 app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const { employeeId, category, title } = req.body || {};
@@ -8387,7 +8416,7 @@ app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
 
   const need = result.need;
   logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need",
-    `Added "${need.title}" (${category}) for ${emp.fullName} in the ${fiscalYear} Training and Development Plan.`);
+    `Added ${auditNeedTitle(need.title)} (${category}) for ${emp.fullName} in the ${fiscalYear} Training and Development Plan.`);
   saveDB();
   res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
 });
@@ -8425,7 +8454,7 @@ app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
 
   const emp = (db.employees || []).find(e => e.id === need.employeeId || e.employeeId === need.employeeId);
   logEvent(req.user.id, req.user.username, req.user.role, "Update Training Need",
-    `Updated ${titleBefore !== need.title ? `${JSON.stringify(titleBefore)} to ` : ""}${JSON.stringify(need.title)} (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
+    `Updated ${titleBefore !== need.title ? `${auditNeedTitle(titleBefore)} to ` : ""}${auditNeedTitle(need.title)} (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
   saveDB();
   res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
 });
@@ -8438,9 +8467,77 @@ app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) =>
   const [removed] = db.trainingNeeds.splice(index, 1);
   const emp = (db.employees || []).find(e => e.id === removed.employeeId || e.employeeId === removed.employeeId);
   logEvent(req.user.id, req.user.username, req.user.role, "Remove Training Need",
-    `Removed "${removed.title}" (${removed.category}) for ${emp ? emp.fullName : removed.employeeId} from the ${removed.fiscalYear} plan.`);
+    `Removed ${auditNeedTitle(removed.title)} (${removed.category}) for ${emp ? emp.fullName : removed.employeeId} from the ${removed.fiscalYear} plan.`);
   saveDB();
   res.json({ status: "success", message: "Training need removed." });
+});
+
+// --- Mandated trainings (HSAC RAB 1's step 5, "Prioritization – statutory/legal mandates"; 12z Part D) ---
+// HR or the Administrator marks a training title as mandated, with the law or rule behind it, for every
+// year. Its unmet needs then come first in Plan D, in planning and in the participant picker. Nothing is
+// presumed: the list starts empty. Each change is in the audit log ("Mandated Training").
+function trainingMandateIndex() {
+  return mandateIndex(db.trainingMandates || []);
+}
+
+app.get("/api/training/mandates", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const data = (db.trainingMandates || []).filter(isMandate).sort((a, b) => a.basis.localeCompare(b.basis) || a.title.localeCompare(b.title));
+  res.json({ status: "success", data });
+});
+
+app.post("/api/training/mandates", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  // A title from a plan (any year's: a mark applies to every year), matched as the plan matches it.
+  const chosen = readMandateTitle(req.body?.title);
+  if ("problem" in chosen) return res.status(400).json({ status: "error", message: chosen.problem });
+  const { title, key } = chosen;
+  if (!(db.trainingNeeds || []).some(n => normalizeTitle(n.title) === key)) {
+    return res.status(400).json({ status: "error", message: "No year's plan lists that training. Choose it from the plan." });
+  }
+  const basis = readMandateBasis(req.body?.basis);
+  if ("problem" in basis) return res.status(400).json({ status: "error", message: basis.problem });
+  const existing = (db.trainingMandates || []).filter(isMandate).find(m => m.key === key);
+  if (existing) return res.status(409).json({ status: "error", message: `"${existing.title}" is already marked as mandated (${existing.basis}).` });
+  const user = req.user;
+  const mandate: TrainingMandate = {
+    id: `mandate-${crypto.randomUUID()}`,
+    title, key, basis: basis.value,
+    markedBy: { id: user.id, name: user.fullName, role: user.role },
+    markedAt: new Date().toISOString()
+  };
+  if (!db.trainingMandates) db.trainingMandates = [];
+  db.trainingMandates.push(mandate);
+  logEvent(user.id, user.username, user.role, "Mandated Training",
+    `${user.fullName} marked ${JSON.stringify(title)} as mandated: ${JSON.stringify(basis.value)}.`);
+  saveDB();
+  res.json({ status: "success", data: mandate });
+});
+
+app.put("/api/training/mandates/:id", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const mandate = (db.trainingMandates || []).filter(isMandate).find(m => m.id === req.params.id);
+  if (!mandate) return res.status(404).json({ status: "error", message: "That mandated training is no longer marked." });
+  const basis = readMandateBasis(req.body?.basis);
+  if ("problem" in basis) return res.status(400).json({ status: "error", message: basis.problem });
+  if (basis.value === mandate.basis) return res.json({ status: "success", message: "Nothing changed.", data: mandate });
+  const before = mandate.basis;
+  mandate.basis = basis.value;
+  logEvent(req.user.id, req.user.username, req.user.role, "Mandated Training",
+    `${req.user.fullName} changed why ${JSON.stringify(mandate.title)} is mandated, from ${JSON.stringify(before)} to ${JSON.stringify(basis.value)}.`);
+  saveDB();
+  res.json({ status: "success", data: mandate });
+});
+
+app.delete("/api/training/mandates/:id", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const index = (db.trainingMandates || []).findIndex(m => isMandate(m) && m.id === req.params.id);
+  if (index === -1) return res.status(404).json({ status: "error", message: "That mandated training is no longer marked." });
+  const [removed] = db.trainingMandates.splice(index, 1);
+  logEvent(req.user.id, req.user.username, req.user.role, "Mandated Training",
+    `${req.user.fullName} unmarked ${JSON.stringify(removed.title)} (${JSON.stringify(removed.basis)}): its needs are no longer listed first.`);
+  saveDB();
+  res.json({ status: "success", message: "Unmarked." });
 });
 
 // One transaction: a refusal after the participants are enrolled (a division left with nobody at the

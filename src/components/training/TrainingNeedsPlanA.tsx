@@ -9,6 +9,7 @@ import {
 import { apiCall } from "../../utils";
 import PlanHeader from "./PlanHeader";
 import PlanAImportPanel from "./import/PlanAImportPanel";
+import MandatedTrainingsPanel from "./MandatedTrainingsPanel";
 
 // Plan A of the official form: per employee, the trainings they still need,
 // in three columns, grouped under their office.
@@ -22,8 +23,10 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
   const [openCell, setOpenCell] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
-  async function load() {
-    setLoading(true);
+  // `quiet`: refresh in place, without the spinner, so the panels above the table stay mounted and keep
+  // their messages (the mandated trainings' "… is marked as mandated.").
+  async function load(quiet = false) {
+    if (!quiet) setLoading(true);
     setError("");
     try {
       const res = await apiCall("/api/training/needs");
@@ -95,7 +98,7 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
     return (
       <div className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-sm flex items-start justify-between gap-3">
         <span className="flex gap-2"><AlertTriangle size={16} className="shrink-0 mt-0.5" />{error}</span>
-        <button onClick={load} className="font-semibold underline shrink-0">Retry</button>
+        <button onClick={() => load()} className="font-semibold underline shrink-0">Retry</button>
       </div>
     );
   }
@@ -110,7 +113,10 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
 
       {/* Reading the official workbook instead of retyping it. load() is the same
           refetch every other change here uses. */}
-      <PlanAImportPanel fiscalYear={fiscalYear} onImported={load} />
+      <PlanAImportPanel fiscalYear={fiscalYear} onImported={() => load()} />
+
+      {/* Which trainings the law requires (HSAC RAB 1's step 5): they come first everywhere else. */}
+      <MandatedTrainingsPanel fiscalYear={fiscalYear} onChanged={() => { load(true); onChanged?.(); }} />
 
       <div className="overflow-x-auto border border-slate-200 rounded-lg">
         <table className="w-full text-left text-xs border-collapse">
@@ -155,6 +161,15 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
                                       className="ml-1.5 inline-block rounded border border-amber-200 bg-amber-50 px-1 py-px align-middle font-mono text-[9px] font-bold uppercase tracking-wider text-amber-700"
                                     >
                                       from {need.carriedFromFiscalYear}
+                                    </span>
+                                  )}
+                                  {/* The law or a rule requires it (12z Part D): first in Monitoring and planning. */}
+                                  {need.mandate && (
+                                    <span
+                                      title={`Mandated: ${need.mandate.basis}`}
+                                      className="ml-1.5 inline-block rounded border border-blue-200 bg-blue-50 px-1 py-px align-middle text-[9px] font-bold uppercase tracking-wider text-blue-700"
+                                    >
+                                      Mandated<span className="sr-only">: {need.mandate.basis}</span>
                                     </span>
                                   )}
                                 </span>
