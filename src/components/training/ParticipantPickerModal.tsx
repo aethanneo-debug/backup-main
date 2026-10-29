@@ -4,7 +4,8 @@ import { TrainingCandidate, type TdpJustification, type TdpJustificationInput, t
 import { apiCall, getLocalTodayString } from "../../utils";
 import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 import { tdpBadgeText } from "../../tdpRules";
-import { BADGE, CandidateBadges, optionLabel } from "./candidateBadges";
+import { BADGE, CandidateBadges } from "./candidateBadges";
+import CandidateList, { type CandidateGroup } from "./CandidateList";
 import TdpJustificationForm from "./TdpJustificationForm";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.
@@ -111,22 +112,27 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days,
       selectedIds.filter(id => !notAway.has(id)), (id, day) => !!away.get(id)?.has(day));
   }, [candidates, selectedIds, program.startDate, program.endDate, (program.notAwayIds ?? []).join("|")]);
-  // Recommended (and "Add all recommended") and the dropdown follow the list in scope.
+  // Recommended (and "Add all recommended") and the full list below follow the list in scope.
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId) && inScope(c));
   const recommended = available.slice(0, freeSlots);
   const listers = (candidates ?? []).filter(c => c.needsThis).length;
-  // What "Show all employees" adds: everyone off the plan not selected yet, and how many of them can be picked.
-  const offPlan = planOnly ? (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId)) : [];
+  // What "All employees" adds: everyone off the plan not selected yet (whichever list is on), and, while
+  // the Plan A list is on, how many of them are hidden and how many could be picked.
+  const outsidePlan = (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId));
+  const offPlan = planOnly ? outsidePlan : [];
   const hiddenCount = offPlan.length;
   const hiddenEligible = offPlan.filter(c => c.eligible).length;
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
   // come first. Each group keeps the server's order (Plan A listers, a mandated need first among them,
-  // then new hires, first).
+  // then new hires, first). Each heading says why in one line (training/CandidateList.tsx).
   const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
-  const groups: { label: string; items: TrainingCandidate[] }[] = [
-    { label: `No training yet in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length === 0) },
-    { label: `Already has a training in ${fyText}`, items: available.filter(c => (c.trainingsThisYear ?? []).length > 0) },
-    { label: "Not eligible", items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId) && inScope(c)) }
+  const groups: CandidateGroup[] = [
+    { key: "first", label: `No training yet in ${fyText}`, reason: "Everyone should have at least one training a year, so they come first.",
+      items: available.filter(c => (c.trainingsThisYear ?? []).length === 0) },
+    { key: "trained", label: `Already has a training in ${fyText}`, reason: "Already trained this fiscal year; they may still join another seminar.",
+      items: available.filter(c => (c.trainingsThisYear ?? []).length > 0) },
+    { key: "ineligible", label: "Not eligible", reason: "Already enrolled in this seminar, or attended it before: they can't be added.",
+      items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId) && inScope(c)) }
   ];
   const choices = groups.filter(g => g.items.length > 0);
 
@@ -207,26 +213,44 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
             </p>
           </div>
 
-          {/* Plan A first: who is listed, and the way to everyone else. */}
+          {/* Plan A first: who is listed, and the way to everyone else. Two fixed options, the one on
+              highlighted, so it is plain which list is in use: a single button whose label flipped looked
+              as if nothing happened, since the change lands in the dropdown and the Recommended cards stay
+              the same (Plan A's listers rank first either way). */}
           {coversNeeds && !loading && !error && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              {/* Read out when it changes, so a screen reader hears what the switch did. The switch itself
-                  has no pressed state: its label already says what a click does. */}
-              <p aria-live="polite">
+              {/* Read out when it changes, so a screen reader hears what the switch did. */}
+              <p aria-live="polite" className="min-w-0 flex-1">
                 {planOnly
                   ? listers === 0
                     ? `Nobody's Plan A for ${fyText} lists this training.`
                     : `Showing the ${listers} employee${listers === 1 ? "" : "s"} whose Plan A for ${fyText} lists this training.`
-                  : "Showing all employees."}
+                  : outsidePlan.length === 0
+                    ? "Showing all employees."
+                    : <>
+                        Showing all employees: <strong className="text-slate-800">{outsidePlan.length} outside the plan</strong>{" "}
+                        {outsidePlan.length === 1 ? "was" : "were"} added to the list below{seminarCovers ? "." : "; seating one needs a justification."}
+                      </>}
               </p>
               {(!planOnly || hiddenCount > 0) && (
-                <button
-                  type="button"
-                  onClick={() => setShowAll(v => !v)}
-                  className="text-xs font-semibold text-blue-700 bg-white border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-50"
-                >
-                  {planOnly ? `Show all employees (${hiddenCount} more)` : "Show only those whose Plan A lists it"}
-                </button>
+                <div role="group" aria-label="Who to choose from" className="inline-flex shrink-0 rounded-lg border border-blue-200 bg-white p-0.5">
+                  {([["plan", `Plan A listers (${listers})`], ["all", `All employees (${(candidates ?? []).length})`]] as const).map(([which, label]) => {
+                    const on = (which === "plan") === planOnly;
+                    return (
+                      <button
+                        key={which}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setShowAll(which === "all")}
+                        className={`rounded-md px-2.5 py-1 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                          on ? "bg-blue-600 text-white" : "text-blue-700 hover:bg-blue-50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
@@ -260,7 +284,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                 ) : recommended.length === 0 ? (
                   <p className="text-xs text-slate-500 italic">
                     {hiddenEligible > 0
-                      ? <>Nobody else whose Plan A lists this training can be added. &ldquo;Show all employees&rdquo; lists the others.</>
+                      ? <>Nobody else whose Plan A lists this training can be added. &ldquo;All employees&rdquo; above lists the others.</>
                       : "No more eligible employees to recommend."}
                   </p>
                 ) : (
@@ -284,30 +308,18 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                 )}
               </section>
 
-              {/* DROPDOWN — pick anyone eligible, grouped by priority */}
-              <section className="space-y-1.5">
-                <label htmlFor="participant-dropdown" className="text-xs font-bold uppercase tracking-wider text-slate-600 block">
-                  Select or recommend an employee
-                </label>
-                <select
-                  id="participant-dropdown"
-                  value=""
-                  disabled={freeSlots === 0 || choices.length === 0}
-                  onChange={(e) => { if (e.target.value) add([e.target.value]); }}
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
-                >
-                  <option value="">{freeSlots === 0 ? "Maximum participants reached" : choices.length === 0 ? "Nobody left on this list" : "Choose an employee…"}</option>
-                  {choices.map(g => (
-                    <optgroup key={g.label} label={g.label}>
-                      {g.items.map(c => (
-                        <option key={c.employeeId} value={c.employeeId} disabled={!c.eligible}>
-                          {c.eligible ? optionLabel(c, seminarCovers) : `${c.fullName} — ${c.ineligibleReason}`}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </section>
+              {/* EVERYONE ELSE in scope: searchable, grouped by priority, with why (training/CandidateList.tsx).
+                  Add goes through add(), which asks why for someone outside the plan. */}
+              <CandidateList
+                groups={choices}
+                availableCount={available.length}
+                freeSlots={freeSlots}
+                fyText={fyText}
+                coveredBySeminar={bySeminar}
+                onAdd={id => add([id])}
+                hiddenCount={hiddenCount}
+                onShowAll={() => setShowAll(true)}
+              />
             </>
           )}
 

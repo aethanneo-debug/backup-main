@@ -291,15 +291,36 @@ Prioritized. When you fix one, remove or update its entry here.
     - **Checked:** 6 unit tests (`tests/divisionCoverage.test.ts`; `npm test` 93/93), 28 API and 17 browser checks on sandboxes. The second review's fixes added 14 API checks (42 in all). They were run on the pushed code too, where the 11 that test a fix fail. A sandbox with a planted non-text title answered 500 on the pushed code and 200 now. The older suites still pass. The "at least one training a year" browser suite (12s) now misses 9 counts, each 2 higher than when it was written, from data entered since 2026-10-23: the pushed code misses the same 9 on the same data.
 12y. **The participant picker by Plan A's columns** (HSAC RAB 1's answer 6; Part D of the plan approved 2026-10-26, built 2026-10-27 when the user said to go ahead).
     - HSAC's point: the same training can be needed for different reasons, and Plan A's three columns already say which. RA 12009 is a Function need for the Admin Officer IV (procurement is part of the post), and an Additional Function/Designation need for Budget staff on the BAC TWG. So no designation field is needed.
-    - For a seminar that covers Plan A needs, the picker lists only the employees whose plan lists one of them, for that fiscal year, with those who have no training yet first. "Show all employees (N more)" brings back the others for exceptions. "Add all recommended" and the dropdown follow the list. A seminar covering no need lists everyone, as before.
+    - For a seminar that covers Plan A needs, the picker lists only the employees whose plan lists one of them, for that fiscal year, with those who have no training yet first. "All employees" brings back the others for exceptions. "Add all recommended" and the dropdown follow the list. A seminar covering no need lists everyone, as before.
+    - **The switch made visible** (the user, 2026-10-30: "if I click it nothing works"). The old single button did work, but its effect landed in the closed dropdown, and the Recommended cards stay the same either way, since Plan A's listers rank first. So a click seemed to do nothing. Now:
+      - the switch is two fixed options, "Plan A listers (N)" | "All employees (M)", with the one on highlighted and pressed (`aria-pressed`, right for fixed labels);
+      - in the all-employees view, the line says how many outside the plan were added and that seating one needs a justification (unless the seminar's own justification covers them);
+      - the list's heading counts its choices ("· 17 to choose from").
+      - Checked in the browser on a copy of the live data: 17 → 22 → 17, as the switch is flipped. The plan picker suite has 31 checks; the TDP, mandated trainings and coverage browser suites are at their baselines.
+    - **The dropdown became a searchable list** (the user, 2026-10-30: "fix the design on this part… give me the basis on why those are the ones being recommended… add a search bar"; built by the ui-designer agent).
+      - The native select is replaced by `training/CandidateList.tsx`, a list of the same groups ("No training yet in FY …", "Already has a training in FY …", "Not eligible"). Each group has a sticky heading with its count and a one-line reason.
+      - Each row shows the name, position · division, its badges (why it stands where it does) and an Add button. Add still goes through the picker's `add()`, so someone outside the plan gets the justification form. The outside-the-plan badge reads "Not in their TDP: needs a justification", the selected list's own wording, or "Under the seminar's justification".
+      - The search (`#participant-search`) matches name, position and division, ignoring case and accents ("pena" finds "Peña"). Every word must match. Escape clears it, and a polite line counts the results.
+      - "How this list is ordered" opens the server's ranking (`rankTrainingCandidates`) in plain words, with sample badges:
+        1. those who can be enrolled;
+        2. no training yet this FY;
+        3. their own Plan A lists the training;
+        4. a mandated need;
+        5. new hires (under 12 months);
+        6. the most recently hired, then name.
+        "Recommended" above is the top of that order for the free seats.
+      - After an Add, focus moves to the next row's Add (the search box when none is left), unless the justification form took it.
+      - `optionLabel` (the old option text) is gone; `CandidateBadges` takes extra badges as children, and `TONE` holds the shared badge colours.
+      - Pre-existing, noted by the designer (not fixed): the picker has no Escape-to-close and no focus trap. Moving it onto `ui/ModalDialog.tsx` would need a "discard changes?" guard first. Recommended's Add buttons all read just "Add".
+      - Checked: the designer's 53 browser checks. The older suites that drove the dropdown were migrated to the list and pass at their baselines: plan picker 31, TDP 59, mandated trainings 52, division 20, coverage 37 with its 9 known misses. Several of their selectors were scoped to their own section, because the picker now holds a second list with rows, an ordered note and a status line of its own. The rest of the regression is at baseline.
     - Each lister's badge names the column: "Needs this: Function", "…: Additional Function/Designation", "…: Career Advancement", or several. The dropdown says the same, and the tooltip gives the official column names and the titles.
     - Server: `GET /api/training/recommendations` adds `needCategories` to each candidate, from their own entries (same normalised title, same fiscal year; `employeeCoveredNeeds`). Matching is unchanged.
     - **From the code review (2026-10-28; approved with nits), fixed:**
-      - The "Show all" switch carried `aria-pressed` while its label changes, so a screen reader heard the opposite of what was on. It has no pressed state now, and the line beside it is read out when it changes ("Showing the N employees whose Plan A for FY … lists this training." or "Showing all employees.").
-      - Once everyone the plan lists was chosen with seats left, Recommended said "No more eligible employees to recommend" and the dropdown was empty but on. It now says nobody else on the plan can be added and that "Show all employees" lists the others. An empty dropdown is off ("Nobody left on this list"), and the switch is hidden when it would show nobody more.
+      - The "Show all" switch carried `aria-pressed` while its label changes, so a screen reader heard the opposite of what was on. It had no pressed state after that (since 2026-10-30 it is two fixed options, each pressed while on), and the line beside it is read out when it changes ("Showing the N employees whose Plan A for FY … lists this training." or "Showing all employees.").
+      - Once everyone the plan lists was chosen with seats left, Recommended said "No more eligible employees to recommend" and the dropdown was empty but on. It now says nobody else on the plan can be added and that "All employees" above lists the others. An empty dropdown is off ("Nobody left on this list"), and the switch is hidden when it would show nobody more.
       - A row with every need unticked (a saved seminar being edited) asked without `needTitle`, so the server went by the saved needs and badged "Needs this" for a training the row no longer covers (pre-existing since drafts were ranked). It now sends one empty `needTitle`.
       - Smaller: a title listed under two columns was named twice; the tooltip says "Plan A, <columns>: …" only when there are columns; `employeeNeedMatches` (no callers) is gone; the intro reads right in both views.
-    - Limits: the column informs and doesn't rank (a Function need doesn't outrank an Additional Function one). Staff with no Plan A entries (5 active on 2026-10-27) appear only under "Show all employees". On a phone-width screen, a badge naming several columns can run past the dialog (the picker is HR's desktop screen). The picker's counts are checked in the browser, not as a pure helper with unit tests.
+    - Limits: the column informs and doesn't rank (a Function need doesn't outrank an Additional Function one). Staff with no Plan A entries (5 active on 2026-10-27) appear only under "All employees". On a phone-width screen, a badge naming several columns can run past the dialog (the picker is HR's desktop screen). The picker's counts are checked in the browser, not as a pure helper with unit tests.
     - Checked: 30 API and browser checks on a sandbox, worked out from its own Plan A (live: 460 FY 2027 entries for 17 people). 12 of them were added for the review's fixes, among them a saved seminar edited with every need unticked (nothing saved). The division and coverage browser suites are unchanged.
 12z. **Who may be seated: the TDP decides; anyone else needs a justification** (HSAC RAB 1's answer 8 of 2026-10-28, `.claude/context/hsac-answers.md`; plan and decisions approved 2026-10-28; Part A built 2026-10-28, Parts C and B 2026-10-29; from Part D's proposals, the mandated trainings of step 5 approved and built 2026-10-29).
     - **The rule** (`src/tdpRules.ts`, tested): the TDP identifies someone for a seminar when their own Plan A for its fiscal year lists a need it covers (the picker's match, `employeeCoveredNeeds`). Anyone else is seated only with a justification on the enrolment (`tdpException`):
@@ -335,7 +356,7 @@ Prioritized. When you fix one, remove or update its entry here.
       - A justification can be added after the seminar, in a closed year too (`recordedAt` shows when).
     - **Pre-existing, found by the investigation (not fixed):**
       - HR's training-record form posts `date_conducted`, `training_hours` and `certificate_file_name`, which the server doesn't read (`TrainingsSeminarsView.tsx:98-105`, `server.ts:2049-2051`): every record HR adds gets 8 hours and no date. Only the 3 seeded records exist.
-      - The evaluations list includes participants marked "Did not attend".
+      - The evaluations list includes participants marked "Did not attend" (and seats with no attendance recorded). Planned fix, not built: Part D step 3, below.
       - Seats are counted two ways: a non-attendee frees one when the seats are cut, but still takes one when someone is added.
       - Unticking someone deletes their enrolment with no audit entry and no notice (12j); a representative is kept since Part B.
       - HR can charge expenses to a Cancelled enrolment through the API.
@@ -490,6 +511,35 @@ Prioritized. When you fix one, remove or update its entry here.
         - 71 API checks on sandboxes, with restarts for the load: access by role, the 400s, 409 and 404s, the audit wording (a direction mark in a Plan A title included), a soft-hyphen plan title, marks across years, the order of the catalog, the plan and the picker (TDP standings don't move), persistence and damaged lists.
         - 52 browser checks: mark, change, cancel, Enter and Escape, focus after each action, a refusal from a stale screen, unmark, Retry and an empty plan, Monitoring's order and count, the planning lists, the picker's badges and labels, the audit filter, 768 px.
         - The older suites are at their baselines (flow's 3, archive's 1 and coverage's 9 known misses).
+    - **Part D, step 3: attendees' evaluations and the Individual Learning Report** (raised and planned 2026-10-30; NOT BUILT, left for later at the user's word: "leave it out for now but record it so I won't forget").
+      - **The question:** after a liquidation report (a group's especially: one report for several attendees), how does each attendee submit their individual report, and how does HR evaluate each one? The user saw only the report filers on HR's Evaluations list after a group test.
+      - **What the code does** (checked 2026-10-30):
+        - `GET /api/training/evaluations` lists every seat on an ended seminar except Cancelled and Archived ones, whatever happened to its liquidation.
+        - A sandbox run of the whole group flow listed the covered attendee too: one report by the holder, HR's Verify, Finance's Validate. So covered members aren't left out.
+        - The list's real flaw runs the other way: it includes seats marked "Did not attend" and seats with no attendance recorded. In the live data, 9 seats were listed, 2 with their own report, most with no attendance recorded.
+        - A covered member is missing only while their seminar hasn't ended (the list opens on the end date), or if they were marked absent.
+      - **The user's decisions:**
+        1. The individual report is HSAC's step 3b Individual Learning Report (ILR), one per attendee, a group's covered members included.
+        2. HR's evaluation list holds attendees only.
+      - **The plan, as proposed:**
+        - **Evaluations:**
+          - List a seat once its seminar has ended and HR recorded "Attended", however the advance went (their own, a group's, or none).
+          - Leave out "Did not attend".
+          - Show seats with no attendance yet apart ("Record attendance first").
+          - `POST /api/training/evaluations` refuses anyone else. There were no evaluations on file on 2026-10-30.
+        - **ILR, filing:** the attendee files it from their seminar card once the seminar has ended and HR recorded them "Attended". It doesn't depend on the liquidation report.
+        - **ILR, contents:** key learnings and how they'll apply them at work (required), recommendations (optional). Text only, so no files in `data_store.json`.
+        - **ILR, editing:** the employee edits it until HR marks it "Received". HR or the Administrator can enter one for staff without a Personnel login (14 of 22 records), marked "entered by HR".
+        - **ILR, who sees it:** the employee, HR and the Administrator; not Finance or Budget.
+        - **ILR, notices and records:** the attendee is told once recorded "Attended"; HR is told of each submission; every change gets an audit entry.
+        - **On HR's Evaluations list:** each attendee's ILR status ("Not filed", "Submitted on …", "Received"), and the ILR beside the evaluation form.
+        - **Files:** `src/types.ts`; a new `src/learningReport.ts` with tests; `server.ts` (the evaluation routes, the ILR routes, a `learningReports` load default, notices, audit); the portal's seminar card with a new ILR panel; the Evaluations desk; docs (this entry, hsac-answers answer 8, the project map, item 11's FastAPI gap).
+      - **Defaults to confirm when it is picked up:**
+        - (a) HR may draft an evaluation anytime, and is warned, not blocked, when finalising one without an ILR.
+        - (b) No return-for-revision step for an ILR yet.
+        - (c) No ILR deadline or reminders yet (a later follow-up).
+      - **Related:** the evaluations list including "Did not attend" (Part A's pre-existing list, above); the portal being Personnel-only (12q); HSAC's other step 3 instruments (the participants' Post-Evaluation Form, "is the training effective?", and the IPCR), still proposals.
+      - **Suggested commit when built:** `feat(tdp): Individual Learning Report per attendee; HR evaluates attendees only`.
 12w. **Personnel requests: still open** (found 2026-10-27 by the reviews of 12v Part B; pre-existing).
     - `GET /api/requests` sends every request, leave reasons included, to every officer role, the Budget Officer too. Leave reasons are health data, which RA 10173 counts as sensitive personal information. Generated Reports uses only 8 columns. Fix: full records for the Administrator and HR, a narrow copy for the others. It is an RBAC change, so it needs approval.
     - `POST /api/requests` checks no type, length or date.
