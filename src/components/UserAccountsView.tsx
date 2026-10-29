@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { User, UserRole } from "../types";
-import { apiCall } from "../utils";
+import { apiCall, firstDateString, firstTimestamp, formatDate } from "../utils";
 import { Plus, Edit2, Archive, Key, ShieldCheck, Mail, UserCheck, Search, X, CheckCircle } from "lucide-react";
 
 interface UserAccountsViewProps {
@@ -176,7 +176,9 @@ export default function UserAccountsView({ currentUser }: UserAccountsViewProps)
       u.email.toLowerCase().includes(search.toLowerCase()) ||
       u.role.toLowerCase().includes(search.toLowerCase())
     )
-  );
+  // LIFO: the newest account first, by when it was created (the server keeps them oldest first).
+  // firstTimestamp, not new Date(): a missing date is 0, never NaN, which would scramble the sort.
+  ).sort((a, b) => firstTimestamp(b.createdAt) - firstTimestamp(a.createdAt));
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 w-full">
@@ -234,7 +236,7 @@ export default function UserAccountsView({ currentUser }: UserAccountsViewProps)
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/70 border-b border-slate-100">
-                  <th className="px-6 py-3.5 text-[10px] font-bold text-slate-400 uppercase font-mono">Profile and Name</th>
+                  <th className="px-6 py-3.5 text-[10px] font-bold text-slate-400 uppercase font-mono">Profile and Name (LIFO)</th>
                   <th className="px-6 py-3.5 text-[10px] font-bold text-slate-400 uppercase font-mono">System Username</th>
                   <th className="px-6 py-3.5 text-[10px] font-bold text-slate-400 uppercase font-mono">Email Address</th>
                   <th className="px-6 py-3.5 text-[10px] font-bold text-slate-400 uppercase font-mono">Access Level Role</th>
@@ -267,6 +269,9 @@ export default function UserAccountsView({ currentUser }: UserAccountsViewProps)
                           <div>
                             <p className="text-xs font-semibold text-slate-800">{usr.fullName}</p>
                             <p className="text-[10px] text-slate-400 font-mono">ID: {usr.id}</p>
+                            {firstDateString(usr.createdAt) && (
+                              <p className="text-[10px] text-slate-400">Added {formatDate(usr.createdAt)}</p>
+                            )}
                           </div>
                         </div>
                       </td>
