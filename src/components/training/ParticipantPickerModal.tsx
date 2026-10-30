@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Sparkles, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ListChecks, Loader2, X } from "lucide-react";
 import { TrainingCandidate, type TdpJustification, type TdpJustificationInput, type TdpStanding } from "../../types";
 import { apiCall, getLocalTodayString } from "../../utils";
 import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 import { tdpBadgeText } from "../../tdpRules";
-import { BADGE, CandidateBadges } from "./candidateBadges";
-import CandidateList, { type CandidateGroup } from "./CandidateList";
-import TdpJustificationForm from "./TdpJustificationForm";
+import { TONE } from "./candidateBadges";
+import ParticipantChecklist, { rowMatches, searchTerms, type PickGroup, type PickRow } from "./ParticipantChecklist";
+import PlanAViewSwitch from "./PlanAViewSwitch";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.
 export interface PickerProgram {
@@ -42,6 +42,10 @@ interface Props {
   onClose: () => void;
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const seatsLeft = (free: number) => (free <= 0 ? "All seats are filled." : `${plural(free, "seat")} left.`);
+const OUTSIDE_TDP = "Not in their TDP: needs a justification";
+
 export default function ParticipantPickerModal({ program, initialSelectedIds, initialJustifications, mustJustify, onConfirm, onClose }: Props) {
   const [candidates, setCandidates] = useState<TrainingCandidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,9 +55,19 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   // The server's answer for the seminar as drafted (Part C): its own justification will cover everyone on
   // it. Null until it arrives; the row's guess stands in meanwhile.
   const [serverCovers, setServerCovers] = useState<boolean | null>(null);
-  // A seminar that covers Plan A needs lists only those whose plan lists one of them; "Show all
-  // employees" is for the exceptions (someone with no plan entry, or one HR knows needs it anyway).
+  // A seminar that covers Plan A needs lists only those whose plan lists one of them; "All employees" is
+  // for the exceptions (someone with no plan entry, or one HR knows needs it anyway).
   const [showAll, setShowAll] = useState(false);
+  const [query, setQuery] = useState("");
+  // Read out after each tick: the rows stay where they are, so nothing else says what changed.
+  const [status, setStatus] = useState("");
+  // Unticked since the view last changed: their rows stay put even where the Plan A view would leave them
+  // out, so nothing moves under HR's pointer. Switching views lets them go.
+  const [kept, setKept] = useState<Set<string>>(() => new Set());
+  const switchView = (all: boolean) => {
+    setShowAll(all);
+    setKept(new Set());
+  };
   const coversNeeds = (program.fulfillsNeedTitles ?? []).length > 0;
   const planOnly = coversNeeds && !showAll;
   const inScope = (c: TrainingCandidate) => !planOnly || c.needsThis;
@@ -112,29 +126,17 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days,
       selectedIds.filter(id => !notAway.has(id)), (id, day) => !!away.get(id)?.has(day));
   }, [candidates, selectedIds, program.startDate, program.endDate, (program.notAwayIds ?? []).join("|")]);
-  // Recommended (and "Add all recommended") and the full list below follow the list in scope.
+  // "Recommended" (and "Select all recommended") follow the list in scope.
   const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId) && inScope(c));
   const recommended = available.slice(0, freeSlots);
   const listers = (candidates ?? []).filter(c => c.needsThis).length;
   // What "All employees" adds: everyone off the plan not selected yet (whichever list is on), and, while
   // the Plan A list is on, how many of them are hidden and how many could be picked.
   const outsidePlan = (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId));
-  const offPlan = planOnly ? outsidePlan : [];
+  // (Not those kept on screen after being unticked: they are shown, not hidden.)
+  const offPlan = planOnly ? outsidePlan.filter(c => !kept.has(c.employeeId)) : [];
   const hiddenCount = offPlan.length;
   const hiddenEligible = offPlan.filter(c => c.eligible).length;
-  // At least one training per year per employee: those with none yet in the seminar's fiscal year
-  // come first. Each group keeps the server's order (Plan A listers, a mandated need first among them,
-  // then new hires, first). Each heading says why in one line (training/CandidateList.tsx).
-  const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
-  const groups: CandidateGroup[] = [
-    { key: "first", label: `No training yet in ${fyText}`, reason: "Everyone should have at least one training a year, so they come first.",
-      items: available.filter(c => (c.trainingsThisYear ?? []).length === 0) },
-    { key: "trained", label: `Already has a training in ${fyText}`, reason: "Already trained this fiscal year; they may still join another seminar.",
-      items: available.filter(c => (c.trainingsThisYear ?? []).length > 0) },
-    { key: "ineligible", label: "Not eligible", reason: "Already enrolled in this seminar, or attended it before: they can't be added.",
-      items: (candidates ?? []).filter(c => !c.eligible && !selectedIds.includes(c.employeeId) && inScope(c)) }
-  ];
-  const choices = groups.filter(g => g.items.length > 0);
 
   // Someone the TDP doesn't identify is seated only with a justification (HSAC RAB 1, 2026-10-28,
   // 12z): their Plan A for the seminar's year lists none of its needs. The server checks it again on
@@ -154,9 +156,12 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   const needsJustification = (id: string) => !bySeminar(id) && outsideTdp(id) && !justifications[id] && !saved(id)?.tdpException
     && (!saved(id) || required.has(id) || saved(id)?.tdp === "identified");
   const pending = selectedIds.filter(needsJustification);
-  // "Add all recommended" adds only people the TDP identifies, up to the free seats; anyone else is
-  // added one at a time.
+  // "Select all recommended" ticks only people the TDP identifies, up to the free seats; anyone else is
+  // ticked one at a time.
   const bulk = available.filter(c => c.needsThis).slice(0, freeSlots);
+  // In the "All employees" view the top of the order can include someone off the plan, whom the button
+  // doesn't tick: then it says whom it ticks instead of "all recommended" (the code review, 2026-10-30).
+  const bulkIsRecommended = bulk.length === recommended.length && bulk.every((c, i) => c.employeeId === recommended[i]?.employeeId);
 
   const add = (ids: string[]) => {
     setSelectedIds(prev => {
@@ -183,6 +188,96 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     setFormFor(null);
   };
 
+  const toggle = (r: PickRow) => {
+    if (r.ticked) {
+      remove(r.id);
+      setKept(prev => new Set(prev).add(r.id));
+      setStatus(`Removed ${r.name}. ${seatsLeft(max - selectedIds.length + 1)}`);
+    } else if (selectedIds.length < max) {
+      add([r.id]);
+      setStatus(`Selected ${r.name}. ${seatsLeft(freeSlots - 1)}`);
+    }
+  };
+  const selectAll = () => {
+    add(bulk.map(c => c.employeeId));
+    setStatus(`Selected ${plural(bulk.length, "recommended employee")}. ${seatsLeft(freeSlots - bulk.length)}`);
+  };
+
+  // One row per person: everyone in scope, anyone ticked (so a choice is never hidden, the Plan A view
+  // included) and anyone just unticked.
+  const selected = new Set(selectedIds);
+  const recommendedIds = new Set(recommended.map(c => c.employeeId));
+  const toRow = (id: string, c?: TrainingCandidate): PickRow => {
+    const name = c ? c.fullName : id;
+    if (!selected.has(id)) {
+      // Off the plan: ticking them asks why they are seated, unless the seminar's own justification
+      // covers everyone on it (Part C). Word for word what their row says once ticked.
+      const outside = !!c && c.eligible && !c.needsThis;
+      return {
+        id, c, name, ticked: false, why: null,
+        disabled: (!!c && !c.eligible) || freeSlots === 0,
+        recommended: recommendedIds.has(id),
+        standing: !outside ? null : bySeminar(id)
+          ? { text: tdpBadgeText("seminar") ?? "", tone: TONE.underSeminar }
+          : { text: OUTSIDE_TDP, tone: TONE.needsJustification }
+      };
+    }
+    const draft = justifications[id];
+    const onRecord = saved(id);
+    const waiting = needsJustification(id);
+    // The justification kept here, else the one on record, else the enrolment's standing; none for
+    // someone the TDP identifies (an edit of the needs can make it so).
+    const badge = !outsideTdp(id) ? null
+      : bySeminar(id) && !draft && !onRecord?.tdpException ? tdpBadgeText("seminar")
+      : draft ? tdpBadgeText("justified", draft)
+      : onRecord?.tdpException ? tdpBadgeText("justified", onRecord.tdpException)
+      : onRecord && onRecord.tdp !== "identified" ? tdpBadgeText(onRecord.tdp) : null;
+    // Seated under the seminar's justification (Part C) counts as justified, even once the seminar
+    // covers a need, as the server holds it; it needs no reason of its own.
+    const underSeminar = !draft && !onRecord?.tdpException && onRecord?.tdp === "seminar";
+    const unjustified = !bySeminar(id) && !draft && !onRecord?.tdpException && !underSeminar;
+    return {
+      // Always on, so anyone ticked can be taken off, someone not eligible included.
+      id, c, name, ticked: true, disabled: false, recommended: false,
+      standing: waiting ? { text: OUTSIDE_TDP, tone: TONE.needsJustification }
+        : badge ? { text: badge, tone: unjustified ? TONE.unjustified : TONE.justified } : null,
+      // (A representative's "In lieu of" is changed from the attendance list, Part B.)
+      why: outsideTdp(id) && !bySeminar(id) && !underSeminar && onRecord?.tdpException?.kind !== "In lieu of" && formFor !== id
+        ? (waiting ? "Record why" : unjustified ? "Add why" : "Change why") : null,
+      formInitial: draft ?? onRecord?.tdpException
+    };
+  };
+  const listed = (candidates ?? []).filter(c => inScope(c) || selected.has(c.employeeId) || kept.has(c.employeeId));
+  // Anyone selected missing from the candidates (no longer active, or the list didn't load), by id at
+  // the top: they can still be unticked, or given a justification the server asked for.
+  const unlisted = [...new Set([...(initialSelectedIds ?? []), ...selectedIds])]
+    .filter(id => !byId.has(id) && (selected.has(id) || kept.has(id)));
+  // At least one training per year per employee: those with none yet in the seminar's fiscal year
+  // come first. Each group keeps the server's order (Plan A listers, a mandated need first among them,
+  // then new hires, first), ticked people included. Each heading says why in one line.
+  const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
+  const groups: PickGroup[] = [
+    { key: "unlisted", label: error ? "Selected" : "Selected, not among the active staff",
+      reason: error ? "The list didn't load, so they are shown by record id. Untick to take them off."
+        : "On this seminar, but not among the active employees, so only their record id is known. Untick to take them off.",
+      rows: unlisted.map(id => toRow(id)) },
+    { key: "first", label: `No training yet in ${fyText}`, reason: "Everyone should have at least one training a year, so they come first.",
+      rows: listed.filter(c => c.eligible && (c.trainingsThisYear ?? []).length === 0).map(c => toRow(c.employeeId, c)) },
+    { key: "trained", label: `Already has a training in ${fyText}`, reason: "Already trained this fiscal year; they may still join another seminar.",
+      rows: listed.filter(c => c.eligible && (c.trainingsThisYear ?? []).length > 0).map(c => toRow(c.employeeId, c)) },
+    { key: "ineligible", label: "Not eligible", reason: "Already enrolled in this seminar, or attended it before: they can't be selected.",
+      rows: listed.filter(c => !c.eligible).map(c => toRow(c.employeeId, c)) }
+  ];
+  // The search filters every row, ticked ones included, but never the row whose form is open: what was
+  // typed in it would be lost.
+  const terms = searchTerms(query);
+  const shownGroups = groups
+    .map(g => ({ ...g, rows: terms.length === 0 ? g.rows : g.rows.filter(r => r.id === formFor || rowMatches(r, terms)) }))
+    .filter(g => g.rows.length > 0);
+  const total = groups.reduce((n, g) => n + g.rows.length, 0);
+  const shownIds = new Set(shownGroups.flatMap(g => g.rows.map(r => r.id)));
+  const pendingHidden = pending.filter(id => !shownIds.has(id)).length;
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="participant-picker-title">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -194,136 +289,105 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
           <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1 space-y-5 custom-scrollbar">
-          <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-3 rounded-lg flex gap-2">
-            <Sparkles size={16} className="shrink-0 mt-0.5" />
-            <p>
-              Every employee should have <strong>at least one training a year</strong>, so those with <strong>no training yet in {fyText}</strong> come first
-              (a seminar or a training HR recorded counts; &ldquo;Did not attend&rdquo; doesn&rsquo;t). Within each group, employees whose{" "}
-              <strong>Plan A</strong> lists this training come first (those whose need the law requires ahead of the others), then <strong>new hires</strong>.{" "}
-              {coversNeeds && (
-                <>This seminar covers Plan A needs, so at first only those employees are shown, and their badge says in which column:
-                for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>
-              )}
-              {seminarCovers && (
-                <>This seminar covers no Plan A need, so it is held <strong>outside the TDP</strong> with its own justification, which
-                covers everyone on it.{" "}</>
-              )}
-              Employees may join more than one seminar a year; only those who already attended this seminar can&rsquo;t be selected.
-            </p>
-          </div>
-
-          {/* Plan A first: who is listed, and the way to everyone else. Two fixed options, the one on
-              highlighted, so it is plain which list is in use: a single button whose label flipped looked
-              as if nothing happened, since the change lands in the dropdown and the Recommended cards stay
-              the same (Plan A's listers rank first either way). */}
-          {coversNeeds && !loading && !error && (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              {/* Read out when it changes, so a screen reader hears what the switch did. */}
-              <p aria-live="polite" className="min-w-0 flex-1">
-                {planOnly
-                  ? listers === 0
-                    ? `Nobody's Plan A for ${fyText} lists this training.`
-                    : `Showing the ${listers} employee${listers === 1 ? "" : "s"} whose Plan A for ${fyText} lists this training.`
-                  : outsidePlan.length === 0
-                    ? "Showing all employees."
-                    : <>
-                        Showing all employees: <strong className="text-slate-800">{outsidePlan.length} outside the plan</strong>{" "}
-                        {outsidePlan.length === 1 ? "was" : "were"} added to the list below{seminarCovers ? "." : "; seating one needs a justification."}
-                      </>}
-              </p>
-              {(!planOnly || hiddenCount > 0) && (
-                <div role="group" aria-label="Who to choose from" className="inline-flex shrink-0 rounded-lg border border-blue-200 bg-white p-0.5">
-                  {([["plan", `Plan A listers (${listers})`], ["all", `All employees (${(candidates ?? []).length})`]] as const).map(([which, label]) => {
-                    const on = (which === "plan") === planOnly;
-                    return (
-                      <button
-                        key={which}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => setShowAll(which === "all")}
-                        className={`rounded-md px-2.5 py-1 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                          on ? "bg-blue-600 text-white" : "text-blue-700 hover:bg-blue-50"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500 py-8 justify-center">
-              <Loader2 size={16} className="animate-spin" /> Loading recommendations…
-            </div>
-          ) : error ? (
-            <div className="p-3 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs flex items-start justify-between gap-3">
-              <span className="flex gap-2"><AlertTriangle size={14} className="shrink-0 mt-0.5" />{error}</span>
-              <button onClick={() => setReloadKey(k => k + 1)} className="font-semibold underline shrink-0">Retry</button>
-            </div>
-          ) : (
-            <>
-              {/* RECOMMENDED — the top-ranked eligible employees for the open seats */}
-              <section className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">Recommended for this seminar</h4>
-                  {bulk.length > 1 && (
-                    <button
-                      onClick={() => add(bulk.map(c => c.employeeId))}
-                      className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-100"
-                    >
-                      Add all recommended ({bulk.length})
-                    </button>
-                  )}
-                </div>
-                {freeSlots === 0 ? (
-                  <p className="text-xs text-slate-500 italic">All {max} seat{max === 1 ? " is" : "s are"} filled. Remove someone below to add another.</p>
-                ) : recommended.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic">
-                    {hiddenEligible > 0
-                      ? <>Nobody else whose Plan A lists this training can be added. &ldquo;All employees&rdquo; above lists the others.</>
-                      : "No more eligible employees to recommend."}
-                  </p>
-                ) : (
-                  <ul className="border border-slate-200 rounded-lg divide-y divide-slate-100">
-                    {recommended.map(c => (
-                      <li key={c.employeeId} className="flex items-center justify-between gap-3 p-2.5">
-                        <div className="min-w-0 space-y-1">
-                          <p className="text-sm font-medium text-slate-800 truncate">{c.fullName}</p>
-                          <p className="text-xs text-slate-500 truncate">{c.position}{c.division ? ` · ${c.division}` : ""}</p>
-                          <CandidateBadges c={c} />
-                        </div>
-                        <button
-                          onClick={() => add([c.employeeId])}
-                          className="shrink-0 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg flex items-center gap-1"
-                        >
-                          <UserPlus size={13} /> Add
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+        {/* The only scroller: the checklist's toolbar sticks to its top, and a form opened under a row has
+            room. No top padding on the scroller itself: a sticky element stops below it, and rows would show
+            through the gap above the toolbar. */}
+        <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
+          <div className="space-y-4 pt-4 sm:pt-6">
+            {/* The order itself is in "How this list is ordered"; this keeps only what is particular to the seminar. */}
+            <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-3 rounded-lg flex gap-2">
+              <ListChecks size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+              <p>
+                Tick the employees who will attend.{" "}
+                {coversNeeds && (
+                  <>This seminar covers Plan A needs, so at first only the employees whose plan lists it are shown; their badge says in
+                  which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>
                 )}
-              </section>
+                {seminarCovers && (
+                  <>This seminar covers no Plan A need, so it is held <strong>outside the TDP</strong> with its own justification, which
+                  covers everyone on it.{" "}</>
+                )}
+                Employees may join more than one seminar a year; only those who attended this seminar before can&rsquo;t be selected.
+              </p>
+            </div>
 
-              {/* EVERYONE ELSE in scope: searchable, grouped by priority, with why (training/CandidateList.tsx).
-                  Add goes through add(), which asks why for someone outside the plan. */}
-              <CandidateList
-                groups={choices}
-                availableCount={available.length}
-                freeSlots={freeSlots}
-                fyText={fyText}
-                coveredBySeminar={bySeminar}
-                onAdd={id => add([id])}
+            {coversNeeds && !loading && !error && (
+              <PlanAViewSwitch
+                planOnly={planOnly}
+                listers={listers}
+                outsidePlan={outsidePlan.length}
+                everyone={(candidates ?? []).length}
                 hiddenCount={hiddenCount}
-                onShowAll={() => setShowAll(true)}
+                seminarCovers={seminarCovers}
+                fyText={fyText}
+                onSwitch={switchView}
               />
-            </>
-          )}
+            )}
 
-          {/* A division left with nobody at the office: a warning, since HR may go ahead knowingly. */}
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500 py-8 justify-center">
+                <Loader2 size={16} className="animate-spin" /> Loading recommendations…
+              </div>
+            ) : (
+              <>
+                {error && (
+                  <div className="p-3 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs flex items-start justify-between gap-3">
+                    <span className="flex gap-2"><AlertTriangle size={14} className="shrink-0 mt-0.5" />{error}</span>
+                    {/* Reloading redraws the list, so a justification form left open would lose what was typed. */}
+                    <button
+                      onClick={() => {
+                        if (formFor !== null && !window.confirm("Retrying reloads the list, and what you typed in the open justification form will be lost. Retry anyway?")) return;
+                        setReloadKey(k => k + 1);
+                      }}
+                      className="font-semibold underline shrink-0"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {/* Without the list, still the people already selected: they can be unticked, or given a
+                    justification the server asked for. */}
+                {(!error || total > 0) && (
+                  <ParticipantChecklist
+                    groups={shownGroups}
+                    total={total}
+                    shown={shownIds.size}
+                    selectedHidden={selectedIds.filter(id => !shownIds.has(id)).length}
+                    query={query}
+                    onQueryChange={setQuery}
+                    choosable={freeSlots > 0 && !error ? available.length : null}
+                    filled={selectedIds.length}
+                    max={max}
+                    seatNote={error ? null : freeSlots === 0
+                      ? `${max === 1 ? "The 1 seat is" : `All ${max} seats are`} filled. Untick someone to choose another.`
+                      : recommended.length === 0
+                        ? hiddenEligible > 0
+                          ? <>Nobody else whose Plan A lists this training can be added. &ldquo;All employees&rdquo; above lists the others.</>
+                          : "No more eligible employees to recommend."
+                        : null}
+                    bulkCount={bulk.length}
+                    bulkLabel={bulkIsRecommended ? "Select all recommended" : "Select the top Plan A listers"}
+                    onSelectAll={selectAll}
+                    onToggle={toggle}
+                    formFor={formFor}
+                    onOpenForm={setFormFor}
+                    onKeep={keep}
+                    onCancelForm={() => setFormFor(null)}
+                    hiddenCount={hiddenCount}
+                    onShowAll={() => switchView(true)}
+                    fyText={fyText}
+                    showOrderKey={(candidates ?? []).length > 0}
+                    anyTarget={listed.some(c => c.matchesTarget)}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="px-4 py-3 sm:px-6 sm:py-4 border-t border-slate-200 bg-slate-50 space-y-3 shrink-0">
+          {/* A division left with nobody at the office: a warning, since HR may go ahead knowingly. Under
+              the list, it stays in view while people are ticked, and coming or going it moves no row. */}
           {divisionGapsNow.length > 0 && (
             <div role="status" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-lg flex gap-2">
               <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
@@ -336,87 +400,25 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
               </div>
             </div>
           )}
-
-          {/* SELECTED */}
-          <section className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-              <Users size={13} /> Selected participants
-              <span className={`ml-1 ${BADGE} ${selectedIds.length >= max ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-slate-50 text-slate-700 border-slate-200"}`}>
-                {selectedIds.length} / {max}
-              </span>
-            </h4>
-            {selectedIds.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">No participants selected yet.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {selectedIds.map(id => {
-                  const c = byId.get(id);
-                  const name = c ? c.fullName : id;
-                  const draft = justifications[id];
-                  const onRecord = saved(id);
-                  const waiting = needsJustification(id);
-                  // The justification kept here, else the one on record, else the enrolment's standing; none
-                  // for someone the TDP identifies (an edit of the needs can make it so).
-                  const badge = !outsideTdp(id) ? null
-                    : bySeminar(id) && !draft && !onRecord?.tdpException ? tdpBadgeText("seminar")
-                    : draft ? tdpBadgeText("justified", draft)
-                    : onRecord?.tdpException ? tdpBadgeText("justified", onRecord.tdpException)
-                    : onRecord && onRecord.tdp !== "identified" ? tdpBadgeText(onRecord.tdp) : null;
-                  // Seated under the seminar's justification (Part C) counts as justified, even once the seminar
-                  // covers a need, as the server holds it; it needs no reason of its own.
-                  const underSeminar = !draft && !onRecord?.tdpException && onRecord?.tdp === "seminar";
-                  const unjustified = !bySeminar(id) && !draft && !onRecord?.tdpException && !underSeminar;
-                  return (
-                    <li key={id} className="p-2 rounded-lg border border-blue-200 bg-blue-50/60">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0 space-y-1">
-                          <p className="text-sm font-medium text-slate-800 truncate">{name}</p>
-                          <span className="flex flex-wrap gap-1">
-                            {c && <CandidateBadges c={c} selected />}
-                            {waiting && <span className={`${BADGE} bg-amber-50 text-amber-800 border-amber-300`}>Not in their TDP: needs a justification</span>}
-                            {!waiting && badge && (
-                              <span className={`${BADGE} ${unjustified ? "bg-amber-50 text-amber-800 border-amber-200" : "bg-slate-50 text-slate-700 border-slate-300"}`}>{badge}</span>
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {/* (A representative's "In lieu of" is changed from the attendance list, Part B.) */}
-                          {outsideTdp(id) && !bySeminar(id) && !underSeminar && onRecord?.tdpException?.kind !== "In lieu of" && formFor !== id && (
-                            <button type="button" onClick={() => setFormFor(id)} className="text-xs font-semibold text-blue-700 hover:underline">
-                              {waiting ? "Record why" : unjustified ? "Add why" : "Change why"}<span className="sr-only">: {name}</span>
-                            </button>
-                          )}
-                          <button onClick={() => remove(id)} aria-label={`Remove ${name}`} className="text-slate-400 hover:text-rose-600">
-                            <X size={16} />
-                          </button>
-                        </div>
-                      </div>
-                      {formFor === id && (
-                        <TdpJustificationForm employeeName={name} initial={draft ?? onRecord?.tdpException} onSave={v => keep(id, v)} onCancel={() => setFormFor(null)} />
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {pending.length > 0 && (
+              <p role="status" className="mr-auto text-xs text-amber-800">
+                {pending.length === 1 ? "1 person needs" : `${pending.length} people need`} a justification: record why, or untick them
+                {pendingHidden > 0 ? ` (${pendingHidden} hidden by the search)` : ""}.
+              </p>
             )}
-          </section>
+            <button onClick={onClose} className="px-4 py-2 text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={() => onConfirm(selectedIds, Object.fromEntries(selectedIds.filter(id => justifications[id]).map(id => [id, justifications[id]])))}
+              disabled={(loading && !error) || pending.length > 0}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Confirm Participants ({selectedIds.length})
+            </button>
+          </div>
         </div>
-
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-end gap-3 shrink-0">
-          {pending.length > 0 && (
-            <p role="status" className="mr-auto text-xs text-amber-800">
-              {pending.length === 1 ? "1 person needs" : `${pending.length} people need`} a justification: record why, or remove them.
-            </p>
-          )}
-          <button onClick={onClose} className="px-4 py-2 text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
-          <button
-            onClick={() => onConfirm(selectedIds, Object.fromEntries(selectedIds.filter(id => justifications[id]).map(id => [id, justifications[id]])))}
-            disabled={(loading && !error) || pending.length > 0}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Confirm Participants ({selectedIds.length})
-          </button>
-        </div>
+        {/* Says what each tick did (always in the page, so the first change is read out too). */}
+        <p id="participant-pick-status" role="status" className="sr-only">{status}</p>
       </div>
     </div>
   );
