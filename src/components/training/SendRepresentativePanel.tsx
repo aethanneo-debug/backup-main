@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { TrainingCandidate, TrainingProgram, type TdpJustificationInput } from "../../types";
 import { apiCall, apiErrorCode, getLocalTodayString } from "../../utils";
 import { addedGaps, datesText, divisionGapQuestion, divisionGaps, gapText, seminarWeekdays } from "../../divisionCoverage";
+import PlanAViewSwitch from "./PlanAViewSwitch";
 import TdpJustificationForm from "./TdpJustificationForm";
 
 // Sending a representative in lieu of someone enrolled (HSAC RAB 1, 2026-10-28: e.g. the accountant is on
@@ -35,6 +36,7 @@ export default function SendRepresentativePanel({ program, original, rosterIds, 
   const [chosen, setChosen] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +51,20 @@ export default function SendRepresentativePanel({ program, original, rosterIds, 
 
   const onRoster = new Set(rosterIds);
   const choices = (candidates ?? []).filter(c => c.eligible && !onRoster.has(c.employeeId) && c.employeeId !== original.employeeId);
-  const chosenOne = choices.find(c => c.employeeId === chosen);
+  // A seminar that covers Plan A needs lists, at first, only those whose own plan for its year lists one of
+  // them. "All employees" stays for the Chief's own choice (HSAC RAB 1, 2026-10-28: the Chief may identify
+  // anyone, e.g. in lieu of an accountant on leave); the "In lieu of" reason is recorded either way.
+  const coversNeeds = (program.fulfillsNeedTitles ?? []).length > 0;
+  const planOnly = coversNeeds && !showAll;
+  const listed = choices.filter(c => c.needsThis);
+  const shown = planOnly ? listed : choices;
+  const chosenOne = shown.find(c => c.employeeId === chosen);
+  const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
+  // Back to the plan's list: someone chosen off it is let go, and their form with them.
+  const switchView = (all: boolean) => {
+    setShowAll(all);
+    if (!all && chosen && !listed.some(c => c.employeeId === chosen)) setChosen("");
+  };
 
   // Someone must stay to man each division (HSAC RAB 1): what this swap adds on the days still to come.
   // The server checks it again and asks; this only warns first.
@@ -106,7 +121,8 @@ export default function SendRepresentativePanel({ program, original, rosterIds, 
         {original.name} has a cash advance out, Finance records its refund first.
       </p>
       <div>
-        <label htmlFor={`${id}-choice`} className="mb-0.5 block text-[11px] font-semibold text-slate-700">Who goes instead</label>
+        {/* Tied to the list only while there is one to choose from. */}
+        <label htmlFor={!loading && !loadError && shown.length > 0 ? `${id}-choice` : undefined} className="mb-0.5 block text-[11px] font-semibold text-slate-700">Who goes instead</label>
         {loading ? (
           <p className="flex items-center gap-2 text-slate-500"><Loader2 size={13} className="animate-spin" aria-hidden="true" /> Loading the employees…</p>
         ) : loadError ? (
@@ -114,15 +130,38 @@ export default function SendRepresentativePanel({ program, original, rosterIds, 
         ) : choices.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-slate-500">Nobody else can be enrolled in this seminar.</p>
         ) : (
-          <select id={`${id}-choice`} className={SELECT} value={chosen} disabled={sending} autoFocus onChange={e => { setChosen(e.target.value); setError(""); }}>
-            <option value="">Choose an employee…</option>
-            {choices.map(c => (
-              <option key={c.employeeId} value={c.employeeId}>
-                {c.fullName} — {c.division || "No division"}{c.needsThis ? " · listed in their plan" : ""}
-                {(c.awayOn ?? []).length > 0 ? ` · at another seminar on ${datesText(c.awayOn!)}` : ""}
-              </option>
-            ))}
-          </select>
+          <div className="space-y-1.5">
+            {coversNeeds ? (
+              <PlanAViewSwitch
+                planOnly={planOnly}
+                listers={listed.length}
+                outsidePlan={choices.length - listed.length}
+                everyone={choices.length}
+                hiddenCount={planOnly ? choices.length - listed.length : 0}
+                seminarCovers={false}
+                fyText={fyText}
+                onSwitch={switchView}
+                line={planOnly
+                  ? listed.length === 0
+                    ? <>Nobody else&rsquo;s Plan A for {fyText} lists this training. If the Chief identifies someone anyway, &ldquo;All employees&rdquo; lists everyone who can go.</>
+                    : `Showing the ${listed.length} employee${listed.length === 1 ? "" : "s"} whose Plan A for ${fyText} lists this training.`
+                  : `Showing everyone who can go${choices.length > listed.length ? `, ${choices.length - listed.length} of them outside the plan` : ""}.`}
+              />
+            ) : (
+              <p className="text-[11px] text-slate-600">This seminar covers no Plan A need, so everyone who can go is listed.</p>
+            )}
+            {shown.length > 0 && (
+              <select id={`${id}-choice`} className={SELECT} value={chosen} disabled={sending} autoFocus onChange={e => { setChosen(e.target.value); setError(""); }}>
+                <option value="">Choose an employee…</option>
+                {shown.map(c => (
+                  <option key={c.employeeId} value={c.employeeId}>
+                    {c.fullName} — {c.division || "No division"}{!planOnly && c.needsThis ? " · listed in their plan" : ""}
+                    {(c.awayOn ?? []).length > 0 ? ` · at another seminar on ${datesText(c.awayOn!)}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         )}
       </div>
       <div role="status" aria-live="polite">
