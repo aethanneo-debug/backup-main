@@ -4,13 +4,8 @@ import { CashAdvance } from "../../types";
 import { apiCall, firstTimestamp, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import { useRecordHighlight } from "../ui/useRecordHighlight";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
-import { dvNumberFrom, dvPrefix, dvPrefixIn, dvSerialInput, readDvNumber } from "../../dvNumber";
-
-/** The voucher number the form would send, when the server would take it ("" otherwise). */
-function validDv(dvDate: string, serial: string): string {
-  const number = dvNumberFrom(dvDate, serial);
-  return number && !("problem" in readDvNumber(number, dvDate)) ? number : "";
-}
+import { dvNumberFrom, dvPrefix, readDvNumber } from "../../dvNumber";
+import DvNumberFields from "./DvNumberFields";
 
 interface Props {
   /** From a notification: the request to show, scrolled to and outlined once loaded. */
@@ -271,43 +266,9 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                       </p>
                     )}
                     {form === "release" ? (
-                      // The date first: the number's year and month are the voucher date's (YYYY-MM-NNNN), so
-                      // only the serial is typed, as digits. The line under it shows the number as it will be saved.
-                      <div className="grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="space-y-1">
-                          <label htmlFor={`rq-dvd-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Voucher Date</label>
-                          <input id={`rq-dvd-${r.id}`} type="date" value={dvDate} max={getLocalTodayString()} disabled={saving} onChange={e => setDvDate(e.target.value)} className={INPUT} />
-                        </div>
-                        <div className="space-y-1">
-                          <label htmlFor={`rq-dv-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Disbursement Voucher No.</label>
-                          <div className="flex items-center gap-1">
-                            <span className="shrink-0 rounded-lg border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-xs text-slate-600" aria-hidden="true">
-                              {dvPrefix(dvDate) || "YYYY-MM"}-
-                            </span>
-                            {/* No maxLength: the whole number typed or pasted out of habit ("2026-10-0101")
-                                gives its serial (dvSerialInput), instead of being cut to "2026". */}
-                            <input id={`rq-dv-${r.id}`} type="text" inputMode="numeric" autoComplete="off" value={dvSerial} disabled={saving}
-                              onChange={e => {
-                                const typed = e.target.value;
-                                setDvSerial(dvSerialInput(typed));
-                                // A pasted whole number from another month than the voucher date's is said at once.
-                                const pasted = dvPrefixIn(typed), month = dvPrefix(dvDate);
-                                setFormError(pasted && pasted !== month
-                                  ? month ? `That number is from ${pasted}, but the voucher date is in ${month}: check the date, or the number.` : "Choose the voucher's date first."
-                                  : "");
-                              }}
-                              placeholder="0101" aria-describedby={`rq-dv-hint-${r.id}`} className={INPUT} />
-                          </div>
-                          {/* The number as it will be saved, only once it is one the server takes. */}
-                          <p id={`rq-dv-hint-${r.id}`} className="font-mono text-[11px] text-slate-600">
-                            {validDv(dvDate, dvSerial)
-                              ? `DV ${validDv(dvDate, dvSerial)}`
-                              : /^0+$/.test(dvSerial)
-                                ? "The voucher's serial can't be 0000."
-                                : `Serial on the voucher, up to 4 digits: the number reads ${dvPrefix(dvDate) || "YYYY-MM"}-NNNN.`}
-                          </p>
-                        </div>
-                      </div>
+                      // The date first, then only the serial (DvNumberFields.tsx).
+                      <DvNumberFields prefix="rq" recordId={r.id} dvDate={dvDate} onDvDate={setDvDate} serial={dvSerial} onSerial={setDvSerial}
+                        onWarning={setFormError} disabled={saving} />
                     ) : (
                       <div className="max-w-xl space-y-1">
                         <label htmlFor={`rq-why-${r.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-400">Why it is declined (the employee sees this)</label>

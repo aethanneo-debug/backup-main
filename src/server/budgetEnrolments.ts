@@ -58,6 +58,10 @@ export function enrolmentsForBudget(src: BudgetSources, changed?: { id: string; 
         if (report) q = { ...q, settledSpent: pesos(centavos(report.totalSpent)) };
       }
     }
+    // A reimbursement filed and not yet validated (src/reimbursement.ts): its claim is held like cash
+    // out, since a cut to the seminar's allocation no longer re-prices a seat once its report is filed.
+    const claim = (src.reports ?? []).find((s: any) => s && s.activityId === q.id && s.withinAllowance && !s.financeValidatedAt);
+    if (claim) q = { ...q, claimPending: pesos(centavos(claim.totalSpent)) };
     if (!out.has(q.id)) return q;
     return { ...q, advanceOutstanding: pesos(Math.max(0, out.get(q.id)! - (hand.get(q.id) || 0))) };
   });

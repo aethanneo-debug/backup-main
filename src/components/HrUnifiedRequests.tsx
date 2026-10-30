@@ -4,6 +4,7 @@ import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import ReturnForCorrectionDialog from "./liquidation/ReturnForCorrectionDialog";
 import ReportContents from "./liquidation/ReportContents";
+import { ClaimTypeBadge } from "./liquidation/ClaimType";
 import VehicleTripDetails from "./requests/VehicleTripDetails";
 import { answeredCorrectionSummary } from "./liquidation/resubmit/correctionModel";
 import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
@@ -105,7 +106,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
               _displayDate: firstDateString(s.createdAt, s.dateSubmitted),
               _title: `Liquidation ${s.submissionNo}`,
               _requester: s.employeeName,
-              _amount: s.totalReleased, // totalReleased or totalSpent depending on HR view
+              // A Liquidation's cash advance; a Reimbursement has none, so what the employee is owed.
+              _amount: s.claimType === "Reimbursement" ? s.totalSpent : s.totalReleased,
               _sequence: seq++
             });
           });
@@ -136,6 +138,9 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
     if (filterCategory !== "All") {
       if (["Personnel Request", "Liquidation"].includes(filterCategory)) {
         catMatch = item._category === filterCategory;
+      } else if (filterCategory.startsWith("Liquidation:")) {
+        // A report's claim type: settling a cash advance, or paid by the employee (2026-10-30).
+        catMatch = item._category === "Liquidation" && item.claimType === filterCategory.slice("Liquidation:".length);
       } else {
         catMatch = item.requestType === filterCategory || item.leaveType === filterCategory;
       }
@@ -251,6 +256,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
             <option value="Zoom Access Request">-- Zoom Access</option>
             <option value="Supply Request">-- Supply Requests</option>
             <option value="Liquidation">Liquidations</option>
+            <option value="Liquidation:Liquidation">-- Liquidations of a cash advance</option>
+            <option value="Liquidation:Reimbursement">-- Reimbursements (paid by the employee)</option>
           </select>
           <select 
             value={filterStatus} 
@@ -519,6 +526,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                   <td className="p-3 text-xs text-slate-800 font-medium">
                     <span className="flex flex-wrap items-center gap-1.5">
                       {item._title}
+                      {/* Settling a cash advance, or paid by the employee: seen before opening the row. */}
+                      {item._category === "Liquidation" && <ClaimTypeBadge claimType={item.claimType} />}
                       {/* Visible before opening the row, so a queue of ten shows at a
                           glance which ones carry an excess. */}
                       {overspendOf(item) && <OverspendBadge over={overspendOf(item)!} />}

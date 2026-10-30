@@ -241,6 +241,12 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
               <Users size={12} aria-hidden="true" /> For my group…
             </button>
           </div>
+          {/* The other way to pay for it (HSAC RAB 1 allows it, 2026-10-30): no request, and the
+              report claims it back after the seminar (src/reimbursement.ts). */}
+          <p className="text-[10px] text-slate-500">
+            Paying for it yourself? Don&rsquo;t request one: after the seminar, once HR records your attendance, claim it back
+            as a reimbursement under Liquidations Upload (up to your {formatCurrency(allowance)} share, less anything the office pays for you directly).
+          </p>
         </div>
       ) : canRequest && picking ? (
         <GroupCoverPicker

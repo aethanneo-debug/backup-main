@@ -111,6 +111,7 @@ import {
 import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
 import { dvKey, readDvNumber } from "./src/dvNumber";
+import { reimbursementLimit, reimbursementProblem, seminarClaimMode } from "./src/reimbursement";
 
 const app = express();
 const PORT = 3000;
@@ -1966,6 +1967,18 @@ app.get("/api/employees/:employeeId/trainings", authenticateToken, (req: any, re
   res.json({ status: "success", data: [...manualRecords, ...assignedRecords] });
 });
 
+// What an attendee who paid for a seminar themselves can claim back (src/reimbursement.ts): their
+// allowance less what HR entered as spent for them by hand, money the office paid itself. A report's own
+// ledger rows are written only at validation, so before then every row on the enrolment is HR's.
+function seatReimbursementLimit(participantId: string): number {
+  const p = (db.trainingParticipants || []).find((x: any) => x && x.id === participantId);
+  if (!p) return 0;
+  const hand = sumPesos((db.trainingLiquidations || [])
+    .filter((r: any) => r && r.trainingParticipantId === participantId && r.source !== "report")
+    .map((r: any) => r.amount));
+  return reimbursementLimit(p.allowanceAllocated, hand);
+}
+
 // Whether a seminar enrolment's liquidation form is open to its employee, and why not.
 // Only attendees get the form (HR records attendance once the seminar has started), and
 // each enrolment takes one report. POST /api/liquidation-submissions enforces the same.
@@ -2033,6 +2046,8 @@ app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (re
           startTime: prog.startTime,
           endTime: prog.endTime,
           allocatedBudget: p.allowanceAllocated,
+          // What they could claim back had they paid for it themselves (a Reimbursement, 2026-10-30).
+          reimbursementLimit: seatReimbursementLimit(p.id),
           status: p.status || "Scheduled",
           assignedBy: "HR",
           // Attendance and whether the liquidation form is open (see seminarFormEligibility).
@@ -2047,6 +2062,8 @@ app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (re
     })
     .filter(Boolean);
     
+  // Each seat's allowance and what could be claimed back: not kept in a shared PC's cache (7m).
+  res.set("Cache-Control", "no-store");
   res.json({ status: "success", data: assignedRecords });
 });
 
@@ -2955,6 +2972,14 @@ function invalidSupportingDocs(docs: any): boolean {
     && (!Array.isArray(docs) || docs.some((d: any) => !d || typeof d !== "object" || Array.isArray(d)));
 }
 const INVALID_DOCS_MESSAGE = "Supporting documents must be a list of files.";
+
+// A receipt with something in it, as the upload screens send one: a current (not replaced) file whose
+// content is a base64 data URL of at least 100 characters. A name alone, or an empty data URL, is not
+// a receipt (the security review of seminar reimbursements, 2026-10-30).
+function isRealFile(d: any): boolean {
+  if (!d || d.supersededAt || typeof d.content !== "string" || !SAFE_FILE_URL.test(d.content)) return false;
+  return d.content.length - d.content.indexOf(",") - 1 >= 100;
+}
 
 // Files as the claimant sends them. A file's history (replaces, supersededAt, replacedBy) and
 // when it reached the report are recorded by the server alone, and each file gets an id no
@@ -4159,6 +4184,9 @@ function correctionRequestFrom(
     if (field === "claimType" && sub.withinAdvance) {
       return { error: "A seminar report always settles its cash advance, so its claim type can't be returned for correction." };
     }
+    if (field === "claimType" && sub.withinAllowance) {
+      return { error: "A seminar the employee paid for themselves is always a Reimbursement, so its claim type can't be returned for correction." };
+    }
     items.push(item);
   }
   // A Return the employee couldn't answer would leave the report stuck as "Returned" (no one
@@ -4240,7 +4268,7 @@ function withinAdvanceProblem(
     return {
       code: 409,
       message: asked?.status === "Requested"
-        ? "Your cash advance request is still with Finance. File the report once it is released."
+        ? "Your cash advance request is still with Finance. File the report once it is released. If you paid for the seminar yourself, ask Finance to decline the request; you can then claim it back as a reimbursement."
         : asked?.status === "Declined"
           ? `Finance declined your cash advance request${asked.declineReason ? ` (${asked.declineReason})` : ""}. Ask for it again under My Assigned Activities.`
           : "Request your cash advance first, under My Assigned Activities. A seminar report settles the advance Finance releases, and its items can't go past it."
@@ -4325,16 +4353,21 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     }
   }
   // A seminar report settles the cash advance its attendee asked for and Finance released
-  // (the seminar budget flow, 2026-10-19), so its claim type is always Liquidation and
-  // nothing typed for an advance counts. A general activity's claimant still chooses.
-  const withinAdvance = !!seminarEnrolment;
-  if (!withinAdvance && !isClaimType(claimType)) {
+  // (the seminar budget flow, 2026-10-19), so its claim type is Liquidation and nothing typed
+  // for an advance counts. With no advance waiting or released for the seat, it claims back what
+  // the attendee paid themselves instead: a Reimbursement within their share (HSAC RAB 1 allows
+  // it, 2026-10-30; src/reimbursement.ts). Either way the seat decides, not the form. A general
+  // activity's claimant still chooses.
+  const seatAdvance = seminarEnrolment ? currentAdvanceFor(activityId) : null;
+  const withinAllowance = !!seminarEnrolment && seminarClaimMode(seatAdvance?.status) === "reimbursement";
+  const withinAdvance = !!seminarEnrolment && !withinAllowance;
+  if (!seminarEnrolment && !isClaimType(claimType)) {
     return res.status(400).json({ status: "error", message: CHOOSE_CLAIM_TYPE_MESSAGE });
   }
   // The cash advance as typed. It may be left out (a Reimbursement has none, and Finance's
   // record supplies a recorded one); anything sent must still be an amount of zero or
   // more. Whether it fits the claim type is checked below, once the record is looked up.
-  const releasedGiven = !withinAdvance && !(totalReleased === undefined || totalReleased === null || totalReleased === "");
+  const releasedGiven = !seminarEnrolment && !(totalReleased === undefined || totalReleased === null || totalReleased === "");
   const typedReleased = releasedGiven ? parsePeso(totalReleased) : 0;
   if (typedReleased === null) {
     return res.status(400).json({ status: "error", message: ADVANCE_AMOUNT_MESSAGE });
@@ -4350,7 +4383,7 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   }
   // Without particulars a single typed total is accepted, read strictly, except on a seminar
   // report, which lists its items.
-  const typedSpent = lines || withinAdvance ? null : parsePeso(totalSpent);
+  const typedSpent = lines || seminarEnrolment ? null : parsePeso(totalSpent);
   if (!lines && !(typedSpent !== null && typedSpent > 0)) {
     return res.status(400).json({ status: "error", message: "Add at least one particular describing what was spent." });
   }
@@ -4366,6 +4399,11 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     const eligibility = seminarFormEligibility(seminarEnrolment);
     if (!eligibility.canLiquidate) {
       return res.status(409).json({ status: "error", message: eligibility.reason });
+    }
+    // Money isn't paid out to someone who has left, as with a cash advance: a reimbursement is
+    // claimed with an active staff record and login (a stale token can't file one, 7a).
+    if (withinAllowance && !payeeIsActive(seminarEnrolment.employeeId)) {
+      return res.status(409).json({ status: "error", message: "Your staff record is no longer active, so no reimbursement can be claimed here. Ask HR." });
     }
   } else if ((req as any).user.role !== UserRole.SUPER_ADMIN
       && liquidationActivityOwnedByUser(activityId, req.user) === false) {
@@ -4418,16 +4456,20 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   // is handed back with an OR. A general activity: the claim type must fit the advance.
   // (Cleaned like a name: invisible and control characters can't make it read differently.)
   const refund = { orNo: signatoryText(refundOrNo), orDate: refundOrDate };
+  // A reimbursement: within their share, less what the office paid for them, with the receipts attached.
+  const reimbursable = withinAllowance ? seatReimbursementLimit(activityId) : 0;
   const moneyProblem = withinAdvance
     ? withinAdvanceProblem(activityId, advance, spent, refund)
     : (() => {
-        const message = claimTypeProblem(claimType, advance, { released: typedReleased, dvNo: typedDvNo });
+        const message = withinAllowance
+          ? reimbursementProblem({ spent, limit: reimbursable, files: (supportingDocs || []).filter(isRealFile).length }, pesoText)
+          : claimTypeProblem(claimType, advance, { released: typedReleased, dvNo: typedDvNo });
         return message ? { code: 400, message } : null;
       })();
   if (moneyProblem) {
     return res.status(moneyProblem.code).json({ status: "error", message: moneyProblem.message });
   }
-  const claim: ClaimType = withinAdvance ? "Liquidation" : claimType;
+  const claim: ClaimType = withinAdvance ? "Liquidation" : withinAllowance ? "Reimbursement" : claimType;
   // A Reimbursement has no advance, so nothing typed into its boxes is kept.
   const isReimbursement = claim === "Reimbursement";
   const released = advance ? round2(Number(advance.amount)) : (isReimbursement ? 0 : typedReleased);
@@ -4446,8 +4488,10 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     employeeId,
     employeeName: officialName,
     claimType: claim,
-    // Set only on a seminar report kept within its advance (see withinAdvanceProblem).
+    // Set only on a seminar report kept within its advance (see withinAdvanceProblem), or on one
+    // claiming back what its attendee paid themselves, within their share (src/reimbursement.ts).
     ...(withinAdvance ? { withinAdvance: true } : {}),
+    ...(withinAllowance ? { withinAllowance: true } : {}),
     totalReleased: released,
     totalSpent: spent,
     remainingBalance: pesos(centavos(released) - centavos(spent)),
@@ -4489,9 +4533,10 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     reimbursedBy: "",
 
     // HR's own figure, so Finance can see a stated advance that disagrees with it. A group's is what
-    // it may spend: the shares of those its advance covers who attended.
+    // it may spend: the shares of those its advance covers who attended; a reimbursement's, what its
+    // attendee could claim back.
     ...(facts ? {
-      allocatedAtFiling: groupAdvance ? groupSpendCap(groupAdvance)! : facts.allocated,
+      allocatedAtFiling: groupAdvance ? groupSpendCap(groupAdvance)! : withinAllowance ? reimbursable : facts.allocated,
       activityTitle: facts.title
     } : {}),
 
@@ -4524,7 +4569,19 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   }
   const groupText = groupAdvance ? ` for a group of ${groupAdvance.covers!.length} (${namesText(groupAdvance.covers!.map(c => c.employeeName))})` : "";
 
-  notify({ role: UserRole.HR_OFFICER }, {
+  // A reimbursement says so, with what it claims and the seat's cash advance record (a request
+  // declined, or an advance handed back before the seminar), so reviewers see how it came to be.
+  const advanceHistory = !withinAllowance ? ""
+    : !seatAdvance ? "no cash advance was asked for"
+    : seatAdvance.status === "Declined" ? `cash advance request${seatAdvance.advanceNo ? ` ${seatAdvance.advanceNo}` : ""} declined`
+    : seatAdvance.status === "Refunded" ? `cash advance ${seatAdvance.advanceNo} refunded${seatAdvance.refundedBeforeSeminar ? " before the seminar" : ""}${seatAdvance.refundOrNo ? ` (OR ${seatAdvance.refundOrNo})` : ""}`
+    : `cash advance ${seatAdvance.advanceNo}: ${seatAdvance.status}`;
+  notify({ role: UserRole.HR_OFFICER }, withinAllowance ? {
+    title: "Reimbursement Claim Submitted",
+    message: `${fullName} claims back ${pesoText(spent)} they paid themselves for ${facts?.title || "a seminar"} (${subNo}; within their ${pesoText(reimbursable)} share; ${advanceHistory}).`,
+    type: "info",
+    link: { tab: "requests", record: { kind: "liquidationReport", id: newSub.id } }
+  } : {
     title: "Liquidation Report Submitted",
     message: `${fullName} submitted a liquidation report${groupText} for activity relationship evaluation.`,
     type: "info",
@@ -4541,7 +4598,8 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Submit Liquidation",
-    `Submitted liquidation report: ${subNo}${groupText} (${claim}${withinAdvance ? `; ${balanceText(released, spent, newSub.refundOrNo)}` : ""})`);
+    `Submitted liquidation report: ${subNo}${groupText} (${claim}${withinAdvance ? `; ${balanceText(released, spent, newSub.refundOrNo)}` : ""}${withinAllowance
+      ? `; ${pesoText(spent)} claimed back, limit ${pesoText(reimbursable)}; ${advanceHistory}` : ""})`);
   saveDB();
   res.json({ status: "success", data: newSub });
 }));
@@ -4659,9 +4717,9 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   // back, so reopened particulars reopen the refund OR as well.
   if (!may("refundOr") && !may("claimType") && !(sub.withinAdvance && may("particulars"))) { delete body.refundOrNo; delete body.refundOrDate; }
   if (!may("claimType")) delete body.claimType;
-  // Such a report always settles Finance's advance: its claim type and advance aren't the
-  // claimant's to change.
-  if (sub.withinAdvance) {
+  // Such a report always settles Finance's advance, and a seminar paid out of pocket is always a
+  // Reimbursement with none: their claim type and advance aren't the claimant's to change.
+  if (sub.withinAdvance || sub.withinAllowance) {
     delete body.claimType; delete body.totalReleased; delete body.cashAdvanceDvNo; delete body.cashAdvanceDvDate;
   }
   // A report filed before Box B existed must name one now, ticked or not.
@@ -4832,6 +4890,12 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     const problem = withinAdvanceProblem(sub.activityId, recordedAdvance, newSpent, { orNo: refundNoNow, orDate: refundDateNow }, sub.id);
     if (problem) return res.status(problem.code).json({ status: "error", message: problem.message });
   }
+  // Paid out of pocket: still within their share as it is now (HR may have re-priced the seminar or
+  // entered what the office paid). Its receipts were attached at filing, and a file is never removed.
+  if (sub.withinAllowance) {
+    const message = reimbursementProblem({ spent: newSpent, limit: seatReimbursementLimit(sub.activityId) }, pesoText);
+    if (message) return res.status(400).json({ status: "error", message });
+  }
 
   // Update details. An itemised correction recomputes the total from its lines; a
   // submission that was never itemised keeps accepting a plain typed figure.
@@ -4929,6 +4993,11 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     old.replacedBy = fresh.id;
     sub.supportingDocs.push(fresh);
   });
+  // Paid out of pocket: still at least one receipt with something in it once the files changed (a
+  // replacement could be an empty copy). The whole correction is undone if not.
+  if (sub.withinAllowance && !(sub.supportingDocs || []).some(isRealFile)) {
+    return res.status(400).json({ status: "error", message: "Attach your official receipts (OR) for what you paid." });
+  }
 
   // The corrected report goes back to whoever returned it (open question 5): to HR, or to
   // Finance with HR's verification still standing. A report returned before checklists
@@ -5081,6 +5150,21 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
         message: `${sub.submissionNo} spends ${pesoText(Number(sub.totalSpent))}, more than the shares of those its group's cash advance covers who attended (${pesoText(spendCap)}). Return it so the holder can correct it.`
       });
     }
+    // A seminar paid out of pocket may claim only its attendee's share less what the office paid for
+    // them, as it is now: HR may have re-priced the seminar or entered expenses since it was filed.
+    if (sub.withinAllowance && !(sub.supportingDocs || []).some(isRealFile)) {
+      return res.status(409).json({
+        status: "error",
+        message: `${sub.submissionNo} has no receipt with anything in it. Return it so the employee can attach their official receipts.`
+      });
+    }
+    const reimbursableNow = sub.withinAllowance ? seatReimbursementLimit(sub.activityId) : null;
+    if (reimbursableNow !== null && centavos(sub.totalSpent) > centavos(reimbursableNow)) {
+      return res.status(409).json({
+        status: "error",
+        message: `${sub.submissionNo} claims ${pesoText(Number(sub.totalSpent))}, more than ${sub.employeeName} can claim back now (${pesoText(reimbursableNow)}: their share of the seminar's budget, less what the office paid for them). Return it so the employee can correct it.`
+      });
+    }
     if (handedBack && (!advanceOnFileFor(sub) || handedBack.status === "Over"
         || (handedBack.leftover > 0 && !(String(sub.refundOrNo || "").trim() && isCalendarDate(sub.refundOrDate))))) {
       return res.status(409).json({
@@ -5134,8 +5218,9 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
       // The report is now this participant's record of spending. Anything HR typed for
       // them before it arrived is replaced, so the seminar never counts it twice. Older
       // rows have no `source`: HR's carry a user id in submittedBy, a report's the
-      // employee's own id. (A group's: for everyone it covers.)
-      const handRows = (db.trainingLiquidations || []).filter((r: any) =>
+      // employee's own id. (A group's: for everyone it covers.) Not on a reimbursement: what
+      // HR entered there is what the office paid itself, already left out of the claim's limit.
+      const handRows = sub.withinAllowance ? [] : (db.trainingLiquidations || []).filter((r: any) =>
         coveredIds.has(r.trainingParticipantId) && (r.source === "hr" || (!r.source && r.submittedBy !== sub.employeeId)));
       if (handRows.length > 0) {
         const handTotal = round2(handRows.reduce((s: number, r: any) => s + Number(r.amount || 0), 0));
@@ -5321,7 +5406,8 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
     returnNote = ` (round ${parsed.request.round}: ${parsed.request.items.map(i => i.field).join(", ")})`;
   }
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}${
+    action === "Validate" && sub.withinAllowance ? ` (a reimbursement: ${pesoText(Number(sub.totalSpent))} owed to ${sub.employeeName}, to be paid from the Reimbursement Queue)` : ""}`);
   saveDB();
   res.json({ status: "success", data: sub });
 }));
@@ -5338,6 +5424,14 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
   const { dvNo, date } = req.body;
   const sub = db.liquidationSubmissions.find(l => l.id === req.params.id);
   if (!sub) return res.status(404).json({ status: "error", message: "Submission records not found" });
+  // Nobody pays themselves, as nobody releases a cash advance to themselves (the plan approved
+  // 2026-10-30; until then it was allowed and flagged): another Financial Officer or the
+  // Administrator records it. The seat's employee is checked as well as the report's, since a staff
+  // code can be edited (7j).
+  const seat = (db.trainingParticipants || []).find((p: any) => p && p.id === sub.activityId);
+  if (isOwnRecord(req.user, sub.employeeId) || (seat && isOwnRecord(req.user, seat.employeeId))) {
+    return res.status(403).json({ status: "error", message: "You can't record the payment of your own claim: another Financial Officer or the Administrator has to." });
+  }
 
   const owed = round2(Number(sub.reimbursementAmount || 0));
   if (owed <= 0) {
@@ -5359,12 +5453,23 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
       message: `${mismatch || `${sub.submissionNo}'s figures no longer come to PHP ${owed.toFixed(2)} owed.`} It can't be paid until the report and the cash advance agree.`
     });
   }
-  if (!String(dvNo || "").trim() || !isIsoDate(date)) {
-    return res.status(400).json({ status: "error", message: "A disbursement voucher number and a payment date are required." });
+  // The voucher it is paid on follows a release's rules (src/dvNumber.ts, 12q): dated no later than
+  // today and not before the report was validated, numbered YYYY-MM-NNNN in that date's month, and
+  // never a number already on a cash advance or another reimbursement.
+  if (!isCalendarDate(date) || date > manilaToday()) {
+    return res.status(400).json({ status: "error", message: "Enter the DV date as YYYY-MM-DD, no later than today." });
   }
+  const validatedOn = manilaDateOf(sub.financeValidatedAt);
+  if (validatedOn && date < validatedOn) {
+    return res.status(400).json({ status: "error", message: `The DV can't be dated before the report was validated (${formatLongDate(validatedOn)}).` });
+  }
+  const dv = readDvNumber(dvNo, date);
+  if ("problem" in dv) return res.status(400).json({ status: "error", message: dv.problem });
+  const dvUsed = dvInUse(dv.value, { reportId: sub.id });
+  if (dvUsed) return res.status(409).json({ status: "error", message: dvUsed });
 
   sub.reimbursementStatus = "Reimbursed";
-  sub.reimbursementDvNo = String(dvNo).trim();
+  sub.reimbursementDvNo = dv.value;
   sub.reimbursementDate = date;
   sub.reimbursedBy = (req as any).user.fullName;
 
@@ -5378,9 +5483,6 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Record Reimbursement",
     `Reimbursed PHP ${owed.toFixed(2)} to ${sub.employeeName} for ${sub.submissionNo} via DV ${sub.reimbursementDvNo}`);
-  if (isOwnRecord(req.user, sub.employeeId)) {
-    flagSelfApproval(req.user, `recorded the reimbursement of their own claim ${sub.submissionNo}: ${pesoText(owed)} on DV ${sub.reimbursementDvNo}`);
-  }
   saveDB();
   res.json({ status: "success", data: sub });
 }));
@@ -6105,6 +6207,19 @@ function manilaDateOf(iso: string | undefined): string {
   return isNaN(ms) ? "" : new Date(ms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+// Each voucher has its own number (12q), whether it released a cash advance or paid a reimbursement
+// (2026-10-30): one already used is a typing slip, or the same voucher paying twice. Compared as the
+// same voucher however it was typed (dvKey), since earlier numbers were free text ("2026-10-101").
+// The refusal, or null.
+function dvInUse(dvNo: string, except: { advanceId?: string; reportId?: string } = {}): string | null {
+  const key = dvKey(dvNo);
+  const advance = (db.cashAdvances || []).find((a: any) => a && a.id !== except.advanceId && a.dvNo && dvKey(a.dvNo) === key);
+  if (advance) return `DV ${dvNo} is already on cash advance ${advance.advanceNo} (${advance.employeeName}). Each voucher has its own number: check the one on this voucher.`;
+  const paid = (db.liquidationSubmissions || []).find((s: any) => s && s.id !== except.reportId && s.reimbursementDvNo && dvKey(s.reimbursementDvNo) === key);
+  if (paid) return `DV ${dvNo} already paid the reimbursement on ${paid.submissionNo} (${paid.employeeName}). Each voucher has its own number: check the one on this voucher.`;
+  return null;
+}
+
 // Finance releases an employee's request: the voucher number and date, and the advance is out.
 app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req: any, res: any) => {
   if (!isCashAdvanceRole(req.user.role)) {
@@ -6141,16 +6256,9 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
   if (asked && dvDate < asked) {
     return res.status(400).json({ status: "error", message: `The DV can't be dated before the request (${formatLongDate(asked)}).` });
   }
-  // Each voucher has its own number: one already on another advance is a typing slip, or the same
-  // voucher paying twice. Compared as the same voucher however it was typed (dvKey): an earlier
-  // advance's number was free text ("2026-10-101").
-  const sameDv = (db.cashAdvances || []).find((a: any) => a && a.id !== request.id && a.dvNo && dvKey(a.dvNo) === dvKey(dvNo));
-  if (sameDv) {
-    return res.status(409).json({
-      status: "error",
-      message: `DV ${dvNo} is already on cash advance ${sameDv.advanceNo} (${sameDv.employeeName}). Each voucher has its own number: check the one on this voucher.`
-    });
-  }
+  // Each voucher has its own number, across advances and reimbursements (dvInUse).
+  const dvUsed = dvInUse(dvNo, { advanceId: request.id });
+  if (dvUsed) return res.status(409).json({ status: "error", message: dvUsed });
 
   // The allowance as it is now: HR may have changed it since the request. A group is re-priced the
   // same way, person by person, and anyone who no longer qualifies (marked absent, left the

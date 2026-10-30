@@ -60,6 +60,16 @@ export default function ReportContents({ report }: Props) {
         </div>
       </div>
 
+      {/* A seminar paid out of the employee's own pocket (HSAC RAB 1 allows it, 2026-10-30): no cash
+          advance, and what is owed back, within their share as it stood when it was filed. */}
+      {report?.withinAllowance && (
+        <p className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-900">
+          <strong>Paid by the employee:</strong> no cash advance was released for this seminar, so the {formatCurrency(spent)} spent
+          is owed back to them{peso(report.allocatedAtFiling) > 0 ? `, within their ${formatCurrency(peso(report.allocatedAtFiling))} share` : ""}.
+          Finance pays it from the Reimbursement Queue once it is validated.
+        </p>
+      )}
+
       {/* A seminar report kept within its advance (the seminar budget flow): balanced, or what
           was handed back with its OR, and once validated, what went back to the fund. */}
       {report?.withinAdvance && (

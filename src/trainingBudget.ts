@@ -18,6 +18,10 @@ interface SeminarEnrolment {
   attendance?: string;
   /** A cash advance Finance released to this enrolment that is not yet liquidated or refunded (set by the server). */
   advanceOutstanding?: number | string;
+  /** A reimbursement filed for this enrolment and not yet validated (set by the server, 2026-10-30): what
+   * its attendee claims back, held like cash out, so cutting the seminar's allocation after it was filed
+   * can't free money still owed (src/reimbursement.ts). */
+  claimPending?: number | string;
   /** What Finance validated as spent by this enrolment once it is "Liquidated" (set by the server
    * when it is known). An enrolment liquidated without it keeps its share held, as before. */
   settledSpent?: number | string;
@@ -140,10 +144,10 @@ export function seminarBudget(program: SeminarAmounts, participants: SeminarEnro
   const stillToReport = attending.length - settledAttendees.length;
   const sharesPart = Math.max(units(allocated) - absentShares - settledAttendees.length * shareUnits, stillToReport * shareUnits);
   const settledSpent = settledAttendees.reduce((s, p) => s + units(Math.max(0, Number(p.settledSpent) || 0)), 0);
-  // Cash still out with an attendee: beyond their own share while it still counts; all of it
-  // once their spending counts instead.
+  // Cash still out with an attendee, or what they claim back as a reimbursement not yet validated:
+  // beyond their own share while it still counts; all of it once their spending counts instead.
   const attendeeExcess = attending.reduce((s, p) => {
-    const cash = units(Math.max(0, Number(p.advanceOutstanding) || 0));
+    const cash = units(Math.max(0, Number(p.advanceOutstanding) || 0, Number(p.claimPending) || 0));
     return s + (spendingKnown(p) ? cash : Math.max(0, cash - shareUnits));
   }, 0);
   const openUnits = Math.max(sharesPart + settledSpent + attendeeExcess, units(spent) + units(outstanding) - units(held)) + units(held);

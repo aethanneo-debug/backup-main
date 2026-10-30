@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Wallet } from "lucide-react";
-import { apiCall, formatCurrency, formatDate } from "../../utils";
+import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
+import { dvNumberFrom, dvPrefix, readDvNumber } from "../../dvNumber";
+import DvNumberFields from "./DvNumberFields";
 import { overspendOf, OverspendBadge } from "../liquidation/overspend";
 import {
   ClaimTypeBadge,
@@ -31,6 +33,15 @@ function mismatch(sub: any): boolean {
   return Number(sub.allocatedAtFiling) > Number(sub.totalReleased || 0);
 }
 
+// Shown in red: a mismatch, but not on a seminar paid out of pocket, which has no advance by design.
+const flagged = (sub: any) => mismatch(sub) && !sub?.withinAllowance;
+
+// The Manila day of a stored timestamp (YYYY-MM-DD), or "" when there is none.
+function manilaDay(at: unknown): string {
+  const t = Date.parse(String(at || ""));
+  return Number.isFinite(t) ? new Date(t + 8 * 3600e3).toISOString().slice(0, 10) : "";
+}
+
 /**
  * Claims where the employee spent more than they received.
  *
@@ -44,7 +55,8 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
   // it will be marked as self-approved in the audit log (the user's decision, 2026-10-20).
   const isOwnClaim = (sub: any) => !!currentEmployeeId && sub?.employeeId === currentEmployeeId;
   const [openId, setOpenId] = useState<string | null>(null);
-  const [dvNo, setDvNo] = useState("");
+  // The voucher's serial; its year and month are the voucher date's (YYYY-MM-NNNN, as on a release).
+  const [dvSerial, setDvSerial] = useState("");
   const [payDate, setPayDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -83,20 +95,24 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
 
   function openForm(id: string) {
     setOpenId(id);
-    setDvNo("");
-    // Default to today; Finance can back-date to the DV's actual release date.
-    setPayDate(new Date().toISOString().split("T")[0]);
+    setDvSerial("");
+    // Default to today (Manila); Finance can back-date to the DV's actual date.
+    setPayDate(getLocalTodayString());
     setError("");
   }
 
   async function recordPayment(sub: any) {
     setError("");
-    if (!dvNo.trim()) {
-      setError("Enter the disbursement voucher number.");
+    // The same voucher rules as a release (src/dvNumber.ts); the server checks them and refuses a number
+    // already on an advance or another reimbursement.
+    if (!dvPrefix(payDate)) {
+      setError("Choose the voucher's date first.");
       return;
     }
-    if (!payDate) {
-      setError("Enter the date the voucher was released.");
+    const dvNo = dvNumberFrom(payDate, dvSerial);
+    const read = readDvNumber(dvNo, payDate);
+    if ("problem" in read) {
+      setError(dvSerial ? read.problem : "Type the voucher's serial number, the digits after its year and month.");
       return;
     }
     if (isOwnClaim(sub) && !window.confirm(`${sub.submissionNo} is your own claim. Recording its payment will be marked as self-approved in the audit log. Record it anyway?`)) {
@@ -107,7 +123,7 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
     try {
       const res = await apiCall(`/api/liquidation-submissions/${sub.id}/record-reimbursement`, {
         method: "PUT",
-        body: JSON.stringify({ dvNo: dvNo.trim(), date: payDate })
+        body: JSON.stringify({ dvNo, date: payDate })
       });
       if (res.status === "success") {
         setOpenId(null);
@@ -182,10 +198,18 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
             const isOpen = openId === sub.id;
             return (
               <div key={sub.id} data-record-id={sub.id} className="p-4 border border-amber-200 rounded-xl bg-amber-50/20 space-y-3">
-                {/* A Reimbursement always shows HR's allocation without an advance, and the
+                {/* A seminar paid out of the employee's own pocket (2026-10-30): every cash advance now
+                    goes through the system, so none was released for the seat; it is owed within their
+                    share. An older Reimbursement shows HR's allocation without an advance, and the
                     server already refuses to pay one with an advance on record, so it gets a
                     reminder rather than an alarm. */}
-                {mismatch(sub) && sub.claimType === "Reimbursement" ? (
+                {sub.withinAllowance ? (
+                  <p className="text-[11px] text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                    <strong>Paid by the employee:</strong> no cash advance was released for this seminar, so the{" "}
+                    <strong>{formatCurrency(owed)}</strong> claimed is owed back to them
+                    {Number(sub.allocatedAtFiling) > 0 ? <>, within their {formatCurrency(Number(sub.allocatedAtFiling))} share</> : null}.
+                  </p>
+                ) : mismatch(sub) && sub.claimType === "Reimbursement" ? (
                   <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-2">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" aria-hidden="true" />
                     <span>
@@ -230,14 +254,14 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
                     <p className="text-[11px] text-slate-500 truncate">{sub.activityTitle || sub.activityId}</p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-2xl">
                       <div className="bg-white p-2 rounded border border-slate-100">
-                        <span className="text-[9px] text-slate-400 font-semibold block font-mono">HR Allocated</span>
+                        <span className="text-[9px] text-slate-400 font-semibold block font-mono">{sub.withinAllowance ? "Their Share" : "HR Allocated"}</span>
                         <strong className="text-xs text-slate-700 font-mono">
                           {sub.allocatedAtFiling === undefined ? "Not on record" : formatCurrency(Number(sub.allocatedAtFiling))}
                         </strong>
                       </div>
-                      <div className={`p-2 rounded border ${mismatch(sub) ? "bg-rose-50 border-rose-200" : "bg-white border-slate-100"}`}>
-                        <span className={`text-[9px] font-semibold block font-mono ${mismatch(sub) ? "text-rose-700" : "text-slate-400"}`}>Claimant States Received</span>
-                        <strong className={`text-xs font-mono ${mismatch(sub) ? "text-rose-800" : "text-slate-700"}`}>{formatCurrency(Number(sub.totalReleased || 0))}</strong>
+                      <div className={`p-2 rounded border ${flagged(sub) ? "bg-rose-50 border-rose-200" : "bg-white border-slate-100"}`}>
+                        <span className={`text-[9px] font-semibold block font-mono ${flagged(sub) ? "text-rose-700" : "text-slate-400"}`}>Claimant States Received</span>
+                        <strong className={`text-xs font-mono ${flagged(sub) ? "text-rose-800" : "text-slate-700"}`}>{formatCurrency(Number(sub.totalReleased || 0))}</strong>
                       </div>
                       <div className="bg-white p-2 rounded border border-slate-100">
                         <span className="text-[9px] text-slate-400 font-semibold block font-mono">Total Spent</span>
@@ -262,35 +286,10 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
 
                 {isOpen && (
                   <div className="border-t border-amber-200 pt-3 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-                      <div className="space-y-1">
-                        <label htmlFor={`dv-${sub.id}`} className="text-[10px] font-bold text-slate-400 uppercase font-mono">
-                          Disbursement Voucher No.
-                        </label>
-                        <input
-                          id={`dv-${sub.id}`}
-                          type="text"
-                          value={dvNo}
-                          disabled={saving}
-                          onChange={e => setDvNo(e.target.value)}
-                          placeholder="2026-09-412"
-                          className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label htmlFor={`dt-${sub.id}`} className="text-[10px] font-bold text-slate-400 uppercase font-mono">
-                          Date Released
-                        </label>
-                        <input
-                          id={`dt-${sub.id}`}
-                          type="date"
-                          value={payDate}
-                          disabled={saving}
-                          onChange={e => setPayDate(e.target.value)}
-                          className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100"
-                        />
-                      </div>
-                    </div>
+                    {/* The voucher it is paid on: its date, then only the serial (DvNumberFields.tsx). It
+                        can't be dated before the report was validated. */}
+                    <DvNumberFields prefix="rb" recordId={sub.id} dvDate={payDate} onDvDate={setPayDate} serial={dvSerial} onSerial={setDvSerial}
+                      onWarning={setError} disabled={saving} minDate={manilaDay(sub.financeValidatedAt)} />
 
                     {error && (
                       <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">

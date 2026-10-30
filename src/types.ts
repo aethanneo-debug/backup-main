@@ -812,6 +812,11 @@ export interface LiquidationSubmission {
   // (form and server), the claim type is always Liquidation, and a leftover is handed back with
   // an OR. Reports filed before keep the rules they were filed under.
   withinAdvance?: boolean;
+  // A seminar report filed with no cash advance waiting or released for its seat (HSAC RAB 1 allows
+  // it, 2026-10-30): a Reimbursement of what the attendee paid themselves, its items within their
+  // share less what the office paid for them, with the receipts attached (src/reimbursement.ts).
+  // Finance pays it from the Reimbursement Queue. Reports filed before keep their rules.
+  withinAllowance?: boolean;
   // The leftover of the advance, recorded once when Finance validates: what went back to the
   // training budget, with the employee's refund OR.
   fundReturn?: {

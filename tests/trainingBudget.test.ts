@@ -290,3 +290,21 @@ describe("archived seminars (the user, 2026-10-23: archive instead of delete)", 
       "restoring an unused seminar (its participants back) needs its whole allocation of room");
   });
 });
+
+// A seminar paid out of the employee's own pocket (src/reimbursement.ts, 2026-10-30): once filed, the
+// seat's allowance is no longer re-priced, so the claim is held like cash out (the security review's case).
+describe("a reimbursement filed and not yet validated stays held", () => {
+  // ₱10,000 for 2 seats; A attended and claims back ₱5,000, their whole share.
+  const two = { id: "P", allocatedBudget: 10000, usedBudget: 0, maxParticipants: 2 };
+  const a = enrol("A", { status: "Liquidation Pending", attendance: "Attended", claimPending: 5000 });
+  test("cutting the allocation to ₱4,000 after the claim can't free money still owed", () => {
+    assert.equal(seminarBudget(two, [a]).committed, 10000, "before the cut: the whole allocation is held");
+    // Without the claim the ₱2,000 share would be all that is held for A, and ₱6,000 would look free.
+    assert.equal(seminarBudget(two, [{ ...a, claimPending: undefined }], 4000).committed, 4000, "(as it was: only the share)");
+    assert.equal(seminarBudget(two, [a], 4000).committed, 7000, "the ₱5,000 claim stays held beyond A's new ₱2,000 share");
+  });
+  test("once validated, what was spent counts instead, as for any attendee", () => {
+    const settled = { ...a, status: "Liquidated", claimPending: undefined, settledSpent: 5000 };
+    assert.equal(seminarBudget({ ...two, usedBudget: 5000 }, [settled], 4000).committed, 5000);
+  });
+});

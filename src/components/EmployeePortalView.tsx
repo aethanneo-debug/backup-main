@@ -27,6 +27,7 @@ import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal"
 import AdvanceRequestPanel, { currentAdvanceOf } from "./liquidation/AdvanceRequestPanel";
 import BalanceCheck, { BalanceStatusBadge, FundReturnNote } from "./liquidation/BalanceCheck";
 import { withinAdvanceSubmitProblem } from "./liquidation/withinAdvance";
+import { reimbursementProblem, seminarClaimMode } from "../reimbursement";
 import { liquidationBalance } from "../liquidationMoney";
 import {
   User as UserIcon,
@@ -135,7 +136,24 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // Why the last submit of a seminar's report was stopped (no advance, over it, the OR missing).
   // Its banner goes once the items or the sheet change; the balance check shows where things stand.
   const [moneyError, setMoneyError] = useState("");
-  const isReimbursement = claimType === "Reimbursement";
+  // The seminar budget flow: a seminar's report (a new one, or one filed under the flow)
+  // settles the advance Finance released. Its claim type is fixed, its items stay within the
+  // advance, and a leftover is handed back with an OR. The server enforces the same.
+  const selectedItem = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId);
+  // With no advance waiting or released for the seat, a seminar's report claims back what the employee
+  // paid themselves instead (HSAC RAB 1 allows it, 2026-10-30): a Reimbursement, within their share
+  // less what the office paid for them, with the receipts attached (src/reimbursement.ts). Unknown
+  // while the advances haven't loaded, so the form then says so as a seminar's report does.
+  const allowanceForm = resubmittingItem ? !!resubmittingItem.withinAllowance
+    : selectedItem?.source === "seminar" && !advancesFailed && seminarClaimMode(currentAdvanceOf(myAdvances, selectedActivityId)?.status) === "reimbursement";
+  // What it may claim back, from the seminar list; unknown (null) when that list didn't load.
+  const reimbursable: number | null = selectedItem ? Number(selectedItem.reimbursementLimit || 0) : null;
+  const withinAdvanceForm = resubmittingItem ? !!resubmittingItem.withinAdvance : selectedItem?.source === "seminar" && !allowanceForm;
+  // A seminar's claim type comes from its seat, worked out afresh on every render (the advances may
+  // load or change after it was chosen), so it can't go stale; only a general activity's claimant
+  // chooses (instructor's note 10).
+  const effectiveClaimType: ClaimType | "" = allowanceForm ? "Reimbursement" : withinAdvanceForm ? "Liquidation" : claimType;
+  const isReimbursement = effectiveClaimType === "Reimbursement";
   // My Settlement Log Entries, narrowed by claim type.
   const [logFilter, setLogFilter] = useState<ClaimTypeFilterValue>("All");
 
@@ -200,11 +218,6 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     : isReimbursement ? 0 : totalReleased;
   const refundDue = Math.round((releasedOnSheet - effectiveSpent) * 100) / 100 > 0;
 
-  // The seminar budget flow: a seminar's report (a new one, or one filed under the flow)
-  // settles the advance Finance released. Its claim type is fixed, its items stay within the
-  // advance, and a leftover is handed back with an OR. The server enforces the same.
-  const selectedItem = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId);
-  const withinAdvanceForm = resubmittingItem ? !!resubmittingItem.withinAdvance : selectedItem?.source === "seminar";
   const seminarAdvance = withinAdvanceForm ? currentAdvanceOf(myAdvances, selectedActivityId) : null;
   // A group's report (HSAC RAB 1): the attendees its cash advance covers, offered on each line as
   // "For" (optional). The holder's seminar card says who attended.
@@ -527,6 +540,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               id: s.id,
               label: `Seminar - ${s.title}`,
               allocated: Number(s.allocatedBudget || 0),
+              // What a reimbursement may claim back: their share less what the office paid for them.
+              reimbursementLimit: Number(s.reimbursementLimit || 0),
               liquidationDueDate: s.liquidationDueDate,
               source: "seminar" as const
             }))
@@ -577,13 +592,18 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     // allocation - an allocation is not money in hand, and seeding with it was what made
     // an unfunded assignment look funded.
     const advance = advanceOnRecord(id);
-    // A seminar's report always settles its advance (the seminar budget flow). A general
-    // activity's claimant chooses, so a type set for a seminar isn't carried over to one, and
-    // with an advance released it can only be a Liquidation.
+    // A seminar's report settles its advance (the seminar budget flow), or, with none waiting or
+    // released for the seat, claims back what the employee paid themselves (as allowanceForm reads
+    // it). A general activity's claimant chooses, so a type set for a seminar isn't carried over to
+    // one, and with an advance released it can only be a Liquidation.
     if ((liquidatable ?? []).find((a: any) => a.id === id)?.source === "seminar") {
-      setClaimType("Liquidation");
-      if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
-      setClaimTypeError("");
+      if (!advancesFailed && seminarClaimMode(currentAdvanceOf(myAdvances, id)?.status) === "reimbursement") {
+        chooseClaimType("Reimbursement");
+      } else {
+        setClaimType("Liquidation");
+        if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
+        setClaimTypeError("");
+      }
     } else if (wasSeminar || (advance && claimType === "Reimbursement")) {
       setClaimType("");
       if (claimTypeError) setError(prev => (prev === claimTypeError ? "" : prev));
@@ -789,15 +809,30 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         return;
       }
     }
+    // Paid out of pocket, mirroring the server: within their share, less what the office paid for
+    // them, with the receipts attached (on a correction they were attached at filing). With the
+    // seminar list not loaded the limit isn't known here, so the server alone checks it.
+    if (allowanceForm && reimbursable !== null) {
+      const problem = reimbursementProblem({
+        spent: effectiveSpent,
+        limit: reimbursable,
+        ...(resubmittingItem ? {} : { files: attachedFiles.length })
+      }, formatCurrency);
+      if (problem) {
+        setMoneyError(problem);
+        setError(problem);
+        return;
+      }
+    }
 
     // Claim type, mirroring the server: a Liquidation needs a cash advance (Finance's
     // record, or its DV number and amount typed in), and a Reimbursement can't have one.
     const typedDvNo = coaFields.cashAdvanceDvNo.trim();
-    const claimProblem = !claimType
+    const claimProblem = !effectiveClaimType
       ? "Choose whether this is a Liquidation (settling a cash advance) or a Reimbursement (money you paid yourself)."
-      : claimType === "Reimbursement" && activeAdvance
+      : effectiveClaimType === "Reimbursement" && activeAdvance
         ? "Finance released a cash advance for this assignment, so this report is a Liquidation."
-        : claimType === "Liquidation" && !activeAdvance && !(totalReleased > 0 && typedDvNo)
+        : effectiveClaimType === "Liquidation" && !activeAdvance && !(totalReleased > 0 && typedDvNo)
           ? totalReleased > 0
             ? "Enter the DV number of the cash advance you received."
             : "A Liquidation settles a cash advance. Enter its DV number and amount on the sheet, or choose Reimbursement if you paid out of your own pocket."
@@ -884,7 +919,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         method,
         body: JSON.stringify({
           activityId: selectedActivityId,
-          claimType,
+          claimType: effectiveClaimType,
           totalReleased: releasedOnSheet,
           // Only a fallback: the server derives totalSpent from the particulars whenever
           // there is at least one usable line.
@@ -1711,16 +1746,17 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
                 {/* One form, but the claimant says which kind of claim it is (instructor's
                     note 10). The server checks the choice against Finance's records. A seminar's
-                    report always settles its cash advance, so its type is fixed (the seminar
-                    budget flow, decision 4). */}
-                {withinAdvanceForm ? (
+                    report settles its cash advance, or, with none for the seat, claims back what
+                    the employee paid, so its type is fixed (the seminar budget flow, decision 4;
+                    reimbursements, 2026-10-30). */}
+                {withinAdvanceForm || allowanceForm ? (
                   <div className="space-y-1">
                     <label htmlFor="liq-claim-type-fixed" className="block text-[10px] font-bold text-slate-400 uppercase font-mono">Claim Type</label>
                     <input
                       id="liq-claim-type-fixed"
                       type="text"
                       readOnly
-                      value="Liquidation: settles your cash advance"
+                      value={allowanceForm ? "Reimbursement: you paid for this seminar yourself" : "Liquidation: settles your cash advance"}
                       aria-describedby="liq-claim-type-hint"
                       className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold bg-slate-100"
                     />
@@ -1788,7 +1824,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   ) : seminarAdvance?.status === "Requested" ? (
                     <>
                       <strong>Your cash advance request is waiting for Finance.</strong> You can file this report once it is
-                      released.
+                      released. If you paid for the seminar yourself, ask Finance to decline the request; you can then claim
+                      it back here as a reimbursement.
                     </>
                   ) : (
                     <>
@@ -1811,6 +1848,13 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   </>
                 ) : !selectedActivityId ? (
                   "Choose an assignment first."
+                ) : allowanceForm ? (
+                  <>
+                    <strong>Paid out of your own pocket:</strong> no cash advance was released for this seminar, so this
+                    report claims back what you spent, up to {reimbursable !== null ? <strong>{formatCurrency(reimbursable)}</strong> : "your limit"} (your share of
+                    the seminar&rsquo;s budget, less anything the office paid for you). Attach your official receipts;
+                    Finance pays you once it validates the report.
+                  </>
                 ) : isReimbursement ? (
                   <>
                     <strong>Paid out of your own pocket:</strong> the cash advance stays at 0, and everything you spent is

@@ -29,7 +29,7 @@ export function withinAdvanceSubmitProblem(form: {
   if (!form.advance) {
     if (form.advancesFailed) return "Your cash advance record couldn't be loaded, so this report can't be checked. Reload the page and try again.";
     return form.current?.status === "Requested"
-      ? "Your cash advance request is still with Finance. File the report once it is released."
+      ? "Your cash advance request is still with Finance. File the report once it is released. If you paid for the seminar yourself, ask Finance to decline the request; you can then claim it back as a reimbursement."
       : "Request your cash advance first, under My Assigned Activities. This report settles the advance Finance releases.";
   }
   if (!form.hasItems && form.itemsEditable) return "Add at least one particular describing what the cash advance was spent on.";
