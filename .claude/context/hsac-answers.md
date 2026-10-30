@@ -1,7 +1,7 @@
 # HSAC RAB 1's answers (the office's own rules: cite them when a feature follows one)
 
 Seminar attendance, cash advances, liquidation and refunds. Answers 1–7 were given by HSAC RAB 1's
-Budget unit on 2026-10-26, answer 8 by HSAC RAB 1 on 2026-10-28; all were relayed by the team. Each
+Budget unit on 2026-10-26, answer 8 by HSAC RAB 1 on 2026-10-28, answer 9 on 2026-10-30; all were relayed by the team. Each
 answer is quoted as given, followed by how we read it and what the system does about it.
 
 1. **If 2 or more employees are set to attend the same TDP seminar, do they attend at the same time?**
@@ -55,8 +55,12 @@ answer is quoted as given, followed by how we read it and what the system does a
    - System (known-issues 12z):
      - Part A (built 2026-10-28): someone the TDP doesn't identify for a seminar (their own Plan A for its year lists none of its needs) is seated only with a recorded justification: the kind (designated to a committee from the list above, identified by the Chief, or another reason), the reason and who identified them. HR and the Administrator alone see it, and the Administrator is told.
      - Part C (built 2026-10-29): a seminar the TDP doesn't identify (none of its needs is in its year's Plan A) is held only with its own justification: why (a Central Office training, an invitation from another agency, a new law or issuance, or another reason), the reason and who approved it. It covers everyone seated on it. HR and the Administrator alone see it, and the Administrator is told.
-     - Part B (built 2026-10-29): HR can send a representative in lieu of someone enrolled, as in HSAC's example. The original's enrolment is closed and they are told; the representative takes the seat with a justification "In lieu of" them (the reason and who identified them). Cash advanced to the original is settled first, and Finance can now record a refund before the seminar starts.
+     - Part B (built 2026-10-29): HR can send a representative in lieu of someone enrolled, as in HSAC's example. The original's enrolment is closed and they are told; the representative takes the seat with a justification "In lieu of" them (the reason and who identified them). Cash advanced to the original is settled first, and Finance can now record a refund before the seminar starts. Since 2026-10-30 the list of who can go starts with those whose own Plan A lists the training; "All employees" stays for the Chief's own choice, as in HSAC's example.
      - Step 5, prioritization by statutory or legal mandate (built 2026-10-29, Part D): HR or the Administrator marks a training title as mandated, with the law or rule behind it, once for every year. Its unmet needs then come first in Monitoring, in planning and among the participant picker's Plan A listers. A mark orders only: it never changes who may be seated or what counts as accomplished. Nothing is marked to start with; HSAC's own examples (R.A. 6713, ARTA, R.A. 12009, COA, Safe Spaces, GAD, OSH, DRRM) are offered as suggestions.
      - Steps 1–3 and 6 are proposals (Part D). For step 3, an Individual Learning Report per attendee (3b), and an Evaluations list of attendees only, were planned on 2026-10-30 and left for later (known-issues 12z Part D, step 3).
+
+9. **Can an employee pay for a seminar themselves and be reimbursed, instead of getting a cash advance?** (2026-10-30, relayed by the user) "Yes, they allow it."
+   - The user's decisions with it: the claim is capped at the employee's share of the seminar's budget, and the official receipts are enough (no certificate of attendance).
+   - System (known-issues 12q, Part A built 2026-10-30): an attendee whose seat has no cash advance waiting or released (none, declined, or refunded) files a Reimbursement, up to their share less what the office paid for them directly, with the receipts attached. HR verifies, Finance validates and pays it from the Reimbursement Queue. A request still waiting has to be released or declined first, and once a reimbursement is filed no cash advance can be asked for, so a seat is never funded twice.
 
 Still open: the same or a different budget for each employee (ask HSAC again).
