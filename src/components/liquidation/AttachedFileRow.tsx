@@ -9,7 +9,9 @@ interface AttachedFileRowProps {
   toReplace: boolean;
   /** The new copy chosen, if any. */
   replacement?: { name: string };
-  /** The reviewer's note about replacing, for screen readers. */
+  /** The reviewer's note about replacing, shown on the row (the named documents' form, R7). */
+  note?: string;
+  /** Or, where the note is shown elsewhere, its id, for screen readers. */
   describedBy?: string;
   /** A filed file the person on the form may open; a colleague's certificate isn't one. */
   onView?: () => void;
@@ -23,12 +25,14 @@ const ACTION = "text-[10px] font-bold font-mono uppercase cursor-pointer";
 
 /** One file on the liquidation form: what it is, and what can be done with it here. In a correction the
  * filed copies stay on the report (only new files can be removed), and a file marked for replacing gets a
- * new copy instead. */
+ * new copy instead. A notice about it lands on its Replace button (R7). */
 export default function AttachedFileRow({
-  file, stored, toReplace, replacement, describedBy, onView, onDownload, onChooseReplacement, onUndoReplacement, onRemove
+  file, stored, toReplace, replacement, note, describedBy, onView, onDownload, onChooseReplacement, onUndoReplacement, onRemove
 }: AttachedFileRowProps) {
+  const noteId = toReplace && note ? `replace-note-${file.id}` : undefined;
   return (
     <div
+      data-correction-target={toReplace ? `replaceDocuments:${file.id}` : undefined}
       className={`flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg border text-[11px] ${
         file.supersededAt ? "bg-white border-slate-100 text-slate-400"
           : toReplace ? "bg-amber-50 border-amber-200 text-slate-700"
@@ -73,14 +77,16 @@ export default function AttachedFileRow({
               }}
             />
             {replacement ? (
-              <button type="button" onClick={onUndoReplacement} className={`text-slate-500 hover:text-slate-700 ${ACTION}`}>
+              <button type="button" data-correction-control onClick={onUndoReplacement} className={`text-slate-500 hover:text-slate-700 ${ACTION}`}>
                 Undo<span className="sr-only"> the new copy of {file.name}</span>
               </button>
             ) : (
               <button
                 type="button"
+                id={`replace-button-${file.id}`}
+                data-correction-control
                 onClick={() => document.getElementById(`replace-${file.id}`)?.click()}
-                aria-describedby={describedBy}
+                aria-describedby={noteId ?? describedBy}
                 className="rounded border border-amber-300 bg-white px-2 py-0.5 text-amber-800 hover:bg-amber-100 text-[10px] font-bold font-mono uppercase cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
               >
                 Replace file<span className="sr-only">: {file.name}</span>
@@ -94,6 +100,11 @@ export default function AttachedFileRow({
           </button>
         )}
       </div>
+      {noteId && (
+        <p id={noteId} className="basis-full break-words text-[10px] text-amber-800">
+          The reviewer: &ldquo;{note}&rdquo;
+        </p>
+      )}
     </div>
   );
 }

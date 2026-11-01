@@ -197,6 +197,8 @@ export default function LiquidationSheetForm({
                   disabled={disabled}
                   readOnly={!can("periodCovered")}
                   onChange={(e) => set({ periodCoveredFrom: e.target.value })}
+                  data-correction-target="periodCovered"
+                  data-correction-control
                   aria-label="Period covered from"
                   aria-describedby={noteId("periodCovered")}
                   className={`${can("periodCovered") ? open : LOCKED} font-bold`}
@@ -239,6 +241,8 @@ export default function LiquidationSheetForm({
                   readOnly={!can("responsibilityCenterCode")}
                   onChange={(e) => set({ responsibilityCenterCode: e.target.value })}
                   placeholder="09-001-01"
+                  data-correction-target="responsibilityCenterCode"
+                  data-correction-control
                   aria-label="Responsibility center code"
                   aria-describedby={noteId("responsibilityCenterCode")}
                   className={`${can("responsibilityCenterCode") ? open : LOCKED} mx-auto mt-2 block w-[85%] text-center font-bold`}
@@ -277,13 +281,14 @@ export default function LiquidationSheetForm({
           {rows.map((p, idx) => {
             const rowError = particularErrors[p.id];
             return (
-              <tr key={p.id} className="align-top">
+              <tr key={p.id} className="align-top" data-correction-target={`particulars:${p.id}`}>
                 <td colSpan={2} className="border-r-2 border-black px-2 pt-2">
                   {(p.description || "").trim() !== "" && <p className="font-bold">{p.description}</p>}
                   {/* The AMOUNT column shows the amount as it prints. */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
                     <select
                       value={p.category ?? ""}
+                      data-correction-control
                       disabled={disabled || !lineOpen(p.id)}
                       onChange={(e) => update(p.id, { category: (e.target.value || undefined) as LiquidationParticular["category"] })}
                       aria-label={`Particular ${idx + 1} expense type`}
@@ -398,6 +403,8 @@ export default function LiquidationSheetForm({
                   readOnly={advanceOnRecord || !can("cashAdvance")}
                   onChange={(e) => set({ cashAdvanceDvNo: e.target.value })}
                   placeholder={noAdvance ? "None" : "2026-08-336"}
+                  data-correction-target="cashAdvance"
+                  data-correction-control
                   aria-label="Cash advance DV number"
                   aria-describedby={noteId("cashAdvance")}
                   className={`${advanceOnRecord || !can("cashAdvance") ? LOCKED : open} w-24 font-bold`}
@@ -446,6 +453,8 @@ export default function LiquidationSheetForm({
                   readOnly={!can("refundOr")}
                   onChange={(e) => set({ refundOrNo: e.target.value })}
                   placeholder={refundDue ? "0247983" : "No refund due"}
+                  data-correction-target="refundOr"
+                  data-correction-control
                   aria-label="Refund OR number"
                   aria-describedby={noteId("refundOr")}
                   className={`${can("refundOr") ? open : LOCKED} w-24`}
@@ -495,6 +504,8 @@ export default function LiquidationSheetForm({
                   value={representativeId}
                   onChange={(e) => onRepresentativeChange(e.target.value)}
                   disabled={disabled || !can("representative")}
+                  data-correction-target="representative"
+                  data-correction-control
                   aria-label="Box B: Authorized Representative"
                   aria-required="true"
                   aria-invalid={!!representativeError}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, DocumentKind, LiquidationDocument, ScreenFocus, TravelDeclaration } from "../types";
-import { useRecordHighlight } from "./ui/useRecordHighlight";
+import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, DocumentKind, LiquidationDocument, NotificationLink, ScreenFocus, TravelDeclaration } from "../types";
+import { useFocusTarget, useRecordHighlight } from "./ui/useRecordHighlight";
+import { correctionTarget as firstCorrectionTarget, correctionTargetSelectors } from "../correctionTarget";
 import { apiCall, getLocalTodayString, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../utils";
 import { spendableCentavos } from "../advanceCoverage";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
@@ -68,9 +69,11 @@ interface EmployeePortalViewProps {
   /** From a notification: a request, liquidation report or assignment to show. */
   focus?: ScreenFocus | null;
   onFocusHandled?: () => void;
+  /** Follows a notice's link as the bell does (the Notifications & Alerts list). */
+  onOpenLink?: (link: NotificationLink) => void;
 }
 
-export default function EmployeePortalView({ user, fetchSummary, onRefresh, liquidationTarget, onLiquidationTargetHandled, correctionTarget, onCorrectionTargetHandled, focus, onFocusHandled }: EmployeePortalViewProps) {
+export default function EmployeePortalView({ user, fetchSummary, onRefresh, liquidationTarget, onLiquidationTargetHandled, correctionTarget, onCorrectionTargetHandled, focus, onFocusHandled, onOpenLink }: EmployeePortalViewProps) {
   const [activeSubMenu, setActiveSubMenu] = useState<"profile" | "requests" | "activities" | "liquidations" | "notifications">("profile");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -431,7 +434,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // reload it here when that section is already open), then the record is shown, scrolled to
   // and outlined, once the fresh load has landed (portalLoads). A visit to Liquidations made
   // this way shows that report, so it doesn't open the latest returned one for correction.
-  const [shownRecord, setShownRecord] = useState<{ id: string; key: number; afterLoad: number } | null>(null);
+  // A certificate reminder also puts the keyboard focus on the card's Upload button (R7).
+  const [shownRecord, setShownRecord] = useState<{ id: string; key: number; afterLoad: number; control?: string } | null>(null);
   const focusVisit = useRef(false);
   useEffect(() => {
     if (!focus) return;
@@ -448,11 +452,16 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         if (section === "liquidations") focusVisit.current = true;
         setActiveSubMenu(section);
       }
-      setShownRecord({ id: record.id, key: focus.nonce, afterLoad: portalLoads });
+      setShownRecord({
+        id: record.id,
+        key: focus.nonce,
+        afterLoad: portalLoads,
+        control: focus.focus === "certificateUpload" ? `#${CSS.escape(`certificate-upload-${record.id}`)}` : undefined
+      });
     }
     onFocusHandled?.();
   }, [focus?.nonce]);
-  useRecordHighlight(shownRecord && portalLoads > shownRecord.afterLoad ? shownRecord.id : null, shownRecord?.key);
+  useRecordHighlight(shownRecord && portalLoads > shownRecord.afterLoad ? shownRecord.id : null, shownRecord?.key, shownRecord?.control);
 
   // A seminar title (Trainings and Seminar) or a "form is ready" notice asked App to open
   // this seminar's liquidation form.
@@ -482,6 +491,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
   // A "returned" notification asked App to open that report for correction.
   const [pendingReport, setPendingReport] = useState<{ id: string; afterLoad: number } | null>(null);
+  // Set when a notice puts the report on the form: it lands on the first part the reviewer reopened (R7).
+  const [correctionFocusKey, setCorrectionFocusKey] = useState<number | null>(null);
   useEffect(() => {
     if (!correctionTarget) return;
     openReturnedReport(correctionTarget);
@@ -495,6 +506,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setPendingReport(null);
     if (report && canResubmit(report)) {
       loadForResubmission(report);
+      setCorrectionFocusKey(Date.now());
     } else if (!error) {
       setError(!report
         ? "That liquidation report could not be found."
@@ -503,6 +515,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           : `${report.submissionNo} is no longer waiting for correction (it is ${report.status}).`);
     }
   }, [pendingReport, portalLoads]);
+
+  // Where it lands: the part brought into view and outlined, its control with the keyboard focus. Only a notice
+  // does this; the Liquidations tab opening the latest returned report by itself moves nothing.
+  const correctionFocus = useMemo(() => {
+    const target = correctionFocusKey && resubmittingItem ? firstCorrectionTarget(access.open, resubmittingItem) : null;
+    return target ? correctionTargetSelectors(target) : null;
+  }, [correctionFocusKey, resubmittingItem, access.open]);
+  useFocusTarget(correctionFocus, correctionFocusKey);
 
   // The Liquidations tab opens straight into the latest returned report (requirement 5),
   // once per visit, so the claimant can still cancel it and file something else. Each visit
@@ -720,9 +740,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // Opens a returned report for correction (its notification's link). Applied after the
   // next data load, so the report's latest state is the one corrected.
   function openReturnedReport(id: string) {
-    // Already correcting it: just show it, keeping what was typed.
+    // Already correcting it: just show it, keeping what was typed, and land on what was reopened.
     if (resubmittingItem?.id === id) {
       setActiveSubMenu("liquidations");
+      setCorrectionFocusKey(Date.now());
       return;
     }
     const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
@@ -740,6 +761,26 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setActiveSubMenu("liquidations");
     setPendingReport({ id, afterLoad: loadSeq.current });
     fetchPortalData();
+  }
+
+  // The Notifications & Alerts list follows a notice's link the way the bell does (R7), and marks it read, as
+  // the bell does. Only links within the portal, the one screen a Personnel login opens.
+  const noticeAction = (link?: NotificationLink): string =>
+    !link ? ""
+      : link.liquidationReportId ? "Open the report"
+      : link.liquidationActivityId ? "Open the Liquidation Report"
+      : link.tab !== "employee_portal" ? ""
+      : link.focus === "certificateUpload" ? "Upload the certificate"
+      : link.record?.kind === "request" ? "Open the request"
+      : link.record?.kind === "assignment" ? "Open the seminar"
+      : link.record?.kind === "liquidationReport" ? "Open the report"
+      : "";
+  function followNotice(n: { id: string; link?: NotificationLink }) {
+    if (!n.link) return;
+    apiCall(`/api/notifications/${encodeURIComponent(n.id)}/read`, { method: "POST", keepalive: true }).catch(() => {});
+    if (onOpenLink) onOpenLink(n.link);
+    else if (n.link.liquidationReportId) openReturnedReport(n.link.liquidationReportId);
+    else if (n.link.liquidationActivityId) openSeminarForm(n.link.liquidationActivityId);
   }
 
   // Opens the Liquidation Report for one seminar. The choice is applied after the next
@@ -1189,7 +1230,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       stored={inCorrection && storedDocIds.has(file.id)}
       toReplace={inCorrection && access.replaceIds.includes(file.id) && !file.supersededAt}
       replacement={replacementFiles[file.id]}
-      describedBy={access.noteFor("replaceDocuments") ? "note-replaceDocuments" : undefined}
+      note={namedForm ? access.noteFor("replaceDocuments") : undefined}
+      describedBy={!namedForm && access.noteFor("replaceDocuments") ? "note-replaceDocuments" : undefined}
       onView={file.kind === "certificate" && file.participantId !== resubmittingItem?.activityId ? undefined : () => viewReportFile(resubmittingItem.id, file)}
       onDownload={() => downloadBase64File(file.name, file.content ?? "")}
       onChooseReplacement={chosen => chooseReplacement(file.id, chosen)}
@@ -1971,6 +2013,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   <select
                     id="liq-claim-type"
                     ref={claimTypeRef}
+                    data-correction-target="claimType"
+                    data-correction-control
                     value={claimType}
                     onChange={e => chooseClaimType(e.target.value as ClaimType | "")}
                     disabled={submittingLiq || !access.editable("claimType")}
@@ -2221,14 +2265,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   noTravelBlocked={noTravelBlocked}
                   canAdd={canAddDocument}
                   asked={access.addKinds}
+                  askedNote={access.noteFor("addDocument")}
                   onAddFiles={addDocumentFiles}
                   files={attachedFiles}
                   renderFile={fileRow}
                   certificate={certificateLines}
                   certificateOnFile={certificateOnFile}
                 >
-                  <CorrectionNote id="note-addDocument" note={access.noteFor("addDocument")} />
-                  <CorrectionNote id="note-replaceDocuments" note={access.noteFor("replaceDocuments")} />
+                  {/* (The reviewer's notes on documents sit in the slots asked for and on the files to replace.) */}
                   {fileError && (
                     <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{fileError}</p>
                   )}
@@ -2242,11 +2286,22 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 <div className="space-y-3 p-3">
                 {/* In a correction, new files only when the reviewer asked for a missing one. */}
                 {access.editable("addDocument") ? (
+                  // Reachable by keyboard too (Enter or Space browses), so a notice can land on it (R7).
                   <div
+                    role="button"
+                    tabIndex={0}
+                    data-correction-target="addDocument"
+                    data-correction-control
+                    aria-describedby={access.noteFor("addDocument") ? "note-addDocument" : undefined}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 ${
+                    onKeyDown={e => {
+                      if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                      e.preventDefault();
+                      document.getElementById("receipt-input")?.click();
+                    }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                       isDragging
                         ? "border-blue-500 bg-blue-50/50"
                         : "border-slate-200 hover:border-slate-300 bg-slate-50/30"
@@ -2302,6 +2357,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     onChange={e => setLiqRemarks(e.target.value)}
                     readOnly={!access.editable("remarks")}
                     maxLength={2000}
+                    data-correction-target="remarks"
+                    data-correction-control
                     aria-label="Your notes on the report"
                     aria-describedby={access.noteFor("remarks") ? "note-remarks" : undefined}
                     className="h-16 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 read-only:bg-slate-100 read-only:text-slate-600"
@@ -2511,17 +2568,15 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     <div>
                       <p className="font-semibold text-slate-800">{n.title}</p>
                       <p className="text-slate-500 mt-0.5">{n.message}</p>
-                      {/* Like the bell's: a returned report opens for correction, a seminar's
-                          notice opens its Liquidation Report. */}
-                      {(n.link?.liquidationReportId || n.link?.liquidationActivityId) && (
+                      {/* As the bell's: it lands where the notice is about (a returned report on what was
+                          reopened, a reminder on the card's Upload), and the notice counts as read. */}
+                      {noticeAction(n.link) && (
                         <button
                           type="button"
-                          onClick={() => n.link.liquidationReportId
-                            ? openReturnedReport(n.link.liquidationReportId)
-                            : openSeminarForm(n.link.liquidationActivityId)}
+                          onClick={() => followNotice(n)}
                           className="mt-1 cursor-pointer text-[10px] font-semibold text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
                         >
-                          {n.link.liquidationReportId ? "Open the report" : "Open the Liquidation Report"} &rarr;
+                          {noticeAction(n.link)} &rarr;
                         </button>
                       )}
                       <p className="text-[9px] text-slate-400 font-mono mt-1">{n.timestamp.split("T").join(" ")}</p>

@@ -125,6 +125,7 @@ import {
   correctionSlots, documentPlate, filedUnderDocuments, missingDocuments, missingDocumentsText, noTravelProblem, readDeclarations, readDocumentKind,
   requiredDocuments, UPLOAD_KINDS
 } from "./src/reportDocuments";
+import { correctionSummary } from "./src/correctionTarget";
 
 const app = express();
 const PORT = 3000;
@@ -638,6 +639,16 @@ function getInitialData(): DBStructure {
           : [];
         delete n.isRead;
         changed = true;
+      }
+
+      // A certificate reminder lands on the seminar card's Upload button (the instructor's review, R7); those sent
+      // before only opened the card.
+      for (const n of loaded.notifications || []) {
+        if (!n || typeof n !== "object" || !String(n.dedupeKey || "").startsWith("cert-due:")) continue;
+        if (n.link && typeof n.link === "object" && n.link.record?.kind === "assignment" && !n.link.focus) {
+          n.link.focus = "certificateUpload";
+          changed = true;
+        }
       }
 
       // Group cash advances (HSAC RAB 1, 2026-10-26), checked, never changed: each group's amounts
@@ -4397,8 +4408,9 @@ function correctionRequestFrom(
   returnTo: CorrectionRequest["returnTo"]
 ): { request: CorrectionRequest } | { error: string } {
   const remarks = typeof body?.remarks === "string" ? body.remarks.trim() : "";
-  if (!remarks) return { error: "Explain why the report is returned: remarks are required." };
   if (remarks.length > 1000) return { error: "Keep the remarks under 1,000 characters." };
+  // (Cleaned, as the notice shows it: a remark of invisible characters says nothing.)
+  if (!cleanText(remarks)) return { error: "Explain why the report is returned: remarks are required." };
   if (!Array.isArray(body?.items) || body.items.length === 0) {
     return { error: "Tick at least one part of the report for the employee to correct." };
   }
@@ -4486,14 +4498,19 @@ function correctionRequestFrom(
   };
 }
 
-// Tells the claimant their report came back, linking straight to it in correction mode.
+// Tells the claimant their report came back, linking straight to it in correction mode, where the portal lands
+// on the first part reopened (R7). The notice names what is to be fixed: the documents, the files, the parts.
 // Addressed to their staff record's code, as the login carries it; never untargeted, which
 // every employee would see. The id is random: the reviewer's remarks are in the notice.
 function notifyReportReturned(sub: any, by: "HR" | "Finance", request: CorrectionRequest) {
   if (!sub.employeeId) return;
+  const toFix = correctionSummary(request, sub);
+  // The reviewer's words are quoted, as the correction panel shows them, and can't close those quotes or turn
+  // the text after them around, so they can't pass for the notice's own "To fix".
+  const said = cleanText(request.remarks).replace(/[“”]/g, '"');
   notify({ employee: sub.employeeId }, {
     title: `Liquidation report returned by ${by}`,
-    message: `${sub.submissionNo} was returned for correction: ${request.remarks} Only the parts ticked (${request.items.length}) can be changed.`,
+    message: `${sub.submissionNo} was returned for correction: “${said}” ${toFix ? `To fix: ${toFix}.` : `Only the parts ticked (${request.items.length}) can be changed.`}`,
     type: "warning",
     link: { tab: "employee_portal", liquidationReportId: sub.id }
   });
@@ -7901,7 +7918,8 @@ function runCertificateReminderSweep() {
           ? `Your certificate of attendance for "${title}" isn't on file, and the liquidation report needs it. Upload it from your seminar card.`
           : `"${title}" has ended and your certificate of attendance isn't on file. HR records your attendance on it, and the liquidation report needs it.`,
         type: "warning",
-        link: { tab: "employee_portal", record: { kind: "assignment", id: p.id } },
+        // (It lands on the card's Upload button, R7.)
+        link: { tab: "employee_portal", record: { kind: "assignment", id: p.id }, focus: "certificateUpload" },
         dedupeKey: `cert-due:${p.id}`
       })) sent++;
     }

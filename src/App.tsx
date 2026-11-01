@@ -264,7 +264,7 @@ export default function App() {
     // just closes. The server still checks every request.
     if (!link.tab || !tabsOpenTo(user.role as UserRole).includes(link.tab)) return;
     if (link.tab === "finance" && link.subTab) setActiveFinanceSubTab(link.subTab);
-    setScreenFocus(link.record || link.subTab ? { record: link.record, subTab: link.subTab, nonce: Date.now() } : null);
+    setScreenFocus(link.record || link.subTab ? { record: link.record, subTab: link.subTab, focus: link.focus, nonce: Date.now() } : null);
     setActiveTab(link.tab);
   }
 
@@ -349,6 +349,7 @@ export default function App() {
             onLiquidationTargetHandled={() => setLiquidationTarget(null)}
             correctionTarget={correctionTarget}
             onCorrectionTargetHandled={() => setCorrectionTarget(null)}
+            onOpenLink={openNotificationLink}
             {...focusProps}
           />
         );

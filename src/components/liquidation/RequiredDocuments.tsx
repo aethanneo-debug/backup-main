@@ -18,6 +18,8 @@ interface RequiredDocumentsProps {
   canAdd: (kind: DocumentKind) => boolean;
   /** What a reviewer named as missing. */
   asked: DocumentKind[];
+  /** The reviewer's note on it, shown in each slot asked for (R7). */
+  askedNote?: string;
   onAddFiles: (kind: DocumentKind, files: File[]) => void;
   /** Everything on the form, certificates included. */
   files: LiquidationDocument[];
@@ -32,17 +34,19 @@ interface RequiredDocumentsProps {
 
 const ROW = "rounded-lg border px-2.5 py-2";
 
-function Slot({ slot, why, required, filled, asked, canAdd, onAddFiles, children }: {
+function Slot({ slot, why, required, filled, asked, note, canAdd, onAddFiles, children }: {
   slot: DocumentSlot;
   why?: string;
   required: boolean;
   filled: boolean;
   asked: boolean;
+  note?: string;
   canAdd: boolean;
   onAddFiles: (kind: DocumentKind, files: File[]) => void;
   children?: ReactNode;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const noteId = asked && note ? `slot-note-${slot.kind}` : undefined;
   const [dragging, setDragging] = useState(false);
   const drop = canAdd ? {
     onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragging(true); },
@@ -56,6 +60,7 @@ function Slot({ slot, why, required, filled, asked, canAdd, onAddFiles, children
   return (
     <li
       data-document-kind={slot.kind}
+      data-correction-target={`addDocument:${slot.kind}`}
       {...drop}
       className={`${ROW} ${dragging ? "border-blue-500 bg-blue-50/50" : asked && !filled ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}
     >
@@ -71,6 +76,7 @@ function Slot({ slot, why, required, filled, asked, canAdd, onAddFiles, children
           </p>
           {why && <p className="mt-0.5 text-[10px] text-slate-500">{why}</p>}
           {asked && !filled && <p className="mt-0.5 text-[10px] font-semibold text-amber-800">The reviewer asked for this.</p>}
+          {noteId && <p id={noteId} className="mt-0.5 break-words text-[10px] text-amber-800">The reviewer: &ldquo;{note}&rdquo;</p>}
         </div>
         {canAdd && (
           <>
@@ -91,6 +97,8 @@ function Slot({ slot, why, required, filled, asked, canAdd, onAddFiles, children
             <button
               type="button"
               id={`document-upload-${slot.kind}`}
+              data-correction-control
+              aria-describedby={noteId}
               onClick={() => input.current?.click()}
               className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
@@ -110,8 +118,8 @@ function Slot({ slot, why, required, filled, asked, canAdd, onAddFiles, children
  * certificate comes from the attendee's own upload (R4), so it is shown here, never asked for again.
  */
 export default function RequiredDocuments({
-  required, reimbursement, declarations, declarationsOpen, onDeclarations, noTravelBlocked = "", canAdd, asked, onAddFiles, files, renderFile,
-  certificate, certificateOnFile, children
+  required, reimbursement, declarations, declarationsOpen, onDeclarations, noTravelBlocked = "", canAdd, asked, askedNote, onAddFiles, files,
+  renderFile, certificate, certificateOnFile, children
 }: RequiredDocumentsProps) {
   const filesOf = (kind: DocumentKind) => (files ?? []).filter(f => (f.kind ?? "receipts") === kind);
   // A document the reviewer asked for is answered only by a new copy: one already on the report isn't it.
@@ -137,6 +145,7 @@ export default function RequiredDocuments({
       required={!!why(s.kind) || asked.includes(s.kind)}
       filled={filled(s.kind)}
       asked={asked.includes(s.kind)}
+      note={askedNote}
       canAdd={s.kind !== "certificate" && canAdd(s.kind)}
       onAddFiles={onAddFiles}
     >

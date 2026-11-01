@@ -10,6 +10,7 @@ import {
   LiquidationSubmissionView
 } from "../../types";
 import { UPLOAD_KINDS, filedUnderDocuments } from "../../reportDocuments";
+import { cleanText } from "../../inputText";
 import ModalDialog from "../ui/ModalDialog";
 import { ACTION_BUTTON, CANCEL_BUTTON, CONTROL, LABEL, Notice } from "../utilities/signatoryFormParts";
 import { ChecklistRow, FilePicker, KindPicker, LinePicker, NoteField, REQUIRED } from "./correction/ChecklistParts";
@@ -95,7 +96,8 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
   const named = filedUnderDocuments(report);
   const chosenKinds = UPLOAD_KINDS.filter(k => documentKinds.includes(k));
   const kindsMissing = named && chosen.some(c => c.field === "addDocument") && chosenKinds.length === 0;
-  const remarksBlank = remarks.trim() === "";
+  // (As the server reads it: invisible characters alone say nothing.)
+  const remarksBlank = cleanText(remarks) === "";
   const remarksError = remarksTouched && remarksBlank;
 
   const missing = [

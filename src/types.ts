@@ -395,12 +395,18 @@ export interface Notification {
 // seat on HR's attendance list (by enrolment id).
 export type NotificationRecordKind = "request" | "liquidationReport" | "seminar" | "assignment" | "cashAdvance" | "attendance";
 
+// The control a notice lands on, where the screen can't work it out from the record (the instructor's review,
+// R7): a certificate reminder lands on the seminar card's Upload button. A returned report needs none: the
+// portal lands on the first part the reviewer reopened (src/correctionTarget.ts).
+export type NoticeFocus = "certificateUpload";
+
 export interface NotificationLink {
   tab: string;                       // the app tab to open, e.g. "employee_portal"
   subTab?: string;                   // Finance's sub-tab ("liquidation") or Training Plan & Budget's step ("plan-a")
   record?: { kind: NotificationRecordKind; id: string }; // shown (opened or highlighted) on arrival
   liquidationActivityId?: string;    // open the Liquidation Report with this seminar chosen
   liquidationReportId?: string;      // open this returned report for correction
+  focus?: NoticeFocus;               // the control on the record that takes the keyboard focus
 }
 
 // What a screen should show when a notice opens it. `nonce` lets the same record be shown
@@ -408,6 +414,7 @@ export interface NotificationLink {
 export interface ScreenFocus {
   subTab?: string;
   record?: { kind: NotificationRecordKind; id: string };
+  focus?: NoticeFocus;
   nonce: number;
 }
 
