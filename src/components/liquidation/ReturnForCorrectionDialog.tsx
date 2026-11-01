@@ -5,7 +5,8 @@ import {
   CorrectionField,
   CorrectionItem,
   LiquidationDocument,
-  LiquidationSubmission
+  LiquidationSubmission,
+  LiquidationSubmissionView
 } from "../../types";
 import ModalDialog from "../ui/ModalDialog";
 import { ACTION_BUTTON, CANCEL_BUTTON, CONTROL, LABEL, Notice } from "../utilities/signatoryFormParts";
@@ -24,7 +25,7 @@ import { ChecklistRow, FilePicker, LinePicker, NoteField, REQUIRED } from "./cor
 
 interface ReturnForCorrectionDialogProps {
   /** The report being returned. */
-  report: LiquidationSubmission;
+  report: LiquidationSubmissionView;
   /** Who is returning it. The corrected report comes back to them. */
   reviewer: "HR" | "Finance";
   onCancel: () => void;
@@ -212,6 +213,7 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
                       lines={lines}
                       chosen={lineIds}
                       onToggle={lineId => setLineIds(l => toggled(l, lineId))}
+                      nameOf={participantId => report.covers?.find(c => c.participantId === participantId)?.employeeName}
                     />
                   )}
                   {field === "replaceDocuments" && (

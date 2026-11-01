@@ -8,7 +8,8 @@ import {
   newParticular,
   sumParticulars,
   filledParticulars
-} from "./liquidation/ParticularsEditor";
+} from "./liquidation/particularLines";
+import { expenseLineLabel, expenseTypeProblem, isBlankExpenseLine, keptExpenseType, vehicleNoForLine } from "../expenseLines";
 import { CoaHeaderFields, emptyCoaHeaderFields } from "./liquidation/LiquidationCoaFields";
 import LiquidationSheetForm, { BOX_B_AS_FILED } from "./liquidation/sheet/LiquidationSheetForm";
 import { amountText } from "./liquidation/sheet/sheetFormat";
@@ -226,8 +227,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     if (!withinAdvanceForm || !a || !Array.isArray(a.covers) || a.covers.length < 2) return undefined;
     const holderCard = (activities ?? []).find((x: any) => x && x.id === a.activityId);
     const members: any[] = Array.isArray(holderCard?.groupMembers) ? holderCard.groupMembers : [];
-    return members.filter(m => m && m.attendance === "Attended").map(m => ({ participantId: String(m.participantId), employeeName: String(m.employeeName) }));
+    return members.filter(m => m && m.attendance === "Attended").map(m => ({ participantId: String(m.participantId), employeeName: String(m.employeeName), onVehicle: !!m.onVehicle }));
   }, [activeAdvance, withinAdvanceForm, activities]);
+  // The vehicle request standing for this seminar, theirs or their group's: no Transportation line
+  // while it does (the instructor's review, R3; the server refuses one too). Unknown while the seminar
+  // list hasn't loaded, when the server alone checks it.
+  const seatCard: any = (activities ?? []).find((x: any) => x && x.id === (resubmittingItem?.activityId ?? selectedActivityId));
+  const vehicleNo: string | null = seatCard?.transportVehicle ? String(seatCard.transportVehicle.vrsNo || "") : null;
+  const vehicleFiledBy: string | undefined = seatCard?.transportVehicle?.filedBy;
   // What the group's report may spend: the shares of those who attended; an absent member's share is
   // handed back with the rest (the server's groupSpendCap).
   const groupSpendCap = useMemo(() => {
@@ -333,6 +340,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         {
           ...newParticular(),
           description: activityLabelFor(sub.activityId) || "Liquidated expenses",
+          // As the server would store it: filed with a typed total, this line has no type to choose
+          // unless the reviewer reopened the particulars.
+          category: "Miscellaneous",
           amount: Number(sub.totalSpent)
         }
       ]);
@@ -649,7 +659,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     }
     const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
       (attachedFiles ?? []).length > 0 ||
-      (particulars ?? []).some(p => String(p.description || "").trim() !== "" || Number(p.amount) > 0)
+      (particulars ?? []).some(p => !isBlankExpenseLine(p))
     ));
     if (hasDraft && !window.confirm("Discard the report you are filling in and open the returned report instead?")) {
       setActiveSubMenu("liquidations");
@@ -675,7 +685,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     // Don't silently throw away a report being filled in or corrected.
     const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
       (attachedFiles ?? []).length > 0 ||
-      (particulars ?? []).some(p => String(p.description || "").trim() !== "" || Number(p.amount) > 0)
+      (particulars ?? []).some(p => !isBlankExpenseLine(p))
     ));
     if (hasDraft && !window.confirm("Discard the report you are filling in and open this seminar's form instead?")) {
       setActiveSubMenu("liquidations");
@@ -864,8 +874,13 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     const lines = filledParticulars(particulars);
     const rowErrors: Record<string, string> = {};
     lines.forEach(p => {
-      if (!(p.description || "").trim()) {
-        rowErrors[p.id] = "Describe this expense before submitting.";
+      // A line already on the report stays as it was filed.
+      const kept = keptExpenseType(p, resubmittingItem?.particulars);
+      const typeProblem = kept ? "" : expenseTypeProblem(p.category, vehicleNoForLine(p, vehicleNo, groupAttendees));
+      if (!kept && !p.category) {
+        rowErrors[p.id] = "Choose the expense type.";
+      } else if (typeProblem) {
+        rowErrors[p.id] = typeProblem;
       } else if (!isFinite(Number(p.amount)) || Number(p.amount) < 0) {
         rowErrors[p.id] = "Amount must be zero or more.";
       }
@@ -886,7 +901,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     }
     // (Only where the particulars can change: a correction that left them as filed can't add one.)
     if (lines.length === 0 && !(totalSpent > 0) && access.editable("particulars")) {
-      setError("Add at least one particular describing what the cash advance was spent on.");
+      setError("Add at least one expense: choose its type and enter the amount.");
       return;
     }
     if (isReimbursement && !(effectiveSpent > 0)) {
@@ -1617,6 +1632,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                         <h3 className="text-xs font-bold text-slate-800">{act.title}</h3>
                       )}
                       <p className="text-[11px] text-slate-500 mt-1">{act.description}</p>
+                      {act.type === "training" && (
+                        <p className="text-[11px] text-slate-500 mt-0.5">Venue: {act.venue || "not set yet"}</p>
+                      )}
                       {act.type === "training" && !act.canLiquidate && act.liquidationBlockedReason && act.participantStatus !== "Liquidated" && (
                         <p className="text-[10px] text-slate-500 italic mt-1">{act.liquidationBlockedReason}</p>
                       )}
@@ -1926,6 +1944,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               <div className="custom-scrollbar overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-3">
                 <LiquidationSheetForm
                   groupAttendees={groupAttendees}
+                  vehicleNo={vehicleNo}
+                  vehicleFiledBy={vehicleFiledBy}
                   representatives={boxBChoices}
                   representativeId={representativeId}
                   onRepresentativeChange={id => {
@@ -2273,7 +2293,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                               <li key={p.id || idx} className="flex items-baseline justify-between gap-3 text-[10px]">
                                 <span className="truncate text-slate-600">
                                   <span className="mr-1 font-mono text-slate-400">{idx + 1}.</span>
-                                  {p.description}
+                                  {expenseLineLabel(p)}
                                 </span>
                                 <span className="shrink-0 font-mono tabular-nums text-slate-700">
                                   {formatCurrency(Number(p.amount) || 0)}

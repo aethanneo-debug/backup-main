@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { CircleAlert, Lock, Paperclip } from "lucide-react";
 import { LiquidationDocument, LiquidationParticular } from "../../../types";
+import { expenseLineLabel } from "../../../expenseLines";
 import { formatCurrency, formatDate } from "../../../utils";
 import { HINT } from "../../utilities/signatoryFormParts";
 
@@ -62,11 +63,13 @@ export function ChecklistRow({ id, label, on, reason, onToggle, children }: {
 }
 
 /** Particulars: which lines reopen. None ticked reopens every line. */
-export function LinePicker({ id, lines, chosen, onToggle }: {
+export function LinePicker({ id, lines, chosen, onToggle, nameOf }: {
   id: string;
   lines: LiquidationParticular[];
   chosen: string[];
   onToggle: (lineId: string) => void;
+  /** On a group's report: whom a line was for. Lines go by their type, so several can read the same. */
+  nameOf?: (participantId?: string) => string | undefined;
 }) {
   if (lines.length === 0) {
     return (
@@ -91,8 +94,9 @@ export function LinePicker({ id, lines, chosen, onToggle }: {
                 className={CHECKBOX}
               />
               <span className="min-w-0 flex-1 break-words text-slate-700">
-                {line.description || <em className="text-slate-500">No description</em>}
-                {line.category && <span className="text-slate-500"> · {line.category}</span>}
+                {expenseLineLabel(line)}
+                {line.description?.trim() && line.category && <span className="text-slate-500"> · {line.category}</span>}
+                {nameOf?.(line.participantId) && <span className="text-slate-500"> · For {nameOf(line.participantId)}</span>}
               </span>
               {/* A space for the accessible name; flex layout ignores it. */}{" "}
               <span className="shrink-0 font-mono tabular-nums text-slate-800">

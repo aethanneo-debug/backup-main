@@ -32,7 +32,7 @@ export function withinAdvanceSubmitProblem(form: {
       ? "Your cash advance request is still with Finance. File the report once it is released. If you paid for the seminar yourself, ask Finance to decline the request; you can then claim it back as a reimbursement."
       : "Request your cash advance first, under My Assigned Activities. This report settles the advance Finance releases.";
   }
-  if (!form.hasItems && form.itemsEditable) return "Add at least one particular describing what the cash advance was spent on.";
+  if (!form.hasItems && form.itemsEditable) return "Add at least one expense: choose its type and enter the amount.";
   if (form.balance.status === "Over") {
     return `Your items come to ${formatCurrency(form.itemsTotal)}, ${formatCurrency(form.balance.over)} more than your cash advance. A seminar report can't go past its advance: lower or remove an item.`;
   }

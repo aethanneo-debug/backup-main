@@ -1,5 +1,6 @@
 import React from "react";
 import { LiquidationSubmission, LiquidationParticular } from "../../types";
+import { expenseLineLabel, isBlankExpenseLine } from "../../expenseLines";
 import { SHEET_FONT, amountText, longDate, periodRange, sheetDate } from "./sheet/sheetFormat";
 import { CertificationCell, Fill, SheetTotalRow } from "./sheet/SheetParts";
 
@@ -24,9 +25,7 @@ const Amount = ({ value }: { value: number }) => <span className="font-bold tabu
  * display, which is why both print and only one is ever non-zero.
  */
 export default function LiquidationReportForm({ submission }: LiquidationReportFormProps) {
-  const lines: LiquidationParticular[] = (submission.particulars ?? []).filter(
-    (p) => p && ((p.description || "").trim() !== "" || Number(p.amount) > 0)
-  );
+  const lines: LiquidationParticular[] = (submission.particulars ?? []).filter((p) => p && !isBlankExpenseLine(p));
 
   const totalSpent = Number(submission.totalSpent) || 0;
   const totalReleased = Number(submission.totalReleased) || 0;
@@ -110,11 +109,11 @@ export default function LiquidationReportForm({ submission }: LiquidationReportF
             </th>
           </tr>
 
-          {/* --- Particulars: each amount sits on its description's last line --- */}
+          {/* --- Particulars: each amount sits on the last line of its expense --- */}
           {printableLines.map((line, idx) => (
             <tr key={line.id || idx}>
               <td colSpan={2} className="border-r-2 border-black px-2 pt-2 align-bottom font-bold">
-                {line.description}
+                {expenseLineLabel(line)}
               </td>
               <td className="px-2 pt-2 text-right align-bottom font-bold tabular-nums">
                 {amountText(Number(line.amount) || 0)}

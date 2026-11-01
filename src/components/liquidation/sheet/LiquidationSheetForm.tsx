@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Plus } from "lucide-react";
-import { ActiveSignatory, CorrectionField, LiquidationParticular, TRAINING_EXPENSE_CATEGORIES } from "../../../types";
-import { newParticular, round2 } from "../ParticularsEditor";
+import { ActiveSignatory, CorrectionField, LiquidationParticular } from "../../../types";
+import { expenseTypeChoices, vehicleNoForLine } from "../../../expenseLines";
+import { newParticular, round2 } from "../particularLines";
 import { CoaHeaderFields } from "../LiquidationCoaFields";
 import { SHEET_FONT, amountText, longDate } from "./sheetFormat";
 import { getLocalTodayString } from "../../../utils";
@@ -60,7 +61,11 @@ interface LiquidationSheetFormProps {
   correction?: Pick<CorrectionAccess, "editable" | "noteFor" | "lineIds">;
   /** A group's report (HSAC RAB 1): the attendees its cash advance covers. Each line may name the
    * one it was for (optional); a line naming nobody is the holder's. */
-  groupAttendees?: Array<{ participantId: string; employeeName: string }>;
+  groupAttendees?: Array<{ participantId: string; employeeName: string; onVehicle?: boolean }>;
+  /** The vehicle request standing for this seminar, if any: no Transportation line while it does. */
+  vehicleNo?: string | null;
+  /** Who filed it, when that wasn't the claimant (a colleague's group request). */
+  vehicleFiledBy?: string;
 }
 
 // Fillable boxes are tinted, like a fillable PDF, so the employee sees where to type while
@@ -105,6 +110,8 @@ export default function LiquidationSheetForm({
   accountant,
   correction,
   groupAttendees,
+  vehicleNo = null,
+  vehicleFiledBy,
 }: LiquidationSheetFormProps) {
   const set = (patch: Partial<CoaHeaderFields>) => onCoaChange({ ...coa, ...patch });
   const rows = particulars ?? [];
@@ -256,43 +263,39 @@ export default function LiquidationSheetForm({
               <td />
             </tr>
           )}
+          {vehicleNo !== null && can("particulars") && (
+            <tr>
+              <td colSpan={2} className="border-r-2 border-black px-2 pt-1 text-[11px] text-slate-700">
+                {vehicleFiledBy ? `${vehicleFiledBy} requested` : "You requested"} vehicle {vehicleNo}; put small fares under Miscellaneous.
+              </td>
+              <td />
+            </tr>
+          )}
 
-          {/* --- Particulars --- */}
+          {/* --- Particulars: each line is an expense type and an amount. A report filed earlier keeps
+              the description it was filed with. --- */}
           {rows.map((p, idx) => {
             const rowError = particularErrors[p.id];
             return (
               <tr key={p.id} className="align-top">
                 <td colSpan={2} className="border-r-2 border-black px-2 pt-2">
-                  <textarea
-                    rows={2}
-                    value={p.description}
-                    disabled={disabled}
-                    readOnly={!lineOpen(p.id)}
-                    onChange={(e) => update(p.id, { description: e.target.value })}
-                    placeholder="e.g. Meals and incidentals, 12-13 Sept 2026"
-                    aria-label={`Particular ${idx + 1} description`}
-                    aria-invalid={rowError ? true : undefined}
-                    aria-describedby={lineOpen(p.id) ? noteId("particulars") : undefined}
-                    className={`w-full resize-none font-bold ${rowError ? INVALID : lineOpen(p.id) ? open : LOCKED}`}
-                  />
-                  {rowError && <p className="text-[11px] font-bold text-rose-700">{rowError}</p>}
-                  {/* Screen-only bookkeeping: which budget line the expense is charged to, and
-                      its amount. The AMOUNT column shows that amount as it prints. */}
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                    <label className="flex items-center gap-1">
-                      Charged to
-                      <select
-                        value={p.category || "Miscellaneous"}
-                        disabled={disabled || !lineOpen(p.id)}
-                        onChange={(e) => update(p.id, { category: e.target.value as LiquidationParticular["category"] })}
-                        aria-label={`Particular ${idx + 1} expense category`}
-                        className={`${lineOpen(p.id) ? open : LOCKED} text-[11px]`}
-                      >
-                        {TRAINING_EXPENSE_CATEGORIES.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </label>
+                  {(p.description || "").trim() !== "" && <p className="font-bold">{p.description}</p>}
+                  {/* The AMOUNT column shows the amount as it prints. */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                    <select
+                      value={p.category ?? ""}
+                      disabled={disabled || !lineOpen(p.id)}
+                      onChange={(e) => update(p.id, { category: (e.target.value || undefined) as LiquidationParticular["category"] })}
+                      aria-label={`Particular ${idx + 1} expense type`}
+                      aria-invalid={rowError ? true : undefined}
+                      aria-describedby={lineOpen(p.id) ? noteId("particulars") : undefined}
+                      className={`${rowError ? INVALID : lineOpen(p.id) ? open : LOCKED} text-[13px] font-bold`}
+                    >
+                      <option value="">Choose expense type</option>
+                      {expenseTypeChoices(p.category, vehicleNoForLine(p, vehicleNo, groupAttendees)).map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
                     {groupAttendees && groupAttendees.length > 0 && (
                       <label className="flex items-center gap-1">
                         For
@@ -340,8 +343,13 @@ export default function LiquidationSheetForm({
                       </button>
                     )}
                   </div>
+                  {/* Only this line's person is on a vehicle: say why Transportation isn't offered here. */}
+                  {vehicleNo === null && lineOpen(p.id) && vehicleNoForLine(p, null, groupAttendees) !== null && (
+                    <p className="text-[11px] text-slate-700">A vehicle request stands for them; put small fares under Miscellaneous.</p>
+                  )}
+                  {rowError && <p className="text-[11px] font-bold text-rose-700">{rowError}</p>}
                 </td>
-                {/* View only: the amount typed beside "Charged to", shown as it prints. */}
+                {/* View only: the amount typed beside the expense type, shown as it prints. */}
                 <td className="px-2 pt-2">
                   <p className="px-1 py-0.5 text-right font-bold tabular-nums">{amountText(Number(p.amount) || 0)}</p>
                 </td>

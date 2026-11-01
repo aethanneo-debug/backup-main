@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { UserRole, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput, type SeminarTdpJustificationInput, type TrainingProgramRow } from "../types";
+import { UserRole, TRAINING_EXPENSE_CATEGORIES, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput, type SeminarTdpJustificationInput, type TrainingProgramRow } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
-import { apiCall, apiErrorCode, formatCurrency, type ApiError } from "../utils";
+import { apiCall, apiErrorCode, formatCurrency, getLocalTodayString, type ApiError } from "../utils";
+import { cleanText } from "../inputText";
+import { isProgramOnlyExpense } from "../expenseLines";
 import { normalizeTitle, seminarTdpBadgeText, tdpBadgeText } from "../tdpRules";
 // Someone must stay to man each division (HSAC RAB 1's answer 1). The server refuses a save or
 // restore that would leave a division with nobody at the office (409, code DIVISION_GAP) and says
@@ -368,6 +370,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
 
     if (!row.title || !row.startDate || !row.endDate) {
       alert("Please fill in the required fields (Title, Start Date, End Date).");
+      return;
+    }
+
+    // A vehicle request's destination comes from the venue, so a seminar still to end needs one
+    // (the server checks the same).
+    if ((isNew || String(row.endDate) >= getLocalTodayString()) && !cleanText(row.venue)) {
+      alert("Please enter the seminar's venue.");
       return;
     }
 
@@ -939,8 +948,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
            )}
         </td>
 
-        {/* 4. Allocated Budget, 5. Facilitator, 6. Actions. (The Description column was removed on
-            2026-10-23; a save still sends a seminar's stored description back unchanged.) */}
+        {/* 4. Allocated Budget, 5. Venue, 6. Facilitator, 7. Actions. (The Description column was removed
+            on 2026-10-23; a save still sends a seminar's stored description back unchanged.) */}
         <td className="p-2 border-r border-slate-100">
           {isEditing ? (
             <input type="number" value={row.allocatedBudget} onChange={e => updateRow(p.id, "allocatedBudget", e.target.value, isNew)} className={CELL_INPUT} placeholder="0.00" aria-label="Allocated budget" />
@@ -993,6 +1002,13 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                 );
               })()}
             </>
+          )}
+        </td>
+        <td className="p-2 border-r border-slate-100">
+          {isEditing ? (
+            <input type="text" maxLength={200} value={row.venue ?? ""} onChange={e => updateRow(p.id, "venue", e.target.value, isNew)} className={CELL_INPUT} placeholder="Venue" aria-label="Venue" />
+          ) : (
+            <div className="text-slate-600 truncate max-w-[150px]" title={p.venue || undefined}>{p.venue || "N/A"}</div>
           )}
         </td>
         <td className="p-2 border-r border-slate-100">
@@ -1211,6 +1227,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                 <th scope="col" className="p-2 border-r border-slate-700">Date &amp; Time</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Participants</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Allocated Budget</th>
+                <th scope="col" className="p-2 border-r border-slate-700">Venue</th>
                 <th scope="col" className="p-2 border-r border-slate-700">Facilitator</th>
                 <th scope="col" className="p-2 w-24">Actions</th>
               </tr>
@@ -1219,7 +1236,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
               {newRows.map(nr => renderRow(nr, true))}
               {activePrograms.length === 0 && newRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-500">
+                  <td colSpan={7} className="p-8 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <BookOpen size={48} className="text-slate-300 mb-4" />
                       <p>No training programs found for this fiscal year.</p>
@@ -1333,7 +1350,15 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
               <form id="liqForm" onSubmit={handleCreateLiquidation} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Charge to</label>
-                  <select value={liqParticipantId} onChange={e => setLiqParticipantId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                  <select
+                    value={liqParticipantId}
+                    onChange={e => {
+                      setLiqParticipantId(e.target.value);
+                      // Venue rental and speaker fees are the seminar's, never one person's.
+                      if (e.target.value && isProgramOnlyExpense(expenseCategory)) setExpenseCategory("Miscellaneous");
+                    }}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
                     <option value="">Whole program (no specific person)</option>
                     {participants
                       .filter(pt => pt.trainingProgramId === selectedProgramId && pt.status !== "Cancelled")
@@ -1351,13 +1376,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Expense Category *</label>
                   <select required value={expenseCategory} onChange={e => setExpenseCategory(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                    <option value="Meals">Meals</option>
-                    <option value="Transportation">Transportation</option>
-                    <option value="Accommodation">Accommodation</option>
-                    <option value="Materials">Materials</option>
-                    <option value="Venue Rental">Venue Rental</option>
-                    <option value="Speaker Fees">Speaker Fees</option>
-                    <option value="Miscellaneous">Miscellaneous</option>
+                    {TRAINING_EXPENSE_CATEGORIES.filter(c => !liqParticipantId || !isProgramOnlyExpense(c)).map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
                   </select>
                 </div>
                 <div>

@@ -3,6 +3,7 @@ import { Banknote, Car, Loader2, Users } from "lucide-react";
 import { CashAdvance, type LinkedVehicleSummary } from "../../types";
 import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import { advancesCovering, isGroupAdvance, portionCentavos } from "../../advanceCoverage";
+import { cleanText } from "../../inputText";
 import { vehicleDraftFor, vehicleWithAdvanceFields, type SeminarForVehicle, type VehicleDraft } from "../../vehicleWithAdvance";
 import GroupCoverPicker from "./GroupCoverPicker";
 import VehicleWithAdvance from "./VehicleWithAdvance";
@@ -57,7 +58,9 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
   const [withVehicle, setWithVehicle] = useState(false);
   const freshDraft = () => vehicleDraftFor(seminar ?? {}, selfName ? [selfName] : []);
   const [vehicle, setVehicle] = useState<VehicleDraft>(freshDraft);
-  const offerVehicle = !vehicleOnFile;
+  // Its destination is the seminar's venue, so without one HR has to add it first.
+  const noVenue = !vehicleOnFile && !cleanText(seminar?.venue);
+  const offerVehicle = !vehicleOnFile && !noVenue;
   const sendVehicle = offerVehicle && withVehicle;
   const shownVehicle = advance?.vehicle ?? vehicleOnFile ?? null;
 
@@ -213,6 +216,13 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
           <Car size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
           {/* One flex item, so the gap doesn't split "VRS-…: status". */}
           <span>Vehicle request <span className="font-mono">{shownVehicle.vrsNo || ""}</span>: {shownVehicle.status}</span>
+        </p>
+      )}
+
+      {canRequest && noVenue && (
+        <p className="flex items-center gap-1 text-[11px] text-slate-600">
+          <Car size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
+          <span>Need a vehicle? HR hasn&rsquo;t set this seminar&rsquo;s venue yet, so ask HR to add it first.</span>
         </p>
       )}
 

@@ -21,7 +21,7 @@ import {
 } from "./src/advanceCoverage";
 import { enrolmentsForBudget } from "./src/server/budgetEnrolments";
 import { vehicleWithAdvanceFields as checkVehicleWithAdvance, type VehicleWithAdvanceFields } from "./src/vehicleWithAdvance";
-import { cleanText, isCalendarDate } from "./src/inputText";
+import { cleanText, isCalendarDate, RAW_TEXT_MAX } from "./src/inputText";
 import { addedGaps, divisionGaps, gapText, MAX_DAYS as MAX_SEMINAR_DAYS, seminarWeekdays, type CoverageStaff, type DivisionGap } from "./src/divisionCoverage";
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
@@ -112,6 +112,7 @@ import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
 import { dvKey, readDvNumber } from "./src/dvNumber";
 import { reimbursementLimit, reimbursementProblem, seminarClaimMode } from "./src/reimbursement";
+import { expenseLineLabel, expenseLinesProblem, isBlankExpenseLine, isProgramOnlyExpense, MAX_REPORT_LINES, vehicleOverlapsSeminar } from "./src/expenseLines";
 
 const app = express();
 const PORT = 3000;
@@ -3709,7 +3710,9 @@ app.put("/api/requests/:id/chief-decide", authenticateToken, (req: any, res) => 
 // advance and DV, under My Assigned Activities. Activities stored before (none live) still list.
 app.get("/api/activities", authenticateToken, (req: any, res) => {
   const { role, employeeId } = req.user;
-  
+  // Each seat's money, and a group's names and attendance: not kept in a shared PC's cache (7m).
+  res.set("Cache-Control", "no-store");
+
   if (role === UserRole.EMPLOYEE) {
     const empRecord = db.employees.find((e) => e.employeeId === employeeId);
     const altId = empRecord ? empRecord.id : null;
@@ -3743,6 +3746,13 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
             const v = vehicleRequestFor(t.id);
             return v ? { vrsNo: v.vrsNo, status: v.status } : null;
           })(),
+          // The vehicle request that rules out a Transportation line on this seat's report, and who
+          // filed it when a colleague did (the instructor's review, R3).
+          transportVehicle: (() => {
+            const v = transportVehicleFor(t.id);
+            if (!v) return null;
+            return { vrsNo: v.vrsNo, ...(employeeIdForms(employeeId).includes(v.employeeId) ? {} : { filedBy: v.employeeName }) };
+          })(),
           liquidationDueDate: liquidationDueDateFor(prog),
           participantStatus: t.status,
           // Attendance and whether the liquidation form is open (see seminarFormEligibility).
@@ -3764,7 +3774,9 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
             return held.covers!.map(c => ({
               participantId: c.participantId,
               employeeName: c.employeeName,
-              attendance: (db.trainingParticipants || []).find((x: any) => x && x.id === c.participantId)?.attendance || null
+              attendance: (db.trainingParticipants || []).find((x: any) => x && x.id === c.participantId)?.attendance || null,
+              // Whether a vehicle request stands for them: their lines can't be Transportation.
+              onVehicle: !!transportVehicleFor(c.participantId)
             }));
           })(),
           // The report a co-participant filed on the group advance covering them: its number and
@@ -3912,30 +3924,35 @@ function lineAmount(value: unknown): number | null {
 }
 
 // Normalises the PARTICULARS block. Returns null when the payload carries no usable
-// lines, so an older client sending only `totalSpent` keeps working unchanged.
-function normalizeParticulars(raw: any): { particulars: any[]; total: number; error?: string } | null {
+// lines, so an older client sending only `totalSpent` keeps working unchanged. `stored`: the lines
+// already on the report, when correcting it.
+function normalizeParticulars(raw: any, stored: any[] = []): { particulars: any[]; total: number; error?: string } | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
+  if (raw.length > MAX_REPORT_LINES) {
+    return { particulars: [], total: 0, error: `A report can have up to ${MAX_REPORT_LINES} expense lines.` };
+  }
   const particulars: any[] = [];
   // Each line keeps its id, so a reviewer can reopen it alone, unless that id is missing or
   // already taken; then it gets a new one, and a tick never reaches two lines.
   const usedIds = new Set<string>();
   for (let i = 0; i < raw.length; i++) {
     const p = raw[i] || {};
-    const description = String(p.description || "").trim();
+    const sentId = typeof p.id === "string" || typeof p.id === "number" ? String(p.id) : "";
+    const ownId = !!sentId && !usedIds.has(sentId);
+    // A line is an expense type and an amount (the instructor's review, R2), so text sent with one is
+    // ignored: it could print on the official report as a type the attendee can't claim. Only a line
+    // filed with a description keeps it.
+    const description = String((ownId && stored.find(s => s && String(s.id) === sentId)?.description) || "").trim();
     const amount = lineAmount(p.amount);
-    if (!description && amount === 0) continue; // blank row the user never filled in
-    if (!description) {
-      return { particulars: [], total: 0, error: `Particular ${i + 1} needs a description.` };
-    }
+    const typed = TRAINING_EXPENSE_CATEGORIES.includes(p.category);
+    if (!description && !typed && amount === 0) continue; // blank row the user never filled in
     if (amount === null) {
-      return { particulars: [], total: 0, error: `"${description}" needs an amount in pesos of zero or more, with at most two decimals.` };
+      return { particulars: [], total: 0, error: `"${description || (typed ? p.category : `Particular ${i + 1}`)}" needs an amount in pesos of zero or more, with at most two decimals.` };
     }
     // An unrecognised or missing bucket falls back rather than failing the whole
     // report — the claimant's money is not held up by a bad dropdown value.
-    const category: TrainingExpenseCategory =
-      TRAINING_EXPENSE_CATEGORIES.includes(p.category) ? p.category : "Miscellaneous";
-    const sentId = typeof p.id === "string" || typeof p.id === "number" ? String(p.id) : "";
-    const id = sentId && !usedIds.has(sentId) ? sentId : `lp-${crypto.randomUUID()}`;
+    const category: TrainingExpenseCategory = typed ? p.category : "Miscellaneous";
+    const id = ownId ? sentId : `lp-${crypto.randomUUID()}`;
     usedIds.add(id);
     // On a group's report, the attendee the line was for (optional; checked by groupLinesProblem).
     const participantId = typeof p.participantId === "string" && p.participantId.trim() ? p.participantId.trim() : "";
@@ -3956,10 +3973,35 @@ function groupLinesProblem(lines: any[] | null | undefined, advance: CashAdvance
     if (!group) { delete line.participantId; continue; }
     const cover = group.covers!.find(c => c.participantId === line.participantId);
     const enrolment = cover ? (db.trainingParticipants || []).find((p: any) => p && p.id === cover.participantId) : null;
-    if (!cover || !enrolment) return `"${line.description}" is marked for someone your group's cash advance doesn't cover.`;
-    if (enrolment.attendance !== "Attended") return `"${line.description}" is marked for ${cover.employeeName}, who didn't attend: only attendees' spending is liquidated.`;
+    if (!cover || !enrolment) return `"${expenseLineLabel(line)}" is marked for someone your group's cash advance doesn't cover.`;
+    if (enrolment.attendance !== "Attended") return `"${expenseLineLabel(line)}" is marked for ${cover.employeeName}, who didn't attend: only attendees' spending is liquidated.`;
   }
   return null;
+}
+
+// The vehicle request that rules out a Transportation line on a seat (the instructor's review, R3): the
+// one filed for its seminar, theirs or their group's, or their own ordinary Vehicle Request for its dates
+// (the team's decision of 2026-11-01: only a request filed with the cash advance is linked to a seminar).
+function transportVehicleFor(participantId: string): any {
+  const linked = vehicleRequestFor(participantId);
+  if (linked) return linked;
+  const seat: any = (db.trainingParticipants || []).find((p: any) => p && p.id === participantId);
+  const seminar: any = seat && (db.trainingPrograms || []).find((p: any) => p && p.id === seat.trainingProgramId);
+  if (!seminar) return null;
+  const forms = employeeIdForms(seat.employeeId);
+  return (db.requests || []).find((r: any) => r && r.requestType === RequestType.VEHICLE && r.status !== RequestStatus.REJECTED
+    && !r.trainingParticipantId && forms.includes(r.employeeId) && vehicleOverlapsSeminar(r, seminar)) || null;
+}
+
+// Which vehicle request stands for whom a report's line is for (src/expenseLines.ts, the instructor's
+// review, R3): the attendee it names on a group's report, else the report's own seat. Someone else's
+// own request says that it stands, not its number. null when none stands.
+function lineVehicleNo(seatId: string, claimantId: string) {
+  return (participantId?: string): string | null => {
+    const v = transportVehicleFor(participantId || seatId);
+    if (!v) return null;
+    return employeeIdForms(claimantId).includes(v.employeeId) ? String(v.vrsNo || "") : "";
+  };
 }
 
 // The group advance a report settles, when it is a group's (its holder files it), else null.
@@ -4385,7 +4427,7 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   // report, which lists its items.
   const typedSpent = lines || seminarEnrolment ? null : parsePeso(totalSpent);
   if (!lines && !(typedSpent !== null && typedSpent > 0)) {
-    return res.status(400).json({ status: "error", message: "Add at least one particular describing what was spent." });
+    return res.status(400).json({ status: "error", message: "Add at least one expense: choose its type and enter the amount." });
   }
 
   // A seminar enrolment is liquidated only by its own employee (no Administrator exception)
@@ -4445,7 +4487,8 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   // flags a suspicious claim.
   const advance = releasedAdvanceForAssignment(activityId);
   // (A group's report may say whom each line was for; any other report's lines name nobody.)
-  const linesProblem = groupLinesProblem(lines ? lines.particulars : null, withinAdvance ? advance : null);
+  const linesProblem = groupLinesProblem(lines ? lines.particulars : null, withinAdvance ? advance : null)
+    || expenseLinesProblem(lines ? lines.particulars : [], [], lineVehicleNo(activityId, employeeId));
   if (linesProblem) return res.status(400).json({ status: "error", message: linesProblem });
   const groupAdvance = withinAdvance && advance && isGroupAdvance(advance) ? advance : null;
   const typedDvNo = String(cashAdvanceDvNo || "").trim();
@@ -4735,15 +4778,15 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     // A line reopened on its own is corrected, not removed (the form offers no Remove then).
     const cleared = (sub.particulars || []).find((p: any) => {
       const edit = editOf(p);
-      return edit && !String(edit.description ?? "").trim() && !(Number(edit.amount) > 0);
+      return edit && isBlankExpenseLine(edit);
     });
     if (cleared) {
-      return res.status(400).json({ status: "error", message: `"${cleared.description}" was reopened for correction: correct it rather than clearing it.` });
+      return res.status(400).json({ status: "error", message: `"${expenseLineLabel(cleared)}" was reopened for correction: correct it rather than clearing it.` });
     }
     body.particulars = (sub.particulars || []).map((p: any) => {
       const edit = editOf(p);
       // (A group's line keeps whom it was for as corrected, the group when none is sent.)
-      return edit ? { ...p, description: edit.description, amount: edit.amount, category: edit.category, participantId: edit.participantId || undefined } : p;
+      return edit ? { ...p, amount: edit.amount, category: edit.category, participantId: edit.participantId || undefined } : p;
     });
     delete body.totalSpent;
   }
@@ -4790,7 +4833,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   const changeSnapshot = (s: any): Record<CorrectionField, string> => ({
     periodCovered: JSON.stringify([s.periodCoveredFrom || "", s.periodCoveredTo || ""]),
     responsibilityCenterCode: JSON.stringify(s.responsibilityCenterCode || ""),
-    particulars: JSON.stringify((s.particulars || []).map((p: any) => [p.id, p.description, p.amount, p.category])),
+    particulars: JSON.stringify((s.particulars || []).map((p: any) => [p.id, p.description, p.amount, p.category, p.participantId || ""])),
     cashAdvance: JSON.stringify([s.totalReleased, s.cashAdvanceDvNo || "", s.cashAdvanceDvDate || ""]),
     refundOr: JSON.stringify([s.refundOrNo || "", s.refundOrDate || ""]),
     claimType: JSON.stringify(s.claimType || ""),
@@ -4810,11 +4853,14 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     || (f === "refundOr" && !!sub.withinAdvance && may("particulars"))
     || (f === "representative" && !hadRepresentative);
 
-  const lines = normalizeParticulars(particulars);
+  const lines = normalizeParticulars(particulars, sub.particulars || []);
   if (lines && lines.error) {
     return res.status(400).json({ status: "error", message: lines.error });
   }
-  const linesProblem = groupLinesProblem(lines ? lines.particulars : null, sub.withinAdvance ? advanceOnFileFor(sub) : null);
+  // (A report filed before these rules keeps its lines: only a new line, a changed type or a line
+  // moved to someone else is checked.)
+  const linesProblem = groupLinesProblem(lines ? lines.particulars : null, sub.withinAdvance ? advanceOnFileFor(sub) : null)
+    || expenseLinesProblem(lines ? lines.particulars : [], sub.particulars, lineVehicleNo(sub.activityId, sub.employeeId));
   if (linesProblem) return res.status(400).json({ status: "error", message: linesProblem });
 
   // Box B: a new choice is checked and copied. Without one, the report keeps the person
@@ -5237,7 +5283,7 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
       const dateIncurred = new Date().toISOString().split("T")[0];
       const ledgerLines = (sub.particulars && sub.particulars.length > 0)
         ? sub.particulars.map((p: any) => ({
-            description: p.description,
+            description: expenseLineLabel(p),
             amount: p.amount,
             category: TRAINING_EXPENSE_CATEGORIES.includes(p.category) ? p.category : "Miscellaneous",
             participantId: p.participantId
@@ -5992,8 +6038,15 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
         message: `${names} ${onAnother.length === 1 ? "is" : "are"} already on a vehicle request for this seminar. Untick ${onAnother.length === 1 ? "them" : "those people"}, or the vehicle.`
       });
     }
+    // The destination is the seminar's venue (the instructor's review, R1), never typed.
     const prog: any = (db.trainingPrograms || []).find((p: any) => p && p.id === enrolment.trainingProgramId);
-    const v = checkVehicleWithAdvance(req.body.vehicle, manilaToday(), prog ? { startDate: prog.startDate, endDate: prog.endDate } : undefined);
+    const venue = cleanText(prog?.venue);
+    if (!venue) {
+      return res.status(409).json({ status: "error", message: "HR hasn't set this seminar's venue yet, so a vehicle can't be requested. Ask HR to add it, or untick the vehicle." });
+    }
+    const sent = req.body.vehicle;
+    const trip = typeof sent === "object" && !Array.isArray(sent) ? { ...sent, destination: venue } : sent;
+    const v = checkVehicleWithAdvance(trip, manilaToday(), prog ? { startDate: prog.startDate, endDate: prog.endDate } : undefined);
     if ("error" in v) return res.status(400).json({ status: "error", message: v.error });
     vehicle = v.fields;
   }
@@ -6997,6 +7050,16 @@ function seminarTextProblem(title: unknown, description: unknown, category: unkn
     return "The description must be text, up to 2,000 characters.";
   }
   if (category != null && (typeof category !== "string" || category.length > 100)) return "The category must be text, up to 100 characters.";
+  return null;
+}
+
+// A seminar's venue as it will be saved (the instructor's review, R1): a vehicle request's destination
+// comes from it, so it is required on a new seminar and on one that hasn't ended. Saved cleaned like
+// the title, and with the room a destination has.
+function seminarVenueProblem(venue: unknown, required: boolean): string | null {
+  if (venue != null && typeof venue !== "string") return "The venue must be text.";
+  if (typeof venue === "string" && (venue.length > RAW_TEXT_MAX || cleanText(venue).length > 200)) return "Keep the venue to 200 characters.";
+  if (required && !cleanText(venue)) return "Enter the seminar's venue.";
   return null;
 }
 
@@ -8585,7 +8648,7 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
   if (datesProblem) return res.status(400).json({ status: "error", message: datesProblem });
   const timeProblem = seminarTimeProblem(body.startDate, body.startTime, body.endDate, body.endTime);
   if (timeProblem) return res.status(400).json({ status: "error", message: timeProblem });
-  const textProblem = seminarTextProblem(body.title, body.description, body.category);
+  const textProblem = seminarTextProblem(body.title, body.description, body.category) || seminarVenueProblem(body.venue, true);
   if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
   const tdpSent = readTdpExceptions(body.tdpExceptions);
   if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
@@ -8635,7 +8698,7 @@ app.post("/api/training/programs", authenticateToken, transactional((req: any, r
     endTime: body.endTime,
     durationDays: diffDays,
     totalHours: totalHours,
-    venue: body.venue,
+    venue: cleanText(body.venue),
     facilitator: body.facilitator,
     maxParticipants: seats ?? 1,
     targetSpecialization: body.targetSpecialization,
@@ -8724,7 +8787,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   const title = body.title ?? existingProgram.title;
   const description = body.description ?? existingProgram.description;
   const category = body.category ?? existingProgram.category;
-  const textProblem = seminarTextProblem(title, description, category);
+  const venueIn = body.venue !== undefined ? body.venue : existingProgram.venue;
+  const textProblem = seminarTextProblem(title, description, category) || seminarVenueProblem(venueIn, endDate >= manilaToday());
   if (textProblem) return res.status(400).json({ status: "error", message: textProblem });
   const tdpSent = readTdpExceptions(body.tdpExceptions);
   if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
@@ -8809,7 +8873,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     endTime: body.endTime !== undefined ? body.endTime : existingProgram.endTime,
     durationDays: diffDays,
     totalHours: totalHours,
-    venue: body.venue !== undefined ? body.venue : existingProgram.venue,
+    venue: body.venue !== undefined ? cleanText(body.venue) : existingProgram.venue,
     facilitator: body.facilitator !== undefined ? body.facilitator : existingProgram.facilitator,
     maxParticipants: newSeats ?? existingProgram.maxParticipants,
     targetDivision: body.targetDivision !== undefined ? body.targetDivision : existingProgram.targetDivision,
@@ -8833,6 +8897,13 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     return;
   }
   const seminarCovers = !inTdpAfter && seminarJustified;
+
+  // A vehicle request's destination comes from the venue, so a change is on record. (One already filed
+  // keeps the destination it was filed with: the Division Chief decided that trip.)
+  if (body.venue !== undefined && cleanText(body.venue) !== cleanText(existingProgram.venue)) {
+    logEvent(req.user.id, req.user.username, req.user.role, "Change Seminar Venue",
+      `${req.user.fullName} changed the venue of ${JSON.stringify(cleanText(title))} from ${JSON.stringify(cleanText(existingProgram.venue))} to ${JSON.stringify(cleanText(body.venue))}.`);
+  }
 
   // Budget or head-count edits re-price the allowances nobody has liquidated yet, whether or
   // not the roster was sent: an allowance caps the cash advance Finance can release.
@@ -9638,6 +9709,9 @@ app.post("/api/training/liquidations", authenticateToken, transactional((req: an
   }
   const { trainingProgramId, trainingParticipantId, expenseCategory, description, amount, receiptFileName, dateIncurred } = req.body;
   const amt = round2(parseFloat(amount));
+  if (!TRAINING_EXPENSE_CATEGORIES.includes(expenseCategory)) {
+    return res.status(400).json({ status: "error", message: "Choose an expense category from the list." });
+  }
 
   const prog = db.trainingPrograms.find(p => p.id === trainingProgramId);
   if (!prog) return res.status(404).json({ status: "error", message: "Program not found" });
@@ -9656,6 +9730,9 @@ app.post("/api/training/liquidations", authenticateToken, transactional((req: an
     participant = (db.trainingParticipants || []).find(p => p.id === trainingParticipantId);
     if (!participant || participant.trainingProgramId !== trainingProgramId) {
       return res.status(400).json({ status: "error", message: "Selected participant is not enrolled in this training program." });
+    }
+    if (isProgramOnlyExpense(expenseCategory)) {
+      return res.status(400).json({ status: "error", message: `${expenseCategory} is a cost of the whole seminar: charge it to the whole program, not to one person.` });
     }
     // A participant who files a liquidation report is accounted for by that report, which
     // Finance's validation copies into this ledger; a hand entry as well would count the
@@ -9698,6 +9775,8 @@ app.post("/api/training/liquidations", authenticateToken, transactional((req: an
 
   prog.usedBudget = round2((prog.usedBudget || 0) + amt);
   db.trainingLiquidations.push(liq);
+  logEvent(req.user.id, req.user.username, req.user.role, "Record Training Expense",
+    `${req.user.fullName} recorded ${pesoText(amt)} of ${expenseCategory} for ${JSON.stringify(cleanText(prog.title))}, charged to ${participant ? JSON.stringify(cleanText(enrolmentEmployee(participant)?.fullName || participant.employeeId)) : "the whole program"}.`);
   saveDB();
   res.json({ status: "success", data: liq });
 }));

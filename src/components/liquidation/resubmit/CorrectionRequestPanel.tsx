@@ -1,5 +1,6 @@
 import { ClipboardList } from "lucide-react";
-import { CorrectionRequest, LiquidationSubmission, UserRole } from "../../../types";
+import { CorrectionRequest, LiquidationSubmissionView, UserRole } from "../../../types";
+import { expenseLineLabel } from "../../../expenseLines";
 import { formatCurrency, formatDate } from "../../../utils";
 import { correctionLabel } from "./correctionModel";
 
@@ -12,10 +13,15 @@ export default function CorrectionRequestPanel({
   report
 }: {
   request: CorrectionRequest;
-  report: Partial<LiquidationSubmission>;
+  report: Partial<LiquidationSubmissionView>;
 }) {
   const by = request.requestedByRole === UserRole.FINANCE_OFFICER ? "Finance" : "HR";
   const lineName = (id: string) => (report.particulars ?? []).find(p => p.id === id);
+  // On a group's report lines can read the same, so each says whom it was for.
+  const forWhom = (participantId?: string) => {
+    const name = report.covers?.find(c => c.participantId === participantId)?.employeeName;
+    return name ? ` for ${name}` : "";
+  };
   const fileName = (id: string) => (report.supportingDocs ?? []).find(d => d.id === id)?.name ?? "a file";
 
   return (
@@ -41,7 +47,7 @@ export default function CorrectionRequestPanel({
                   {item.lineIds?.length
                     ? `: ${item.lineIds.map(id => {
                         const line = lineName(id);
-                        return line ? `${line.description} (${formatCurrency(Number(line.amount) || 0)})` : "a line";
+                        return line ? `${expenseLineLabel(line)}${forWhom(line.participantId)} (${formatCurrency(Number(line.amount) || 0)})` : "a line";
                       }).join("; ")}`
                     : ": every line (you may add or remove lines)"}
                 </span>

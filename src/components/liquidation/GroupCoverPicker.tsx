@@ -21,7 +21,7 @@ interface Props {
   /** The seminar and the holder's own name: "Also request a vehicle" starts from them. */
   seminar?: SeminarForVehicle;
   selfName?: string;
-  /** False when a vehicle request for this seminar still stands (filed with an earlier request). */
+  /** False when a vehicle request for this seminar still stands (filed with an earlier request), or the seminar has no venue yet. */
   offerVehicle?: boolean;
   /** The trip already filled in on the card before "For my group…" was pressed: it starts ticked. */
   initialVehicle?: VehicleDraft;

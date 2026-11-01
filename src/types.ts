@@ -425,6 +425,7 @@ export interface Activity {
 // The spending buckets HR's training ledger groups by. Shared with the PARTICULARS
 // editor so a claimant's line item lands in a real bucket instead of "Miscellaneous".
 export type TrainingExpenseCategory =
+  | "Registration Fee"
   | "Meals"
   | "Transportation"
   | "Accommodation"
@@ -433,7 +434,9 @@ export type TrainingExpenseCategory =
   | "Speaker Fees"
   | "Miscellaneous";
 
+// Which of these an attendee may choose, and when: src/expenseLines.ts.
 export const TRAINING_EXPENSE_CATEGORIES: TrainingExpenseCategory[] = [
+  "Registration Fee",
   "Meals",
   "Transportation",
   "Accommodation",

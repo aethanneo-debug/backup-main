@@ -125,7 +125,7 @@ export default function AttendanceModal({ program, participants, employees, canR
   return (
     <ModalDialog
       title="Attendance"
-      subtitle={`${String(program.title || "").trim()} · ${formatDate(program.startDate)}${program.endDate && program.endDate !== program.startDate ? ` to ${formatDate(program.endDate)}` : ""}`}
+      subtitle={`${String(program.title || "").trim()} · ${formatDate(program.startDate)}${program.endDate && program.endDate !== program.startDate ? ` to ${formatDate(program.endDate)}` : ""}${program.venue ? ` · ${program.venue}` : ""}`}
       icon={<CalendarCheck size={16} aria-hidden="true" />}
       onClose={onClose}
       busy={!!savingId || justifying || sendingRep}

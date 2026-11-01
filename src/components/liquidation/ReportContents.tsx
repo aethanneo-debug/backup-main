@@ -92,8 +92,7 @@ export default function ReportContents({ report }: Props) {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th scope="col" className="px-2 py-1.5 font-semibold">Description</th>
-                  <th scope="col" className="px-2 py-1.5 font-semibold">Category</th>
+                  <th scope="col" className="px-2 py-1.5 font-semibold">Expense</th>
                   <th scope="col" className="px-2 py-1.5 text-right font-semibold">Amount</th>
                 </tr>
               </thead>
@@ -101,17 +100,18 @@ export default function ReportContents({ report }: Props) {
                 {items.map((p, i) => (
                   <tr key={p?.id || i}>
                     <td className="px-2 py-1.5 text-slate-700">
-                      {p?.description || "—"}
+                      {p?.category || "Miscellaneous"}
+                      {/* An older report keeps the description it was filed with. */}
+                      {p?.description?.trim() && <span className="block text-[10px] text-slate-500">{p.description}</span>}
                       {nameOf(p?.participantId) && <span className="block text-[10px] text-slate-500">For {nameOf(p.participantId)}</span>}
                     </td>
-                    <td className="px-2 py-1.5 text-slate-500">{p?.category || "—"}</td>
                     <td className="px-2 py-1.5 text-right font-mono text-slate-700">{formatCurrency(Number(p?.amount) || 0)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot className="border-t border-slate-200 bg-slate-50">
                 <tr>
-                  <td colSpan={2} className="px-2 py-1.5 font-semibold text-slate-600">Total</td>
+                  <td className="px-2 py-1.5 font-semibold text-slate-600">Total</td>
                   <td className="px-2 py-1.5 text-right font-mono font-semibold text-slate-800">{formatCurrency(itemsTotal)}</td>
                 </tr>
               </tfoot>

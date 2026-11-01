@@ -24,8 +24,9 @@ const TIME = `${BOX} w-24 shrink-0`;
 /**
  * "Also request a vehicle" on a seminar's cash advance request (HSAC RAB 1, 2026-10-26: the vehicle
  * request may be filed together with the cash advance). It files the usual Vehicle Request in the
- * same step, prefilled from the seminar and editable. The Division Chief decides it, apart from the
- * advance; the server checks it as src/vehicleWithAdvance.ts says.
+ * same step, prefilled from the seminar. The destination is the seminar's venue and can't be typed
+ * (the instructor's review, R1); the rest can be changed. The Division Chief decides it, apart from
+ * the advance; the server checks it as src/vehicleWithAdvance.ts says.
  */
 export default function VehicleWithAdvance({ idPrefix, on, onToggle, draft, onChange, disabled, onPassengersEdited }: Props) {
   const set = (patch: Partial<VehicleDraft>) => onChange({ ...draft, ...patch });
@@ -48,9 +49,9 @@ export default function VehicleWithAdvance({ idPrefix, on, onToggle, draft, onCh
         <fieldset className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
           <legend className="sr-only">Vehicle request</legend>
           <div>
-            <label htmlFor={id("destination")} className={LABEL}>Destination</label>
-            <input id={id("destination")} type="text" maxLength={200} value={draft.destination} disabled={disabled}
-              onChange={e => set({ destination: e.target.value })} className={INPUT} />
+            <label htmlFor={id("destination")} className={LABEL}>Destination (the seminar&rsquo;s venue)</label>
+            <input id={id("destination")} type="text" value={draft.destination} readOnly disabled={disabled}
+              className={`${INPUT} bg-slate-100 text-slate-700`} />
           </div>
           <div>
             <label htmlFor={id("purpose")} className={LABEL}>Purpose</label>
