@@ -17,7 +17,7 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 | 1 | R1 venue, R2 expense lines, R3 transportation | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 2 | R6 viewer, file allow-list, Print; file storage; 12e | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 3 | R4 certificate, R5 required documents | Built 2026-11-01; reviewed three times, every finding fixed, 2026-11-02 (known-issues 12aa); not committed |
-| 4 | R7 notices that open on the missing item | Not started |
+| 4 | R7 notices that open on the missing item | Built and reviewed 2026-11-02 (known-issues 12aa), not committed |
 | 5 | R8 tables and View | Not started |
 | 6 | R9 the TDP once a year | Not started |
 | 7 | R10 picker, R11 history and reports | Not started |
@@ -146,6 +146,8 @@ Build:
 - The notice names the document.
 - The certificate reminder (R4) opens on the card's upload the same way.
 - It works from the bell and from the portal's own "Notifications & Alerts" list.
+
+Decided in Phase 4's plan (2026-11-02): when a Return reopens several things, the notice lands on the first on the reviewer's checklist, the order the form's "Only these parts can be changed" panel shows. A Return's target is worked out on the portal from the report's open correction, so only the certificate reminder carries one on its link.
 
 ### R8. Liquidation lists as tables, with a View window
 
