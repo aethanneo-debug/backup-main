@@ -27,7 +27,7 @@ answer is quoted as given, followed by how we read it and what the system does a
    - System: Part D (built 2026-10-27, known-issues 12y): for a seminar that covers Plan A needs, the participant picker lists the people whose plan lists one of them and names the column ("Needs this: Function" or "…: Additional Function/Designation"); "Show all employees" covers the exceptions.
 7. **Can the vehicle request be filed together with the cash advance?** (asked by a team member)
    "Yes, pwede."
-   - System: Part B (built 2026-10-27, known-issues 12v): "Also request a vehicle" on the cash-advance request, filed in the same step, for the seminar's dates. The two are decided separately: the Division Chief the vehicle, Finance the advance.
+   - System: Part B (built 2026-10-27, known-issues 12v): "Also request a vehicle" on the cash-advance request, filed in the same step, for the seminar's dates. The two are decided separately: the Division Chief the vehicle, Finance the advance. Since 2026-11-01 its destination is the seminar's venue, and while it stands no Transportation expense is claimed (the instructor's review, R1 and R3; known-issues 12aa).
 
 8. **How HR builds the TDP, and who goes to a seminar** (2026-10-28): "Paano po yung whole process ng HR sa paggawa ng TDP hanggang sa pag-set ng seminar, and bakit po napupunta yung specific seminar na yon sa employee? And sa selection po ng participants sa seminar, for example Legal Ethics, may mapi-prioritize po ba na employee for that seminar, and pwede po ba mag-assign ng specific employee kahit hindi siya under Legal Division?"
    1. Position Description Form (PDF) & Qualification Standards (QS) Review
