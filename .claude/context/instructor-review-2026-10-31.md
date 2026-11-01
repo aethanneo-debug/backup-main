@@ -12,11 +12,11 @@ If a recommendation conflicts with an HSAC answer or a recorded decision, stop a
 
 Work one phase at a time: a short plan, the team's OK, build, verify, code review and security review, fix, update the docs. Nothing is committed without being asked.
 
-| Phase | Recommendations | Status (2026-11-01) |
+| Phase | Recommendations | Status (2026-11-02) |
 |---|---|---|
 | 1 | R1 venue, R2 expense lines, R3 transportation | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 2 | R6 viewer, file allow-list, Print; file storage; 12e | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
-| 3 | R4 certificate, R5 required documents | Not started |
+| 3 | R4 certificate, R5 required documents | Built 2026-11-01; reviewed three times, every finding fixed, 2026-11-02 (known-issues 12aa); not committed |
 | 4 | R7 notices that open on the missing item | Not started |
 | 5 | R8 tables and View | Not started |
 | 6 | R9 the TDP once a year | Not started |
@@ -25,7 +25,7 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 
 ## Decisions that change earlier ones
 
-- **Reimbursements need a certificate too.** This replaces the 2026-10-30 decision that official receipts are enough (`hsac-answers.md` 9, known-issues 12q). The team didn't answer this one directly. It follows from Q4: nobody reaches the form without HR recording "Attended", and that needs a certificate. Update both documents in Phase 3.
+- **Reimbursements need a certificate too.** This replaces the 2026-10-30 decision that official receipts are enough (`hsac-answers.md` 9, known-issues 12q). The team didn't answer this one directly. It follows from Q4: nobody reaches the form without HR recording "Attended", and that needs a certificate. Both documents updated in Phase 3.
 - **"Attended" waits for the certificate.** Requirement 3 let HR record attendance once a seminar starts. Now "Attended" needs a certificate, so in practice it waits until the seminar ends. "Did not attend" can still be recorded from the first day and needs no file. Correcting "Did not attend" to "Attended" also needs a certificate.
 - **Carried-over needs don't count as an upload.** A year counts as uploaded "before this change" only if it has Plan A entries that weren't carried over. FY 2027 counts (464 entries, 0 carried). Carried needs survive an upload or a Replace (`POST /api/fiscal-years`, the carry-over rule).
 - **The picker keeps its Plan A switch** (12y, HSAC answers 6 and 8). The no-training filter applies inside it. People with a mandated need for the seminar stay visible even if they already had a training this year.
@@ -37,7 +37,6 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 
 - **R12 / Q9, demo data:** how the data gets in. Decide in Phase 8.
 - **R11 / Q10, 12r:** the team asked what the records are and why they would be removed. Unless told otherwise, the Review buttons get fixed in Phase 7, not removed.
-- **R5, documents:** which of the named documents are always required, and which only when their condition applies. Decide in Phase 3's plan.
 - **R9, "Add Training Program":** how it stays while seminars still start from the TDP. Confirm in Phase 6's plan.
 - **Known limit, accepted:** a certificate that arrives late holds up the attendance record, then the report (due 30 days after the seminar) and the employee's next cash advance. If this proves common, add "HR records it with a reason", flagged in the audit log.
 
@@ -96,6 +95,13 @@ Said: "pag nag submit ka ng requirement icliclick lang yung requirement? … req
 
 Team's decision: seminar photos are not required. The named slots follow the documentary requirements below, which replace the brief's three slots.
 
+Which are required (Phase 3's plan, approved 2026-11-01):
+- Always: the certificate, Itinerary of Travel and Certificate of Travel Completed.
+- When the report shows it: Tickets with a Transportation line, the hotel bills with an Accommodation line, "OR, Excess Cash Advance" when money is handed back.
+- When the employee ticks it: the revised Office Order (the schedule changed), the revised itinerary (the approved one wasn't followed), the Head of Agency's certification (over the daily rate), the RER (an expense with no official receipt).
+- A tick "No travel: held at my own office" takes the two travel documents off, since an in-house seminar has no itinerary. It can't be ticked with a vehicle request, a Transportation line or an Accommodation line, and a Transportation or Accommodation line added on a correction brings the two documents back. (Accommodation counting as travel is the developer's reading after the security review, 2026-11-02; the team can reverse it.)
+- A Reimbursement needs only the certificate and Official Receipts. "Official Receipts" isn't on the team's list; it is an optional slot on every other report, so meal and registration receipts have somewhere to go.
+
 Build:
 - Named slots. Submit stays disabled, with the reason shown, until the required ones are filled. The server enforces the same on filing and on resubmit.
 - Each stored file keeps its kind, so reviewers and the Return checklist can name the missing slot (R7).
@@ -120,7 +126,7 @@ Build:
 
 Said: "nasan yung liquidation? bakit ko pa idodownload? iprint mo na, pag clinick mo si print tapos print preview."
 
-Team's decision: PDF, JPEG and PNG, 5 MB per file. The suggested cap of 10 files per report was accepted before the named slots came in, so re-check it in Phase 3. As built, the cap is on what one request brings, so a report filed with 10 files can still take the missing document a reviewer asks for.
+Team's decision: PDF, JPEG and PNG, 5 MB per file. The suggested cap of 10 files per report was accepted before the named slots came in; Phase 3 raised it to 20, since one trip can bring tickets, passes, bills and receipts. The cap is on what one request brings, so a report already at the cap can still take the missing document a reviewer asks for.
 
 Build:
 - A shared file viewer in `src/components/ui/`. PDF, JPEG and PNG preview in a modal with Print and Download. Any other kind can only be downloaded.
