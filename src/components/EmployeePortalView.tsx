@@ -10,6 +10,8 @@ import {
   filledParticulars
 } from "./liquidation/particularLines";
 import { expenseLineLabel, expenseTypeProblem, isBlankExpenseLine, keptExpenseType, vehicleNoForLine } from "../expenseLines";
+import { FILE_INPUT_ACCEPT, MAX_REPORT_FILES, fileBytes, fileProblem, pickedFileProblem, reportFilesProblem } from "../fileRules";
+import FileViewer, { type ReportFile } from "./ui/FileViewer";
 import { CoaHeaderFields, emptyCoaHeaderFields } from "./liquidation/LiquidationCoaFields";
 import LiquidationSheetForm, { BOX_B_AS_FILED } from "./liquidation/sheet/LiquidationSheetForm";
 import { amountText } from "./liquidation/sheet/sheetFormat";
@@ -112,6 +114,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // Uploaded receipts carry size + base64 content; older records only a filename. A file
   // replaced in a correction is still listed, marked superseded.
   const [attachedFiles, setAttachedFiles] = useState<LiquidationDocument[]>([]);
+  // Why the last file picked wasn't attached (src/fileRules.ts), and a filed report's file in the viewer.
+  const [fileError, setFileError] = useState("");
+  const [viewing, setViewing] = useState<ReportFile | null>(null);
   const [newFileName, setNewFileName] = useState("");
   const [newFileType, setNewFileType] = useState("Receipt/Invoice");
   const [resubmittingItem, setResubmittingItem] = useState<any | null>(null);
@@ -260,6 +265,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setTotalSpent(0);
     setLiqRemarks("");
     setAttachedFiles([]);
+    setFileError("");
     setParticulars([newParticular()]);
     setParticularErrors({});
     setCoaFields(emptyCoaHeaderFields);
@@ -320,6 +326,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setTotalSpent(sub.totalSpent);
     setLiqRemarks(sub.remarks || "");
     setAttachedFiles(sub.supportingDocs || []);
+    setFileError("");
     setParticularErrors({});
     // Box B stays as filed (the copy that prints) unless the claimant picks someone else.
     setRepresentativeId(sub.representativeId ? BOX_B_AS_FILED : "");
@@ -921,6 +928,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         return;
       }
     }
+    // The file limits, mirroring the server: what this request brings.
+    const newFiles = [...attachedFiles.filter(f => f.content), ...Object.values(replacementFiles)];
+    const filesProblem = reportFilesProblem(newFiles.length, newFiles.reduce((n, f) => n + fileBytes(f.content), 0));
+    if (filesProblem) {
+      setFileError(filesProblem);
+      setError(filesProblem);
+      return;
+    }
     setParticularErrors({});
 
     setSubmittingLiq(true);
@@ -981,11 +996,27 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
   const [isDragging, setIsDragging] = useState(false);
 
-  // Read file as base64
+  // Several files can be refused in one pick, so each is named.
+  const addFileError = (problem: string) => setFileError(prev => (prev ? `${prev} ${problem}` : problem));
+
+  // Read file as base64. The server checks the same rules; here the employee hears why at once.
   const handleFileRead = (file: File) => {
+    const picked = pickedFileProblem(file.name, file.size);
+    if (picked) {
+      addFileError(picked);
+      return;
+    }
+    const pickedFor = resubmittingItem?.id ?? null;
     const reader = new FileReader();
+    reader.onerror = () => addFileError(`"${file.name}" couldn't be read. Try again.`);
     reader.onload = () => {
+      if (correctingId.current !== pickedFor) return; // the form has moved on to another report
       const base64Data = reader.result as string;
+      const problem = fileProblem(file.name, base64Data, file.type);
+      if (problem) {
+        addFileError(problem);
+        return;
+      }
       const formattedSize = (file.size / 1024).toFixed(1) + " KB";
       const newDoc = {
         id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1001,11 +1032,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      for (let i = 0; i < e.target.files.length; i++) {
-        handleFileRead(e.target.files[i]);
-      }
-    }
+    setFileError("");
+    Array.from(e.target.files ?? []).forEach(handleFileRead);
+    // So the same file can be picked again, once fixed or after a Remove.
+    e.target.value = "";
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1020,17 +1050,20 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      for (let i = 0; i < e.dataTransfer.files.length; i++) {
-        handleFileRead(e.dataTransfer.files[i]);
-      }
-    }
+    setFileError("");
+    Array.from(e.dataTransfer.files ?? []).forEach(handleFileRead);
   };
 
   // The shared helper only opens a real uploaded file (a base64 data URL), never a script.
   const downloadBase64File = (name: string, content: string) => {
     if (!saveAttachedFile(name, content)) alert(`"${name}" has no uploaded file that can be opened.`);
   };
+
+  // A filed report's file, in the viewer. The server sends it only to its owner and the reviewers.
+  function viewReportFile(reportId: string, doc: any) {
+    if (doc?.hasFile) setViewing({ reportId, docId: doc.id, name: doc.name });
+    else alert(`"${doc?.name}" has no uploaded file that can be opened.`);
+  }
 
   function handleRemoveAttached(id: string) {
     setAttachedFiles(prev => prev.filter(f => f.id !== id));
@@ -1044,17 +1077,27 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
   // A new copy of a file the reviewer asked to replace. The server keeps the old one.
   function chooseReplacement(docId: string, file: File) {
+    const picked = pickedFileProblem(file.name, file.size);
+    setFileError(picked);
+    if (picked) return;
     const pickedFor = resubmittingItem?.id ?? null;
     const reader = new FileReader();
+    reader.onerror = () => setFileError(`"${file.name}" couldn't be read. Try again.`);
     reader.onload = () => {
       if (correctingId.current !== pickedFor) return; // the form has moved on to another report
+      const content = reader.result as string;
+      const problem = fileProblem(file.name, content, file.type);
+      if (problem) {
+        setFileError(problem);
+        return;
+      }
       setReplacementFiles(prev => ({
         ...prev,
         [docId]: {
           name: file.name,
           size: (file.size / 1024).toFixed(1) + " KB",
           type: file.type || "application/octet-stream",
-          content: reader.result as string,
+          content,
           uploadedAt: new Date().toISOString()
         }
       }));
@@ -1077,6 +1120,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         activityLabel={reportSubmission ? activityLabelFor(reportSubmission.activityId) : undefined}
         onClose={() => setReportSubmission(null)}
       />
+
+      <FileViewer file={viewing} onClose={() => setViewing(null)} />
 
       {resubmitRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
@@ -2049,6 +2094,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                       id="receipt-input"
                       type="file"
                       multiple
+                      accept={FILE_INPUT_ACCEPT}
                       className="hidden"
                       onChange={handleFileChange}
                       aria-describedby={access.noteFor("addDocument") ? "note-addDocument" : undefined}
@@ -2056,7 +2102,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     <Package className="text-slate-400" size={24} />
                     <div>
                       <p className="text-xs font-semibold text-slate-700 font-sans">Drag and drop receipts here, or <span className="text-blue-600 underline">browse</span></p>
-                      <p className="text-[10px] text-slate-400 mt-1 font-sans">Supports PDF, Images or documents up to 5MB (Real base64 persisted file load)</p>
+                      <p className="text-[10px] text-slate-400 mt-1 font-sans">PDF, JPEG or PNG, up to 5 MB each and {MAX_REPORT_FILES} files in all</p>
                     </div>
                   </div>
                 ) : (
@@ -2067,6 +2113,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 )}
                 <CorrectionNote id="note-addDocument" note={access.noteFor("addDocument")} />
                 <CorrectionNote id="note-replaceDocuments" note={access.noteFor("replaceDocuments")} />
+                {fileError && (
+                  <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{fileError}</p>
+                )}
 
                 {attachedFiles.length > 0 && (
                   <div className="space-y-1.5 border-t border-slate-100 pt-3">
@@ -2109,11 +2158,21 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                                 Download
                               </button>
                             )}
+                            {stored && file.hasFile && (
+                              <button
+                                type="button"
+                                onClick={() => viewReportFile(resubmittingItem.id, file)}
+                                className="text-blue-600 hover:text-blue-800 text-[10px] font-bold font-mono uppercase cursor-pointer"
+                              >
+                                View<span className="sr-only"> {file.name}</span>
+                              </button>
+                            )}
                             {toReplace && (
                               <>
                                 <input
                                   id={`replace-${file.id}`}
                                   type="file"
+                                  accept={FILE_INPUT_ACCEPT}
                                   className="hidden"
                                   onChange={e => {
                                     const chosen = e.target.files?.[0];
@@ -2328,7 +2387,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                             <button
                               key={idx}
                               type="button"
-                              onClick={() => downloadBase64File(doc.name, doc.content)}
+                              onClick={() => viewReportFile(sub.id, doc)}
                               className={`px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[10px] font-mono font-medium inline-flex items-center space-x-1 cursor-pointer ${
                                 doc.supersededAt ? "text-slate-400" : "text-blue-600"
                               }`}

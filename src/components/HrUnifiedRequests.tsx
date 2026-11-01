@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { User, RequestStatus, ScreenFocus } from "../types";
+import { User, RequestStatus, ScreenFocus, LiquidationSubmission } from "../types";
 import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
 import ReturnForCorrectionDialog from "./liquidation/ReturnForCorrectionDialog";
 import ReportContents from "./liquidation/ReportContents";
+import LiquidationReportModal from "./liquidation/LiquidationReportModal";
 import { ClaimTypeBadge } from "./liquidation/ClaimType";
 import VehicleTripDetails from "./requests/VehicleTripDetails";
 import { answeredCorrectionSummary } from "./liquidation/resubmit/correctionModel";
-import { Check, Undo2, RefreshCcw, X, Info } from "lucide-react";
+import { Check, Undo2, RefreshCcw, X, Info, Printer } from "lucide-react";
 
 interface HrUnifiedRequestsProps {
   user: User;
@@ -36,6 +37,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
   const [remarks, setRemarks] = useState("");
   const [bulkActionType, setBulkActionType] = useState<"verify" | "return" | null>(null);
   const [viewItem, setViewItem] = useState<any | null>(null);
+  // The official form of the report being read, in print preview (the instructor's review, R6).
+  const [printing, setPrinting] = useState<LiquidationSubmission | null>(null);
   const [modalActionType, setModalActionType] = useState<"verify" | "return" | null>(null);
   const [modalRemarks, setModalRemarks] = useState("");
   // A liquidation report being returned for correction, with its checklist (requirement 5).
@@ -294,6 +297,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
         </div>
       )}
 
+      <LiquidationReportModal submission={printing} activityLabel={printing?.activityTitle} onClose={() => setPrinting(null)} />
+
       {viewItem && (
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-lg w-full max-w-lg flex flex-col max-h-[90vh] overflow-hidden">
@@ -302,9 +307,16 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                 <h3 className="font-bold text-slate-800 text-sm">Request Details</h3>
                 <p className="text-[10px] text-slate-500 font-mono mt-0.5">{viewItem._category} &bull; {viewItem._displayDate}</p>
               </div>
-              <button onClick={() => setViewItem(null)} className="text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded p-1">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                {viewItem._category === "Liquidation" && (
+                  <button type="button" onClick={() => setPrinting(viewItem)} className="inline-flex cursor-pointer items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                    <Printer size={12} aria-hidden="true" /> Print
+                  </button>
+                )}
+                <button onClick={() => setViewItem(null)} className="text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded p-1">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="p-4 overflow-y-auto flex-1 text-sm space-y-4">
               <div className="grid grid-cols-2 gap-4">

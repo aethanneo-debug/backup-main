@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Download,
+  Eye,
   FileImage,
   FileSpreadsheet,
   FileText,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import type { LiquidationDocumentRow } from "../../types";
 import { apiCall, downloadBase64File, firstDateString, formatDate } from "../../utils";
+import FileViewer, { type ReportFile } from "../ui/FileViewer";
 import { reportStatusBadgeClass } from "./overviewFigures";
 import { VAULT_STAGES, fileKindLabel, vaultView, type VaultStage } from "./vaultRows";
 
@@ -36,7 +38,7 @@ function FileIcon({ type, name }: { type: string; name: string }) {
 /**
  * The Documents Vault: every file attached to a liquidation report, in one place, for Finance and
  * the Administrator. The list carries no file contents; a file is fetched only when someone
- * downloads it, and the server records each download in the audit log.
+ * views or downloads it, and the server records each one in the audit log.
  */
 export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }: DocumentsVaultProps) {
   // undefined while loading, null when the list couldn't be loaded.
@@ -51,6 +53,7 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
   const inFlight = useRef(new Set<string>());
   const [downloading, setDownloading] = useState<ReadonlySet<string>>(new Set());
   const [rowProblems, setRowProblems] = useState<Readonly<Record<string, string>>>({});
+  const [viewing, setViewing] = useState<ReportFile | null>(null);
 
   async function load() {
     setFiles(undefined);
@@ -314,16 +317,27 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
                       <td className="px-4 py-3 align-top">
                         <div className="flex flex-col items-end gap-1.5">
                           {row.hasFile ? (
-                            <button
-                              type="button"
-                              onClick={() => download(row)}
-                              disabled={busy}
-                              aria-label={busy ? `Downloading ${row.name}` : `Download ${row.name} from ${row.submissionNo || "this report"}`}
-                              className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60"
-                            >
-                              <Download size={12} aria-hidden="true" />
-                              {busy ? "Downloading…" : "Download"}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setViewing({ reportId: row.reportId, docId: row.docId, name: row.name })}
+                                aria-label={`View ${row.name} from ${row.submissionNo || "this report"}`}
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                              >
+                                <Eye size={12} aria-hidden="true" />
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => download(row)}
+                                disabled={busy}
+                                aria-label={busy ? `Downloading ${row.name}` : `Download ${row.name} from ${row.submissionNo || "this report"}`}
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60"
+                              >
+                                <Download size={12} aria-hidden="true" />
+                                {busy ? "Downloading…" : "Download"}
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-[10px] italic text-slate-500">No file stored</span>
                           )}
@@ -354,6 +368,7 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
           </p>
         )}
       </section>
+      <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </div>
   );
 }

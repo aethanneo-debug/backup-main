@@ -8,5 +8,11 @@ coverage/
 !.env.example
 backend_fastapi/generated_employee_credentials.csv
 
-# The database is saved through a temporary copy (server.ts, writeDataFile)
+# The live database and its copy hold employees' personal data (known-issues 4). data_store.example.json stays tracked.
+data_store.json
+data_store.backup.json
+data_store.last-start.json
+# Saved through a temporary copy (server.ts, writeDataFile)
 data_store.json.tmp
+# Files attached to liquidation reports (src/server/fileStore.ts)
+uploads/

@@ -27,7 +27,7 @@ const FOCUSABLE = [
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
 
-const WIDTHS = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-2xl" } as const;
+const WIDTHS = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-2xl", xl: "max-w-4xl" } as const;
 
 interface ModalDialogProps {
   title: string;
@@ -139,7 +139,7 @@ export default function ModalDialog({
               </span>
             )}
             <div className="min-w-0">
-              <h2 id={titleId} className="text-sm font-bold text-slate-800">
+              <h2 id={titleId} className="break-words text-sm font-bold text-slate-800">
                 {title}
               </h2>
               {subtitle && (

@@ -37,9 +37,14 @@ export default function LiquidationReportModal({
   }, [submission, onClose]);
 
   // Focus once per opened report - not on every parent re-render, which would yank
-  // focus back while the user is reading.
+  // focus back while the user is reading - and give it back to the opener on close.
   useEffect(() => {
-    if (submission) closeRef.current?.focus();
+    if (!submission) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    return () => {
+      if (opener && opener.isConnected) opener.focus();
+    };
   }, [submission?.id]);
 
   // Scope the print stylesheet to the time this modal is actually on screen.

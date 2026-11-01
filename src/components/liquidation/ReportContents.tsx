@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, FileText } from "lucide-react";
-import { downloadBase64File, formatCurrency, formatDate } from "../../utils";
+import { formatCurrency, formatDate } from "../../utils";
+import FileViewer, { type ReportFile } from "../ui/FileViewer";
 import { BalanceStatusBadge, FundReturnNote } from "./BalanceCheck";
 
 interface Props {
@@ -18,6 +19,7 @@ const LABEL = "text-[10px] font-bold text-slate-400 uppercase font-mono mb-1";
  */
 export default function ReportContents({ report }: Props) {
   const [noContent, setNoContent] = useState("");
+  const [viewing, setViewing] = useState<ReportFile | null>(null);
   // Old records may hold anything here, so only real lists are read.
   const items: any[] = Array.isArray(report?.particulars) ? report.particulars : [];
   const docs: any[] = Array.isArray(report?.supportingDocs) ? report.supportingDocs : [];
@@ -134,8 +136,11 @@ export default function ReportContents({ report }: Props) {
                 <li key={doc?.id || i}>
                   <button
                     type="button"
-                    onClick={() => setNoContent(downloadBase64File(name, doc?.content) ? "" : name)}
-                    title={doc?.supersededAt ? "Replaced on correction; the old copy is kept for the record" : "Open or save this file"}
+                    onClick={() => {
+                      setNoContent(doc?.hasFile ? "" : name);
+                      if (doc?.hasFile) setViewing({ reportId: report.id, docId: doc.id, name });
+                    }}
+                    title={doc?.supersededAt ? "Replaced on correction; the old copy is kept for the record" : "View this file"}
                     className={`flex cursor-pointer items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 font-mono text-[10px] hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                       doc?.supersededAt ? "text-slate-400" : "text-slate-600"
                     }`}
@@ -153,6 +158,7 @@ export default function ReportContents({ report }: Props) {
           <p role="alert" className="mt-1.5 text-[11px] text-rose-700">&ldquo;{noContent}&rdquo; has no uploaded file that can be opened.</p>
         )}
       </div>
+      <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </div>
   );
 }

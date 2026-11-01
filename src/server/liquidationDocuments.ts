@@ -1,8 +1,7 @@
 // The Documents Vault's list (Financial Tracking → Documents Vault): one row for every file attached
 // to a liquidation report, without the file itself. A file's content is sent only when someone
-// downloads it (GET /api/liquidation-submissions/:id/documents/:docId), since files are stored
-// inside the database as base64 and the list would otherwise carry all of them at once.
-import type { LiquidationDocumentRow, LiquidationSubmissionView } from "../types";
+// opens it (GET /api/liquidation-submissions/:id/documents/:docId).
+import type { LiquidationDocument, LiquidationDocumentRow, LiquidationSubmissionView } from "../types";
 import { SAFE_FILE_URL } from "../utils";
 import { cleanText } from "../inputText";
 
@@ -13,6 +12,12 @@ import { cleanText } from "../inputText";
  */
 export function cleanFileName(value: unknown): string {
   return cleanText(value);
+}
+
+/** Whether a record has a file to open: one in the file store, or a real data URL not yet moved there
+ * (the same check the per-file route makes, 7f, so a list says up front when there is nothing to open). */
+export function documentHasFile(d: Pick<LiquidationDocument, "stored" | "content"> | null | undefined): boolean {
+  return !!d?.stored || (typeof d?.content === "string" && SAFE_FILE_URL.test(d.content));
 }
 
 /** Every attached file of every report, as rows for the vault. Malformed entries are skipped, and
@@ -40,9 +45,7 @@ export function liquidationDocumentRows(
         type: String(d.type || ""),
         size: d.size || undefined,
         uploadedAt: d.uploadedAt || undefined,
-        // The same check the download route makes (7f), so a row says up front when there is
-        // nothing to download.
-        hasFile: typeof d.content === "string" && SAFE_FILE_URL.test(d.content),
+        hasFile: documentHasFile(d),
         supersededAt: d.supersededAt || undefined,
         replacedBy: d.replacedBy || undefined,
         replaces: d.replaces || undefined

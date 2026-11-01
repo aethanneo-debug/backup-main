@@ -13,7 +13,9 @@ import { seminarBudget, allocationIncrease, isSeminarSettled } from "./src/train
 import { centavos, pesos, sumPesos, liquidationBalance } from "./src/liquidationMoney";
 import { createTransactions } from "./src/server/jsonTransaction";
 import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
-import { cleanFileName, liquidationDocumentRows } from "./src/server/liquidationDocuments";
+import { cleanFileName, documentHasFile, liquidationDocumentRows } from "./src/server/liquidationDocuments";
+import { readStoredFile, storeDataUrl } from "./src/server/fileStore";
+import { fileBytes, fileProblem, reportFilesProblem } from "./src/fileRules";
 import { trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
 import {
   advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, isGroupAdvance, portionCentavos, releasedByEnrolment,
@@ -117,6 +119,8 @@ import { expenseLineLabel, expenseLinesProblem, isBlankExpenseLine, isProgramOnl
 const app = express();
 const PORT = 3000;
 const DATA_FILE_PATH = path.join(process.cwd(), "data_store.json");
+// The file as it was at the last start that could read it: git no longer keeps the live data (known-issues 4).
+const LAST_START_PATH = path.join(process.cwd(), "data_store.last-start.json");
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -163,7 +167,13 @@ function getInitialData(): DBStructure {
     try {
       const content = fs.readFileSync(DATA_FILE_PATH, "utf8");
       const loaded = JSON.parse(content);
-      
+      // Before any migration, and only of a file that could be read, so a damaged one never replaces it.
+      try {
+        fs.writeFileSync(LAST_START_PATH, content, "utf8");
+      } catch (e) {
+        console.warn("[load] Couldn't keep a copy of data_store.json.", e);
+      }
+
       let changed = false;
 
       // Migrate existing "Admin" role string to new "Administrator / Division Chief" value
@@ -626,14 +636,28 @@ function getInitialData(): DBStructure {
         }
       }
 
+      // Files leave the JSON (known-issues 4, 9 and 19): one stored as a base64 data URL moves to the
+      // file store, and the record keeps only where it is. It happens once: a moved file has no content.
+      for (const s of Array.isArray(loaded.liquidationSubmissions) ? loaded.liquidationSubmissions : []) {
+        for (const d of Array.isArray(s?.supportingDocs) ? s.supportingDocs : []) {
+          if (!d || typeof d !== "object" || !d.content) continue;
+          const stored = storeDataUrl(d.content);
+          if (!stored) continue;
+          d.stored = stored;
+          delete d.content;
+          if (!d.id) d.id = `doc-${crypto.randomUUID()}`;
+          changed = true;
+        }
+      }
+
       if (changed) {
         writeDataFile(loaded);
       }
       return loaded;
     } catch (e) {
       // A database that can't be read or migrated is never replaced with the seed data below:
-      // that erased every record. Stop instead, so it can be restored (it is in git).
-      console.error("data_store.json could not be read or migrated. The server will not start, so the file is left untouched. If data_store.json.tmp exists, it may hold the latest complete save: check it first, then data_store.backup.json. Otherwise restore the file (e.g. `git restore data_store.json`, which loses everything since the last commit) or fix the migration, then start again.", e);
+      // that erased every record. Stop instead, so it can be restored.
+      console.error("data_store.json could not be read or migrated. The server will not start, so the file is left untouched. If data_store.json.tmp exists, it may hold the latest complete save: check it first, then data_store.last-start.json, the file as it was at the last start that could read it (which loses everything since). If the file reads fine, fix the migration, then start again.", e);
       throw e;
     }
   }
@@ -2974,31 +2998,39 @@ function invalidSupportingDocs(docs: any): boolean {
 }
 const INVALID_DOCS_MESSAGE = "Supporting documents must be a list of files.";
 
-// A receipt with something in it, as the upload screens send one: a current (not replaced) file whose
-// content is a base64 data URL of at least 100 characters. A name alone, or an empty data URL, is not
-// a receipt (the security review of seminar reimbursements, 2026-10-30).
+// A receipt with something in it: a name alone, or an empty or nearly empty file, is not a receipt
+// (the security review of seminar reimbursements, 2026-10-30). One on a report counts by what the store
+// holds, and only if it hasn't been replaced. One arriving with a request counts by its own bytes,
+// never by what the request says about it.
+const RECEIPT_MIN_BYTES = 75;
 function isRealFile(d: any): boolean {
-  if (!d || d.supersededAt || typeof d.content !== "string" || !SAFE_FILE_URL.test(d.content)) return false;
-  return d.content.length - d.content.indexOf(",") - 1 >= 100;
+  return !!d && !d.supersededAt && Number(d.stored?.bytes) >= RECEIPT_MIN_BYTES;
+}
+function isRealUpload(d: any): boolean {
+  return fileBytes(d?.content) >= RECEIPT_MIN_BYTES;
 }
 
-// Files as the claimant sends them. A file's history (replaces, supersededAt, replacedBy) and
-// when it reached the report are recorded by the server alone, and each file gets an id no
-// other file on the report has, so a reviewer's "replace this file" points at exactly one.
-function claimantDocuments(docs: any[], existing: any[] = []): LiquidationDocument[] {
-  const ids = new Set((existing || []).map((d: any) => d?.id).filter(Boolean));
+// New files, checked by documentProblem, as the report keeps them: each goes to the file store, and
+// only what the server knows about it is recorded. Its id, type, size and history are the server's
+// own, whatever came with it, and so is where it is stored. Called once every refusal has passed.
+function claimantDocuments(docs: any[]): LiquidationDocument[] {
   const now = new Date().toISOString();
   return docs.map((d: any) => {
-    const { replaces, supersededAt, replacedBy, ...file } = d;
-    if (typeof file.id !== "string" || !file.id || ids.has(file.id)) file.id = `doc-${crypto.randomUUID()}`;
-    ids.add(file.id);
-    file.uploadedAt = now;
-    return file;
+    const stored = storeDataUrl(d.content)!;
+    return {
+      id: `doc-${crypto.randomUUID()}`,
+      name: cleanFileName(d.name) || "file",
+      type: stored.type,
+      size: `${(stored.bytes / 1024).toFixed(1)} KB`,
+      uploadedAt: now,
+      stored
+    };
   });
 }
 
 // A new file's details are shown on every reviewer's screen, so they must be plain text (an
-// object there would crash the page), and the file needs a name.
+// object there would crash the page), and the file needs a name. The file itself must be a real
+// PDF, JPEG or PNG (src/fileRules.ts): anything else could run in a reviewer's session.
 function documentProblem(d: any): string | null {
   if (typeof d?.name !== "string" || !d.name.trim() || d.name.length > 255) {
     return "Each file needs a name of up to 255 characters.";
@@ -3006,13 +3038,29 @@ function documentProblem(d: any): string | null {
   for (const k of ["type", "filename", "size", "content"]) {
     if (d[k] !== undefined && d[k] !== null && typeof d[k] !== "string") return "A file's details must be text.";
   }
-  // The file itself, as the upload screen sends it: a base64 data URL. Reviewers open it with a
-  // click, so anything else (a "javascript:" URL sent straight to the API) would run as a script
-  // in their session. SAFE_FILE_URL is the same check the screens and the Documents Vault use.
-  if (typeof d.content === "string" && d.content !== "" && !SAFE_FILE_URL.test(d.content)) {
-    return "Each file must be uploaded from your device.";
-  }
-  return null;
+  return fileProblem(d.name, d.content, d.type) || null;
+}
+
+// Why the files a request brings can't be taken, or "". How many comes first: reading each of a flood
+// of entries would hold the server up for everyone (62,000 took 11.5 s, the security review, 2026-11-01).
+function incomingFilesProblem(docs: any[]): string {
+  return reportFilesProblem(docs.length, 0)
+    || docs.map(documentProblem).find(Boolean)
+    || reportFilesProblem(docs.length, docs.reduce((n, d) => n + fileBytes(d?.content), 0));
+}
+
+// A report's files as a browser sees them: whether there is one to open, never the file itself or
+// where it is kept. A file is sent only by the per-file route, which checks who is asking.
+function reportForClient<T extends LiquidationSubmission>(report: T): T {
+  if (!Array.isArray(report?.supportingDocs)) return report;
+  return {
+    ...report,
+    supportingDocs: report.supportingDocs.map((d: any) => {
+      if (!d || typeof d !== "object") return d;
+      const { content, stored, ...file } = d;
+      return { ...file, hasFile: documentHasFile(d) };
+    })
+  };
 }
 
 // The report's own text, as the claimant enters it at filing or in a correction. Only what
@@ -3819,21 +3867,30 @@ function withSeminarFiscalYear(list: LiquidationSubmission[]): LiquidationSubmis
 
 app.get("/api/liquidation-submissions", authenticateToken, (req: any, res) => {
   const { role, employeeId } = req.user;
+  res.set("Cache-Control", "no-store");
   if (role === UserRole.EMPLOYEE) {
     const list = db.liquidationSubmissions.filter(l => l.employeeId === employeeId);
-    return res.json({ status: "success", data: withSeminarFiscalYear(list) });
+    return res.json({ status: "success", data: withSeminarFiscalYear(list).map(reportForClient) });
   }
-  res.json({ status: "success", data: withSeminarFiscalYear(db.liquidationSubmissions) });
+  // The roles that review reports (12e). None of the Budget Officer's screens show one.
+  if (!canReviewReportFiles(req.user)) {
+    return res.status(403).json({ status: "error", message: "Liquidation reports are for HR, Finance and the Administrator." });
+  }
+  res.json({ status: "success", data: withSeminarFiscalYear(db.liquidationSubmissions).map(reportForClient) });
 });
 
 // The Documents Vault (Financial Tracking → Documents Vault): every file attached to a liquidation
 // report, in one place, for Finance and the Administrator (the roles that see Financial Tracking).
-// The list carries no file contents; a file is sent only when someone downloads it, and each
-// download is recorded in the audit log, since these are employees' receipts and certificates.
-// (The same files also reach every officer through GET /api/liquidation-submissions, unlogged: 12e.)
-// Neither answer may be kept in the browser's cache.
+// The list carries no file contents; a file is sent only when someone opens it. Neither answer may
+// be kept in the browser's cache.
 function canUseDocumentsVault(user: any): boolean {
   return user?.role === UserRole.FINANCE_OFFICER || user?.role === UserRole.SUPER_ADMIN;
+}
+
+// Who may open a report's files (12e): the reviewers, and the claimant their own. Not the Budget
+// Officer. An officer's view is recorded in the audit log, since these are employees' receipts.
+function canReviewReportFiles(user: any): boolean {
+  return canUseDocumentsVault(user) || user?.role === UserRole.HR_OFFICER;
 }
 
 app.get("/api/liquidation-documents", authenticateToken, (req: any, res: any) => {
@@ -3845,30 +3902,37 @@ app.get("/api/liquidation-documents", authenticateToken, (req: any, res: any) =>
 });
 
 app.get("/api/liquidation-submissions/:id/documents/:docId", authenticateToken, (req: any, res: any) => {
-  if (!canUseDocumentsVault(req.user)) {
-    return res.status(403).json({ status: "error", message: "The Documents Vault is for Finance and the Administrator." });
-  }
-  // Express answers HEAD with this handler too, which would log a download that sent nothing
-  // (and rewrite the whole database for it).
-  if (req.method !== "GET") return res.status(405).set("Allow", "GET").json({ status: "error", message: "Use GET." });
   res.set("Cache-Control", "no-store");
   // Ids are compared as text, as the list sends them (liquidationDocumentRows).
   const sub = (db.liquidationSubmissions || []).find((s: any) => s && String(s.id) === req.params.id);
+  const reviewer = canReviewReportFiles(req.user);
+  const ownReport = !!sub && !!req.user.employeeId && employeeIdForms(String(sub.employeeId || "")).includes(req.user.employeeId);
+  if (!reviewer && !ownReport) {
+    // (The same answer whether or not the report exists.)
+    return res.status(403).json({ status: "error", message: "You can only open the files of your own reports." });
+  }
+  // Express answers HEAD with this handler too, which would log a view that sent nothing (and
+  // rewrite the database for it).
+  if (req.method !== "GET") return res.status(405).set("Allow", "GET").json({ status: "error", message: "Use GET." });
   const doc = sub ? (Array.isArray(sub.supportingDocs) ? sub.supportingDocs : []).find((d: any) => d && String(d.id) === req.params.docId) : null;
   if (!sub || !doc) return res.status(404).json({ status: "error", message: "That file was not found." });
   // The name the list shows (cleaned of invisible and right-to-left characters), so the file saves
   // under it too.
   const name = cleanFileName(String(doc.name || doc.filename || "")) || "file";
   // Only a real uploaded file (a base64 data URL) is ever sent, never other stored text (7f).
-  const content = String(doc.content || "");
-  if (!SAFE_FILE_URL.test(content)) {
+  const content = doc.stored ? readStoredFile(doc.stored) : String(doc.content || "");
+  if (!content || !SAFE_FILE_URL.test(content)) {
     return res.status(404).json({ status: "error", message: `"${name}" has no uploaded file that can be opened.` });
   }
   // The employee chose the file's name, so the log quotes it cleaned (above), shortened and
   // escaped, with the file's id: a crafted name can't pass for a second file or another report
-  // in the same entry.
-  logEvent(req.user.id, req.user.username, req.user.role, "Open Liquidation Document",
-    `Opened ${JSON.stringify(name.slice(0, 120))} (file ${doc.id}) from ${sub.submissionNo} (${sub.employeeName || sub.employeeId}).`);
+  // in the same entry. An officer's view is always recorded, even of what looks like their own
+  // report: an account can be relinked to a staff code, and that mustn't hide a view. A claimant
+  // who is no officer opening their own file isn't recorded.
+  if (reviewer) {
+    logEvent(req.user.id, req.user.username, req.user.role, "Open Liquidation Document",
+      `Opened ${JSON.stringify(name.slice(0, 120))} (file ${doc.id}) from ${sub.submissionNo} (${sub.employeeName || sub.employeeId}).`);
+  }
   res.json({ status: "success", data: { name, type: doc.type || "", content } });
 });
 
@@ -4369,7 +4433,7 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   if (invalidSupportingDocs(supportingDocs)) {
     return res.status(400).json({ status: "error", message: INVALID_DOCS_MESSAGE });
   }
-  const fileOrHeaderProblem = (supportingDocs || []).map(documentProblem).find(Boolean) || reportHeaderProblem(req.body);
+  const fileOrHeaderProblem = incomingFilesProblem(supportingDocs || []) || reportHeaderProblem(req.body);
   if (fileOrHeaderProblem) {
     return res.status(400).json({ status: "error", message: fileOrHeaderProblem });
   }
@@ -4505,7 +4569,7 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     ? withinAdvanceProblem(activityId, advance, spent, refund)
     : (() => {
         const message = withinAllowance
-          ? reimbursementProblem({ spent, limit: reimbursable, files: (supportingDocs || []).filter(isRealFile).length }, pesoText)
+          ? reimbursementProblem({ spent, limit: reimbursable, files: (supportingDocs || []).filter(isRealUpload).length }, pesoText)
           : claimTypeProblem(claimType, advance, { released: typedReleased, dvNo: typedDvNo });
         return message ? { code: 400, message } : null;
       })();
@@ -4644,7 +4708,7 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     `Submitted liquidation report: ${subNo}${groupText} (${claim}${withinAdvance ? `; ${balanceText(released, spent, newSub.refundOrNo)}` : ""}${withinAllowance
       ? `; ${pesoText(spent)} claimed back, limit ${pesoText(reimbursable)}; ${advanceHistory}` : ""})`);
   saveDB();
-  res.json({ status: "success", data: newSub });
+  res.json({ status: "success", data: reportForClient(newSub as any) });
 }));
 
 app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
@@ -4815,12 +4879,21 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     }
     replacements.push({ old, doc: r.doc });
   }
-  const fileProblem = [...newDocs, ...replacements.map(r => r.doc)].map(documentProblem).find(Boolean);
-  if (fileProblem) {
-    return res.status(400).json({ status: "error", message: fileProblem });
+  const incomingDocs = [...newDocs, ...replacements.map(r => r.doc)];
+  const replacedIds = new Set(replacements.map(r => r.old.id));
+  const keptDocs = current.filter((d: any) => !replacedIds.has(d.id));
+  // What this correction brings, not what the report will hold: see reportFilesProblem.
+  const newFileProblem = incomingFilesProblem(incomingDocs);
+  if (newFileProblem) {
+    return res.status(400).json({ status: "error", message: newFileProblem });
   }
   if (open && ticked.has("addDocument") && newDocs.length === 0) {
     return res.status(400).json({ status: "error", message: "Attach the missing document the reviewer asked for before resubmitting." });
+  }
+  // Paid out of pocket: still at least one receipt with something in it once the files change (a
+  // replacement could be an empty copy). Asked before anything is stored.
+  if (sub.withinAllowance && !keptDocs.some(isRealFile) && !incomingDocs.some(isRealUpload)) {
+    return res.status(400).json({ status: "error", message: "Attach your official receipts (OR) for what you paid." });
   }
 
   const {
@@ -5024,7 +5097,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   
   // New files join the ones already on the report, which stay as they are.
   if (newDocs.length > 0) {
-    sub.supportingDocs = [...storedDocs, ...claimantDocuments(newDocs, storedDocs)];
+    sub.supportingDocs = [...storedDocs, ...claimantDocuments(newDocs)];
   }
   // A replaced file stays on the report, marked superseded, next to its new copy.
   const replacedAt = new Date().toISOString();
@@ -5039,11 +5112,6 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     old.replacedBy = fresh.id;
     sub.supportingDocs.push(fresh);
   });
-  // Paid out of pocket: still at least one receipt with something in it once the files changed (a
-  // replacement could be an empty copy). The whole correction is undone if not.
-  if (sub.withinAllowance && !(sub.supportingDocs || []).some(isRealFile)) {
-    return res.status(400).json({ status: "error", message: "Attach your official receipts (OR) for what you paid." });
-  }
 
   // The corrected report goes back to whoever returned it (open question 5): to HR, or to
   // Finance with HR's verification still standing. A report returned before checklists
@@ -5085,7 +5153,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Resubmit Liquidation",
     `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}${sub.withinAdvance ? `; ${balanceText(sub.totalReleased, sub.totalSpent, sub.refundOrNo)}` : ""}`);
   saveDB();
-  res.json({ status: "success", data: sub });
+  res.json({ status: "success", data: reportForClient(sub) });
 }));
 
 app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, transactional((req: any, res: any) => {
@@ -5139,7 +5207,7 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, transac
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "HR Verify Liquidation", `HR evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
   saveDB();
-  res.json({ status: "success", data: sub });
+  res.json({ status: "success", data: reportForClient(sub) });
 }));
 
 app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, transactional((req: any, res: any) => {
@@ -5455,7 +5523,7 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}${
     action === "Validate" && sub.withinAllowance ? ` (a reimbursement: ${pesoText(Number(sub.totalSpent))} owed to ${sub.employeeName}, to be paid from the Reimbursement Queue)` : ""}`);
   saveDB();
-  res.json({ status: "success", data: sub });
+  res.json({ status: "success", data: reportForClient(sub) });
 }));
 
 // Closes the loop on an out-of-pocket claim: the employee fronted the money, and this
@@ -5530,7 +5598,7 @@ app.put("/api/liquidation-submissions/:id/record-reimbursement", authenticateTok
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Record Reimbursement",
     `Reimbursed PHP ${owed.toFixed(2)} to ${sub.employeeName} for ${sub.submissionNo} via DV ${sub.reimbursementDvNo}`);
   saveDB();
-  res.json({ status: "success", data: sub });
+  res.json({ status: "success", data: reportForClient(sub) });
 }));
 // Serial for the Vehicle Reservation Slip, e.g. "VRS-2026-09-014". Numbering restarts
 // each month, matching the liquidation serial's shape.
@@ -10031,6 +10099,8 @@ function isPrivateProjectPath(urlPath: string): boolean {
       p = "/" + rest;
     }
   }
+  // A drive letter names a file on its own ("/C:/..."), or relative to the project ("/C:uploads/x").
+  if (/^\/[a-zA-Z]:/.test(p)) return true;
   // Windows ignores trailing dots and spaces, and ":name" opens a stream of the same file.
   const first = p.split("/").find(Boolean)?.split(":")[0].replace(/[. ]+$/, "");
   if (!first || first.toLowerCase().startsWith(".vite")) return false; // a Vite dependency cache

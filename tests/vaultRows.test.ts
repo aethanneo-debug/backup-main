@@ -36,6 +36,14 @@ test("the list has one row per attached file, with its report, and never the fil
   for (const row of rows) assert.equal("content" in row, false);
 });
 
+test("a file in the file store can be opened, though the record holds only its reference", () => {
+  const [row] = liquidationDocumentRows([
+    { id: "liq-1", supportingDocs: [{ id: "doc-a", name: "receipt.pdf", stored: { file: "a.bin", type: "application/pdf", bytes: 9 } }] }
+  ] as any);
+  assert.equal(row.hasFile, true);
+  assert.equal("stored" in row, false);
+});
+
 test("a file with nothing that can be downloaded is listed, but says so", () => {
   const rows = liquidationDocumentRows([
     {

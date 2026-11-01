@@ -7,17 +7,20 @@ import {
   Download,
   FileText,
   Inbox,
+  Printer,
   ScrollText,
   ShieldCheck,
   Wallet
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { ActiveSignatory, User, UserRole } from "../../types";
-import { apiCall, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../../utils";
+import { ActiveSignatory, LiquidationDocument, LiquidationSubmission, User, UserRole } from "../../types";
+import { apiCall, formatCurrency, formatDate } from "../../utils";
 import CashAdvanceDesk from "./CashAdvanceDesk";
 import AdvanceRequestsList from "./AdvanceRequestsList";
 import ReimbursementQueue from "./ReimbursementQueue";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
+import FileViewer, { type ReportFile } from "../ui/FileViewer";
+import LiquidationReportModal from "../liquidation/LiquidationReportModal";
 import { overspendOf, OverspendBadge, OverspendNotice } from "../liquidation/overspend";
 import {
   ClaimTypeBadge,
@@ -128,10 +131,14 @@ export default function LiquidationDeskView({
   }, [user.role]);
   const noAccountant = accountant === null;
 
-  // The shared helper only opens a real uploaded file (a base64 data URL), never a script.
-  const downloadBase64File = (name: string, content: string) => {
-    if (!saveAttachedFile(name, content)) alert(`"${name}" has no uploaded file that can be opened.`);
-  };
+  // A report's file in the viewer, and a report's official form in print preview (the instructor's review, R6).
+  const [viewing, setViewing] = useState<ReportFile | null>(null);
+  const [printing, setPrinting] = useState<LiquidationSubmission | null>(null);
+  function viewFile(reportId: string, doc: LiquidationDocument) {
+    const name = doc.name || doc.filename || "This file";
+    if (doc.hasFile) setViewing({ reportId, docId: doc.id, name });
+    else alert(`"${name}" has no uploaded file that can be opened.`);
+  }
 
   return (
     <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
@@ -423,11 +430,11 @@ export default function LiquidationDeskView({
                             <button
                               key={i}
                               type="button"
-                              onClick={() => downloadBase64File(doc.name || doc.filename, doc.content)}
+                              onClick={() => viewFile(sub.id, doc)}
                               className={`flex cursor-pointer items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 font-mono text-[10px] transition-colors hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 ${
                                 doc.supersededAt ? "text-slate-400" : "text-slate-600"
                               }`}
-                              title={doc.supersededAt ? "Replaced on correction; the old copy is kept for the record" : "Click to view/download attachment"}
+                              title={doc.supersededAt ? "Replaced on correction; the old copy is kept for the record" : "View this file"}
                             >
                               <FileText size={10} className="text-slate-400" aria-hidden="true" />
                               <span className={doc.supersededAt ? "line-through" : undefined}>{doc.name}</span>
@@ -470,7 +477,15 @@ export default function LiquidationDeskView({
                         self-approved in the audit log.
                       </p>
                     )}
-                    <div className="flex justify-end gap-2 pt-3">
+                    <div className="flex flex-wrap justify-end gap-2 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setPrinting(sub)}
+                        className="flex cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <Printer size={12} aria-hidden="true" />
+                        Print<span className="sr-only"> {sub.submissionNo}</span>
+                      </button>
                       <button
                         type="button"
                         // A Return names what to correct; only those parts reopen for the employee.
@@ -513,7 +528,7 @@ export default function LiquidationDeskView({
       {/* OUT-OF-POCKET CLAIMS. Validation does not release money, so these stay
           open until Finance records the disbursement voucher. */}
       {(user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN) && (
-        <ReimbursementQueue submissions={submissions} onRecorded={onQueueRefresh} currentEmployeeId={user.employeeId} />
+        <ReimbursementQueue submissions={submissions} onRecorded={onQueueRefresh} currentEmployeeId={user.employeeId} onPrint={setPrinting} />
       )}
 
       {/* LIQUIDATIONS INDEX TABLE */}
@@ -552,6 +567,7 @@ export default function LiquidationDeskView({
                 <th scope="col" className={`${TH_CLASS} text-right`}>Liquidated Spends</th>
                 <th scope="col" className={`${TH_CLASS} text-right`}>Refund / Balance</th>
                 <th scope="col" className={`${TH_CLASS} text-center`}>Status Loop</th>
+                <th scope="col" className={`${TH_CLASS} text-center`}>Report</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -583,11 +599,21 @@ export default function LiquidationDeskView({
                       {liq.status}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setPrinting(liq)}
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      <Printer size={12} aria-hidden="true" />
+                      Print<span className="sr-only"> {liq.submissionNo}</span>
+                    </button>
+                  </td>
                 </tr>
               ))}
               {yearFilteredSubmissions.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center">
+                  <td colSpan={9} className="px-4 py-12 text-center">
                     <Inbox size={28} className="mx-auto mb-2 text-slate-400" aria-hidden="true" />
                     <p className="text-xs font-semibold text-slate-600">No liquidations for FY {activeFiscalYear}</p>
                     <p className="mt-1 text-[11px] text-slate-500">
@@ -598,7 +624,7 @@ export default function LiquidationDeskView({
               )}
               {yearFilteredSubmissions.length > 0 && visibleIndex.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="p-4">
+                  <td colSpan={9} className="p-4">
                     <ClaimTypeFilterEmpty filter={indexFilter} onShowAll={() => setIndexFilter("All")} />
                   </td>
                 </tr>
@@ -607,6 +633,9 @@ export default function LiquidationDeskView({
           </table>
         </div>
       </SectionCard>
+
+      <FileViewer file={viewing} onClose={() => setViewing(null)} />
+      <LiquidationReportModal submission={printing} activityLabel={printing?.activityTitle} onClose={() => setPrinting(null)} />
 
       {/* Returning a report: a checklist of what to correct. The corrected report comes
           straight back to Finance, since HR's verification still stands. */}

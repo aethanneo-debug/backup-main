@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Wallet } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Printer, Wallet } from "lucide-react";
+import type { LiquidationSubmission } from "../../types";
 import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
 import { dvNumberFrom, dvPrefix, readDvNumber } from "../../dvNumber";
@@ -20,6 +21,8 @@ interface Props {
   onRecorded: () => void;
   /** The signed-in officer's staff code: paying their own claim is allowed but flagged. */
   currentEmployeeId?: string;
+  /** Opens a report's official form in print preview. */
+  onPrint: (report: LiquidationSubmission) => void;
 }
 
 /**
@@ -50,7 +53,7 @@ function manilaDay(at: unknown): string {
  * that report does NOT hand over any money — until the disbursement voucher is recorded
  * here, the claimant is still out of pocket, which is why these stay visible.
  */
-export default function ReimbursementQueue({ submissions, onRecorded, currentEmployeeId }: Props) {
+export default function ReimbursementQueue({ submissions, onRecorded, currentEmployeeId, onPrint }: Props) {
   // The officer's own claim (reports carry the claimant's staff code): allowed, but they are told
   // it will be marked as self-approved in the audit log (the user's decision, 2026-10-20).
   const isOwnClaim = (sub: any) => !!currentEmployeeId && sub?.employeeId === currentEmployeeId;
@@ -274,14 +277,24 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
                     </div>
                   </div>
 
-                  {!isOpen && (
+                  <div className="flex shrink-0 items-center gap-2">
                     <button
-                      onClick={() => openForm(sub.id)}
-                      className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                      type="button"
+                      onClick={() => onPrint(sub)}
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
-                      Record Payment
+                      <Printer size={12} aria-hidden="true" />
+                      Print<span className="sr-only"> {sub.submissionNo}</span>
                     </button>
-                  )}
+                    {!isOpen && (
+                      <button
+                        onClick={() => openForm(sub.id)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+                      >
+                        Record Payment
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {isOpen && (

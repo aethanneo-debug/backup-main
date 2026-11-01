@@ -705,6 +705,13 @@ export interface CorrectionRequest {
 
 // A file attached to a liquidation report. A file replaced during a correction is kept,
 // marked superseded, so the history of what was submitted stays on the report.
+/** Where the server keeps an uploaded file (src/server/fileStore.ts). Never sent to a browser. */
+export interface StoredFile {
+  file: string;   // its name in uploads/, made by the store
+  type: string;   // the data URL's type
+  bytes: number;
+}
+
 export interface LiquidationDocument {
   id: string;
   name: string;
@@ -712,7 +719,9 @@ export interface LiquidationDocument {
   filename?: string;
   uploadedAt: string;
   size?: string;
-  content?: string;         // base64 data URL
+  content?: string;         // base64 data URL: only on its way to the server, never in a list
+  stored?: StoredFile;      // the server's own record of where the file is
+  hasFile?: boolean;        // on its way to a browser: whether there is a file to open
   replaces?: string;        // the id of the file this one replaced
   supersededAt?: string;    // set when a correction replaced this file
   replacedBy?: string;      // the id of the file that replaced it
