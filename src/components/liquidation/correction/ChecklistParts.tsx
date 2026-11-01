@@ -1,7 +1,8 @@
 import { ReactNode } from "react";
 import { CircleAlert, Lock, Paperclip } from "lucide-react";
-import { LiquidationDocument, LiquidationParticular } from "../../../types";
+import { DocumentKind, LiquidationDocument, LiquidationParticular } from "../../../types";
 import { expenseLineLabel } from "../../../expenseLines";
+import { UPLOAD_KINDS, documentPlate } from "../../../reportDocuments";
 import { formatCurrency, formatDate } from "../../../utils";
 import { HINT } from "../../utilities/signatoryFormParts";
 
@@ -143,6 +144,7 @@ export function FilePicker({ id, files, chosen, missing, onToggle }: {
                 />
                 <Paperclip size={12} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
                 <span className="min-w-0 flex-1">
+                  {doc.kind && <span className="block text-[10px] font-semibold text-slate-500">{documentPlate(doc.kind)}</span>}
                   <span className="block break-words text-slate-700">{doc.name || doc.filename || "Unnamed file"}</span>
                   {meta && <> <span className="block text-[10px] text-slate-500">{meta}</span></>}
                 </span>
@@ -158,6 +160,41 @@ export function FilePicker({ id, files, chosen, missing, onToggle }: {
         <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-800">
           <CircleAlert size={12} className="shrink-0" aria-hidden="true" />
           Choose at least one file.
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+/** A missing document: which named documents the employee must add (at least one). The certificate isn't
+ * offered: it is on the report already, and a new copy is asked for by replacing it. */
+export function KindPicker({ id, chosen, missing, onToggle }: {
+  id: string;
+  chosen: DocumentKind[];
+  /** True while none is chosen. */
+  missing: boolean;
+  onToggle: (kind: DocumentKind) => void;
+}) {
+  return (
+    <fieldset className="min-w-0">
+      <legend className={SUB_LABEL}>
+        Which document is missing{REQUIRED}
+        <span className="sr-only"> (choose at least one)</span>
+      </legend>
+      <ul className={`${SUB_LIST} max-h-48 overflow-y-auto custom-scrollbar`}>
+        {UPLOAD_KINDS.map(kind => (
+          <li key={kind}>
+            <label className={SUB_OPTION}>
+              <input type="checkbox" id={`${id}-${kind}`} checked={chosen.includes(kind)} onChange={() => onToggle(kind)} className={CHECKBOX} />
+              <span className="min-w-0 flex-1 break-words text-slate-700">{documentPlate(kind)}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {missing && (
+        <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-800">
+          <CircleAlert size={12} className="shrink-0" aria-hidden="true" />
+          Choose at least one document.
         </p>
       )}
     </fieldset>

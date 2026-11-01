@@ -33,6 +33,7 @@ import ReturnForCorrectionDialog from "../liquidation/ReturnForCorrectionDialog"
 import { answeredCorrectionSummary } from "../liquidation/resubmit/correctionModel";
 import { BalanceStatusBadge } from "../liquidation/BalanceCheck";
 import { liquidationBalance } from "../../liquidationMoney";
+import { declarationsText, documentPlate } from "../../reportDocuments";
 
 /** The mandated sequence a liquidation dossier must travel, in order. */
 const PIPELINE_STEPS = ["Pending Submission", "Submitted", "Under Review", "Approved", "Completed"];
@@ -425,6 +426,11 @@ export default function LiquidationDeskView({
                         <span className="block font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">
                           Receipts &amp; Slips File Vouchers
                         </span>
+                        {declarationsText(sub.travelDeclarations) && (
+                          <p className="text-[11px] text-slate-600">
+                            <span className="font-semibold">The employee ticked:</span> {declarationsText(sub.travelDeclarations)}.
+                          </p>
+                        )}
                         <div className="flex flex-wrap gap-1.5">
                           {sub.supportingDocs.map((doc: any, i: number) => (
                             <button
@@ -437,7 +443,10 @@ export default function LiquidationDeskView({
                               title={doc.supersededAt ? "Replaced on correction; the old copy is kept for the record" : "View this file"}
                             >
                               <FileText size={10} className="text-slate-400" aria-hidden="true" />
-                              <span className={doc.supersededAt ? "line-through" : undefined}>{doc.name}</span>
+                              <span className="flex flex-col text-left">
+                                {doc.kind && <span className="font-sans text-[9px] font-semibold text-slate-500">{documentPlate(doc.kind)}</span>}
+                                <span className={doc.supersededAt ? "line-through" : undefined}>{doc.name}</span>
+                              </span>
                               {/* A correction replaced it; the new copy is listed beside it. */}
                               {doc.supersededAt && <>{" "}<span className="text-[9px] font-bold uppercase">(replaced)</span></>}
                             </button>

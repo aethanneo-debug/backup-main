@@ -11,6 +11,20 @@ export interface ReportFile {
   name: string;
 }
 
+/** A seat's certificate of attendance (R4), which has a route of its own. */
+export interface CertificateFile {
+  participantId: string;
+  name: string;
+}
+
+export type ViewedFile = ReportFile | CertificateFile;
+
+const isCertificate = (file: ViewedFile): file is CertificateFile => "participantId" in file;
+
+const fileRoute = (file: ViewedFile) => isCertificate(file)
+  ? `/api/training/participants/${encodeURIComponent(file.participantId)}/certificate`
+  : `/api/liquidation-submissions/${encodeURIComponent(file.reportId)}/documents/${encodeURIComponent(file.docId)}`;
+
 type Loaded =
   | { stage: "loading" }
   | { stage: "failed"; message: string }
@@ -24,7 +38,7 @@ function blobOf(file: ViewableFile): Blob {
 }
 
 /**
- * Shows a report's file on screen, with Print and Download (the instructor's review, R6).
+ * Shows a report's file or a certificate on screen, with Print and Download (the instructor's review, R6).
  *
  * A preview is a Blob URL made with a type from the allow-list, and only for a file that passes the
  * same check as an upload (src/fileRules.ts): a blob: page runs in the app's own origin, where the
@@ -32,12 +46,12 @@ function blobOf(file: ViewableFile): Blob {
  * PDF viewer. The frame has no `sandbox` attribute because that blocks the viewer; the check is what
  * keeps it safe. Anything else can only be downloaded.
  */
-export default function FileViewer({ file, onClose }: { file: ReportFile | null; onClose: () => void }) {
+export default function FileViewer({ file, onClose }: { file: ViewedFile | null; onClose: () => void }) {
   if (!file) return null;
-  return <Viewer key={`${file.reportId}/${file.docId}`} file={file} onClose={onClose} />;
+  return <Viewer key={fileRoute(file)} file={file} onClose={onClose} />;
 }
 
-function Viewer({ file, onClose }: { file: ReportFile; onClose: () => void }) {
+function Viewer({ file, onClose }: { file: ViewedFile; onClose: () => void }) {
   const [loaded, setLoaded] = useState<Loaded>({ stage: "loading" });
   const frame = useRef<HTMLIFrameElement>(null);
   const printFrame = useRef<HTMLIFrameElement | null>(null);
@@ -48,7 +62,7 @@ function Viewer({ file, onClose }: { file: ReportFile; onClose: () => void }) {
     // On the next tick: StrictMode mounts twice in development, and each officer's fetch is an audit entry.
     const start = setTimeout(async () => {
       try {
-        const res = await apiCall(`/api/liquidation-submissions/${encodeURIComponent(file.reportId)}/documents/${encodeURIComponent(file.docId)}`);
+        const res = await apiCall(fileRoute(file));
         if (!alive) return;
         const name: string = res?.data?.name || file.name;
         const content = res?.data?.content;
@@ -104,7 +118,7 @@ function Viewer({ file, onClose }: { file: ReportFile; onClose: () => void }) {
   return (
     <ModalDialog
       title={name}
-      subtitle="Attached to the liquidation report"
+      subtitle={isCertificate(file) ? "Certificate of attendance" : "Attached to the liquidation report"}
       icon={<FileText size={16} aria-hidden="true" />}
       onClose={onClose}
       size="xl"

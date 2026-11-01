@@ -391,8 +391,9 @@ export interface Notification {
 }
 
 // What a notice is about: a request, a liquidation report, a seminar (Training Plan & Budget),
-// or the employee's own assignment (an enrolment or a general activity, My Assigned Activities).
-export type NotificationRecordKind = "request" | "liquidationReport" | "seminar" | "assignment" | "cashAdvance";
+// the employee's own assignment (an enrolment or a general activity, My Assigned Activities), or a
+// seat on HR's attendance list (by enrolment id).
+export type NotificationRecordKind = "request" | "liquidationReport" | "seminar" | "assignment" | "cashAdvance" | "attendance";
 
 export interface NotificationLink {
   tab: string;                       // the app tab to open, e.g. "employee_portal"
@@ -686,6 +687,7 @@ export interface CorrectionItem {
   remark?: string;          // the reviewer's note, shown beside that part of the form
   lineIds?: string[];       // particulars: only these lines (none listed means every line)
   documentIds?: string[];   // replaceDocuments: the files to replace
+  documentKinds?: DocumentKind[]; // addDocument: which named documents are missing (R5)
 }
 
 // One Return, kept for good: every round stays on the report.
@@ -712,6 +714,26 @@ export interface StoredFile {
   bytes: number;
 }
 
+// The named documents of a seminar's report (the instructor's review, R5; the rules are in
+// src/reportDocuments.ts). "certificate" comes from the attendee's certificate of attendance (R4): it is
+// never uploaded on the report's form.
+export type DocumentKind =
+  | "certificate"
+  | "itinerary"
+  | "travelCompleted"
+  | "tickets"
+  | "hotelBills"
+  | "refundOr"
+  | "revisedOrder"
+  | "revisedItinerary"
+  | "headCertification"
+  | "rer"
+  | "receipts";
+
+// What the claimant says applies to the trip. Only they can know these; each brings a document in, or
+// (no travel) takes the travel documents off.
+export type TravelDeclaration = "noTravel" | "scheduleChanged" | "itineraryNotFollowed" | "overRate" | "noOfficialReceipt";
+
 export interface LiquidationDocument {
   id: string;
   name: string;
@@ -725,6 +747,36 @@ export interface LiquidationDocument {
   replaces?: string;        // the id of the file this one replaced
   supersededAt?: string;    // set when a correction replaced this file
   replacedBy?: string;      // the id of the file that replaced it
+  kind?: DocumentKind;      // which named document it is; none on a file from before R5
+  participantId?: string;   // a certificate: whose it is (a group's report has one per attendee)
+}
+
+// An attendee's certificate of attendance (R4): HR's basis for "Attended", and the proof on the report.
+// Kept in its own collection, not on the enrolment, so no route that sends enrolments can carry it. A
+// replaced one stays, marked, as a report's replaced file does. The report's document points at the same
+// stored file: there is one copy.
+export interface AttendanceCertificate {
+  id: string;
+  participantId: string;    // TrainingParticipant.id (never the staff code, which can change)
+  name: string;             // as uploaded, cleaned
+  type: string;             // the checked file type
+  size: string;
+  uploadedAt: string;
+  uploadedBy: string;       // the full name of whoever uploaded it
+  uploadedById?: string;    // their account's id
+  stored: StoredFile;
+  sha256?: string;          // the file's fingerprint, to tell HR when one file stands for two seats
+  supersededAt?: string;
+  replacedBy?: string;
+}
+
+/** A certificate as a list sends it: never the file, or where it is kept. */
+export type AttendanceCertificateView = Pick<AttendanceCertificate, "id" | "name" | "size" | "uploadedAt" | "uploadedBy">;
+
+/** Another seat whose certificate on file is the very same file (HR's list only). */
+export interface CertificateTwin {
+  name: string;
+  seminar: string;
 }
 
 // The instructor's note 10: one form, but the claimant says which kind of claim it is.
@@ -770,6 +822,9 @@ export interface LiquidationSubmission {
   remainingBalance: number;
   remarks: string;
   supportingDocs: LiquidationDocument[];
+  // What the claimant said applies to the trip when filing (src/reportDocuments.ts). Its presence, even
+  // empty, marks a report filed under the named documents (R5); older reports keep their rules.
+  travelDeclarations?: TravelDeclaration[];
   // Every Return with its checklist, oldest first (requirement 5). The last one without
   // resolvedAt is the correction the claimant is working on.
   corrections?: CorrectionRequest[];
@@ -904,6 +959,8 @@ export interface LiquidationDocumentRow {
   dateSubmitted?: string;
   docId: string;
   name: string;
+  /** Which named document it is (R5); none on a file from before. */
+  kind?: DocumentKind;
   /** The file's MIME type, e.g. "application/pdf" or "image/jpeg". */
   type: string;
   size?: string;
@@ -1121,6 +1178,7 @@ export interface TrainingParticipant {
   attendance?: AttendanceStatus;
   attendanceBy?: string;   // full name of the HR officer who recorded it
   attendanceAt?: string;   // ISO timestamp
+  attendanceCertificateId?: string; // the certificate of attendance "Attended" was recorded on (R4)
   // Set when the enrolment was archived with its seminar (status "Archived"); restoring the
   // seminar puts it back to "Assigned".
   archivedWithSeminarAt?: string;
@@ -1172,7 +1230,18 @@ export interface TdpJustification extends TdpJustificationInput {
 // plan changed since).
 export type TdpStanding = "identified" | "justified" | "seminar" | "beforeRule" | "missing";
 // GET /api/training/participants: each enrolment with its standing.
-export interface TrainingParticipantRow extends TrainingParticipant { tdp?: TdpStanding }
+export interface TrainingParticipantRow extends TrainingParticipant {
+  tdp?: TdpStanding;
+  /** Their certificate of attendance (R4), if one is on file; HR and the Administrator only. `sameFileAs`:
+   * other seats whose certificate on file is the very same file. */
+  certificate?: (AttendanceCertificateView & { sameFileAs?: CertificateTwin[] }) | null;
+  /** With no Personnel login, HR or the Administrator uploads it for them. */
+  hasPersonnelLogin?: boolean;
+  /** Their own uploads reached the limit, so HR or the Administrator may upload it for them. */
+  certificateCapped?: boolean;
+  /** Why HR or the Administrator can't upload it now, if they can't. */
+  certificateBlockedReason?: string | null;
+}
 
 // A seminar the TDP doesn't cover is held only with its own justification (HSAC RAB 1, 2026-10-28;
 // 12z Part C): e.g. a training paid by the Central Office, an invitation from another agency, or a new

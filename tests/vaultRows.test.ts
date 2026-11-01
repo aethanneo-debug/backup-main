@@ -28,12 +28,25 @@ test("the list has one row per attached file, with its report, and never the fil
       reportId: "liq-1", submissionNo: "LIQSUB-2026-011", employeeName: "Andres B. Bonifacio", status: "Completed",
       claimType: "Liquidation", title: "Records Management Seminar", fiscalYear: "2027",
       createdAt: "2026-10-16T03:00:00.000Z", dateSubmitted: undefined,
-      docId: "doc-a", name: "receipt.pdf", type: "application/pdf", size: "12.0 KB",
+      docId: "doc-a", name: "receipt.pdf", kind: undefined, type: "application/pdf", size: "12.0 KB",
       uploadedAt: "2026-10-16T02:59:00.000Z", hasFile: true,
       supersededAt: undefined, replacedBy: undefined, replaces: undefined
     }
   );
   for (const row of rows) assert.equal("content" in row, false);
+});
+
+test("a row says which named document it is, and the search finds it by that name", () => {
+  const rows = liquidationDocumentRows([
+    { id: "liq-1", fiscalYear: "2027", supportingDocs: [
+      { id: "doc-a", name: "scan-0012.pdf", kind: "itinerary", content: PDF },
+      { id: "doc-b", name: "Certificate of Attendance - Ana Reyes.pdf", kind: "certificate", participantId: "tp-1", stored: { file: "a.bin", type: "application/pdf", bytes: 90 } },
+      { id: "doc-c", name: "old.pdf", content: PDF }
+    ] }
+  ] as any);
+  assert.deepEqual(rows.map(r => r.kind), ["itinerary", "certificate", undefined]);
+  const found = vaultView(rows, { fiscalYear: "2027", stage: "all", query: "itinerary of travel", includeReplaced: false });
+  assert.deepEqual(found.rows.map(r => r.docId), ["doc-a"]);
 });
 
 test("a file in the file store can be opened, though the record holds only its reference", () => {

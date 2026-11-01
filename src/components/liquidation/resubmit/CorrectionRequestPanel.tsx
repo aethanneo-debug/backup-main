@@ -1,6 +1,7 @@
 import { ClipboardList } from "lucide-react";
 import { CorrectionRequest, LiquidationSubmissionView, UserRole } from "../../../types";
 import { expenseLineLabel } from "../../../expenseLines";
+import { documentPlate } from "../../../reportDocuments";
 import { formatCurrency, formatDate } from "../../../utils";
 import { correctionLabel } from "./correctionModel";
 
@@ -54,6 +55,9 @@ export default function CorrectionRequestPanel({
               )}
               {item.field === "replaceDocuments" && (
                 <span className="text-slate-500">: {(item.documentIds ?? []).map(fileName).join(", ")}</span>
+              )}
+              {item.field === "addDocument" && (item.documentKinds?.length ?? 0) > 0 && (
+                <span className="text-slate-500">: {item.documentKinds!.map(documentPlate).join(", ")}</span>
               )}
               {item.remark && <span className="block text-amber-800">&ldquo;{item.remark}&rdquo;</span>}
             </li>

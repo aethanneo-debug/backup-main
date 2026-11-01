@@ -1,4 +1,4 @@
-import { CORRECTION_FIELDS, CorrectionField, CorrectionRequest, LiquidationSubmission } from "../../../types";
+import { CORRECTION_FIELDS, CorrectionField, CorrectionRequest, DocumentKind, LiquidationSubmission } from "../../../types";
 
 /**
  * Whether the claimant can correct and resubmit the report, by the server's rule: returned,
@@ -30,6 +30,8 @@ export interface CorrectionAccess {
   lineIds?: string[];
   /** The files the reviewer asked to replace. */
   replaceIds: string[];
+  /** The named documents the reviewer said are missing (R5). */
+  addKinds: DocumentKind[];
 }
 
 /**
@@ -51,7 +53,8 @@ export function correctionAccess(report: Partial<LiquidationSubmission> | null |
       || (field === "representative" && !report?.representativeId),
     noteFor: (field) => open?.items.find(i => i.field === field)?.remark,
     lineIds: open?.items.find(i => i.field === "particulars")?.lineIds,
-    replaceIds: open?.items.find(i => i.field === "replaceDocuments")?.documentIds ?? []
+    replaceIds: open?.items.find(i => i.field === "replaceDocuments")?.documentIds ?? [],
+    addKinds: open?.items.find(i => i.field === "addDocument")?.documentKinds ?? []
   };
 }
 
@@ -90,7 +93,10 @@ export function answeredCorrectionSummary(report: Partial<LiquidationSubmission>
   const done = [
     edited.length ? `changed ${joinAnd(edited)}` : "",
     changed.includes("replaceDocuments") ? "replaced the files marked for replacing" : "",
-    changed.includes("addDocument") ? "added the missing document" : ""
+    // (On a report under the named documents a change can require one nobody asked for, e.g. a new Accommodation line.)
+    changed.includes("addDocument")
+      ? (last.items.some(i => i.field === "addDocument") ? "added the missing document" : "added a document the correction made necessary")
+      : ""
   ].filter(Boolean);
   const untouched = last.items.map(i => i.field).filter(f => !changed.includes(f)).map(f => PART_NAME[f]);
   return `Corrected after Return ${last.round > 1 ? `round ${last.round} ` : ""}by ${last.requestedBy}: ${

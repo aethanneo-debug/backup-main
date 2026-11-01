@@ -17,7 +17,8 @@ export function storeDataUrl(content: unknown): StoredFile | null {
   const comma = content.indexOf(",");
   const bytes = Buffer.from(content.slice(comma + 1), "base64");
   if (bytes.length === 0) return null;
-  const type = content.slice("data:".length, comma).split(";")[0];
+  // (Lowercased: the checks read the type that way, and a certificate's name takes its extension from it.)
+  const type = content.slice("data:".length, comma).split(";")[0].toLowerCase();
   // Only the server's own account may read them, where the system honours that (not on Windows).
   fs.mkdirSync(uploadsDir(), { recursive: true, mode: 0o700 });
   const file = `${crypto.randomUUID()}.bin`;

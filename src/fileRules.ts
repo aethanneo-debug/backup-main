@@ -7,7 +7,11 @@ import { cleanText } from "./inputText";
 import { SAFE_FILE_URL } from "./utils";
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
-export const MAX_REPORT_FILES = 10;
+/** The smallest file that counts as a document (a receipt, a certificate): anything less holds next to nothing.
+ * The server counts a file only from this size, so the form refuses smaller ones on pick. */
+export const MIN_FILE_BYTES = 75;
+/** Raised from 10 with the named documents (R5): one trip can bring tickets, passes, bills and receipts. */
+export const MAX_REPORT_FILES = 20;
 /** Everything one request sends has to fit the server's 50 MB request limit, and base64 adds a third. */
 export const MAX_REPORT_BYTES = 35 * 1024 * 1024;
 /** The longest data URL a file within the limit can be, with room for its header. */
@@ -31,6 +35,11 @@ const KINDS: FileKind[] = [
 
 /** For a file input's `accept`. */
 export const FILE_INPUT_ACCEPT = KINDS.flatMap(k => [...k.extensions.map(e => `.${e}`), k.type]).join(",");
+
+/** The extension for a checked type, or "" for any other. */
+export function fileExtension(type: unknown): string {
+  return KINDS.find(k => k.type === type)?.extensions[0] ?? "";
+}
 
 const ALLOWED_TEXT = "only PDF, JPEG and PNG files can be attached";
 
@@ -68,6 +77,7 @@ export function pickedFileProblem(name: string, size: number): string {
   if (!kindOfName(name)) return `"${name}" can't be attached: ${ALLOWED_TEXT}.`;
   if (size > MAX_FILE_BYTES) return `"${name}" is larger than 5 MB.`;
   if (size <= 0) return `"${name}" is empty.`;
+  if (size < MIN_FILE_BYTES) return `"${name}" has almost nothing in it. Choose the document itself.`;
   return "";
 }
 

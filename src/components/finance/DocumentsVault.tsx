@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { LiquidationDocumentRow } from "../../types";
 import { apiCall, downloadBase64File, firstDateString, formatDate } from "../../utils";
+import { documentPlate } from "../../reportDocuments";
 import FileViewer, { type ReportFile } from "../ui/FileViewer";
 import { reportStatusBadgeClass } from "./overviewFigures";
 import { VAULT_STAGES, fileKindLabel, vaultView, type VaultStage } from "./vaultRows";
@@ -215,7 +216,7 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
                 type="search"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="File name, report number, employee or seminar"
+                placeholder="File, document, report number, employee or seminar"
                 className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-8 text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               {query && (
@@ -286,6 +287,7 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
                             >
                               {row.name}
                             </p>
+                            {row.kind && <p className="mt-0.5 text-[10px] font-semibold text-slate-600">{documentPlate(row.kind)}</p>}
                             <p className="mt-0.5 text-[10px] text-slate-500">
                               {fileKindLabel(row.type, row.name)}
                               {row.size ? ` · ${row.size}` : ""}

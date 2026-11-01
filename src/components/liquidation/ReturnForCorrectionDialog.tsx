@@ -4,13 +4,15 @@ import {
   CORRECTION_FIELDS,
   CorrectionField,
   CorrectionItem,
+  DocumentKind,
   LiquidationDocument,
   LiquidationSubmission,
   LiquidationSubmissionView
 } from "../../types";
+import { UPLOAD_KINDS, filedUnderDocuments } from "../../reportDocuments";
 import ModalDialog from "../ui/ModalDialog";
 import { ACTION_BUTTON, CANCEL_BUTTON, CONTROL, LABEL, Notice } from "../utilities/signatoryFormParts";
-import { ChecklistRow, FilePicker, LinePicker, NoteField, REQUIRED } from "./correction/ChecklistParts";
+import { ChecklistRow, FilePicker, KindPicker, LinePicker, NoteField, REQUIRED } from "./correction/ChecklistParts";
 
 /**
  * Return a liquidation report for correction (requirement 5, the instructor's note 11).
@@ -62,6 +64,7 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
   const [notes, setNotes] = useState<Partial<Record<CorrectionField, string>>>({});
   const [lineIds, setLineIds] = useState<string[]>([]);
   const [documentIds, setDocumentIds] = useState<string[]>([]);
+  const [documentKinds, setDocumentKinds] = useState<DocumentKind[]>([]);
   const [remarks, setRemarks] = useState("");
   const [remarksTouched, setRemarksTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -88,12 +91,17 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
   const chosenLines = lines.filter(l => lineIds.includes(l.id)).map(l => l.id);
   const chosenFiles = files.filter(d => documentIds.includes(d.id)).map(d => d.id);
   const filesMissing = chosen.some(c => c.field === "replaceDocuments") && chosenFiles.length === 0;
+  // On a report under the named documents, the reviewer says which one is missing (R5).
+  const named = filedUnderDocuments(report);
+  const chosenKinds = UPLOAD_KINDS.filter(k => documentKinds.includes(k));
+  const kindsMissing = named && chosen.some(c => c.field === "addDocument") && chosenKinds.length === 0;
   const remarksBlank = remarks.trim() === "";
   const remarksError = remarksTouched && remarksBlank;
 
   const missing = [
     chosen.length === 0 ? "tick at least one part to correct" : "",
     filesMissing ? "choose the files to replace" : "",
+    kindsMissing ? "choose the missing document" : "",
     remarksBlank ? "enter the remarks" : ""
   ].filter(Boolean);
   const ready = missing.length === 0;
@@ -119,6 +127,7 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
       if (note) item.remark = note;
       if (field === "particulars" && chosenLines.length > 0) item.lineIds = chosenLines;
       if (field === "replaceDocuments") item.documentIds = chosenFiles;
+      if (field === "addDocument" && named) item.documentKinds = chosenKinds;
       return item;
     });
     inFlight.current = true;
@@ -223,6 +232,14 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
                       chosen={documentIds}
                       missing={filesMissing}
                       onToggle={docId => setDocumentIds(d => toggled(d, docId))}
+                    />
+                  )}
+                  {field === "addDocument" && named && (
+                    <KindPicker
+                      id={`${id}-kinds`}
+                      chosen={documentKinds}
+                      missing={kindsMissing}
+                      onToggle={kind => setDocumentKinds(k => toggled(k, kind))}
                     />
                   )}
                   <NoteField

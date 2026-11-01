@@ -15,7 +15,7 @@ import { createTransactions } from "./src/server/jsonTransaction";
 import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
 import { cleanFileName, documentHasFile, liquidationDocumentRows } from "./src/server/liquidationDocuments";
 import { readStoredFile, storeDataUrl } from "./src/server/fileStore";
-import { fileBytes, fileProblem, reportFilesProblem } from "./src/fileRules";
+import { fileBytes, fileProblem, MIN_FILE_BYTES, reportFilesProblem } from "./src/fileRules";
 import { trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
 import {
   advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, isGroupAdvance, portionCentavos, releasedByEnrolment,
@@ -97,9 +97,14 @@ import {
   CorrectionField,
   CorrectionItem,
   CorrectionRequest,
+  AttendanceCertificate,
+  AttendanceCertificateView,
+  CertificateTwin,
+  DocumentKind,
   LiquidationDocument,
   LiquidationSubmission,
   LiquidationSubmissionView,
+  StoredFile,
   TdpJustification,
   TdpJustificationInput,
   TrainingParticipantRow,
@@ -115,6 +120,11 @@ import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, re
 import { dvKey, readDvNumber } from "./src/dvNumber";
 import { reimbursementLimit, reimbursementProblem, seminarClaimMode } from "./src/reimbursement";
 import { expenseLineLabel, expenseLinesProblem, isBlankExpenseLine, isProgramOnlyExpense, MAX_REPORT_LINES, vehicleOverlapsSeminar } from "./src/expenseLines";
+import { certificateDocumentName, certificateUploadProblem, MAX_CERTIFICATE_UPLOADS, seminarLastDay } from "./src/attendanceCertificate";
+import {
+  correctionSlots, documentPlate, filedUnderDocuments, missingDocuments, missingDocumentsText, noTravelProblem, readDeclarations, readDocumentKind,
+  requiredDocuments, UPLOAD_KINDS
+} from "./src/reportDocuments";
 
 const app = express();
 const PORT = 3000;
@@ -158,6 +168,7 @@ interface DBStructure {
   trainingNeeds: TrainingNeed[];
   // Training titles the law requires (HSAC RAB 1's step 5): their needs come first (12z Part D).
   trainingMandates: TrainingMandate[];
+  attendanceCertificates: AttendanceCertificate[];
   signatories: Signatory[];
 }
 
@@ -501,6 +512,12 @@ function getInitialData(): DBStructure {
       // Mandated training titles (12z Part D). Starts empty: HR marks them, nothing is presumed.
       if (!Array.isArray(loaded.trainingMandates)) {
         loaded.trainingMandates = [];
+        changed = true;
+      }
+      // Certificates of attendance (the instructor's review, R4): their own collection, so no route that
+      // sends enrolments can carry one. Starts empty.
+      if (!Array.isArray(loaded.attendanceCertificates)) {
+        loaded.attendanceCertificates = [];
         changed = true;
       }
       if (!loaded.cashAdvances) {
@@ -1133,6 +1150,7 @@ function getInitialData(): DBStructure {
     trainingLiquidations: [],
     trainingNeeds: [],
     trainingMandates: [],
+    attendanceCertificates: [],
     // Entered through Utilities → Manage Signatories; no names in code.
     signatories: []
   };
@@ -2039,7 +2057,9 @@ function seminarFormEligibility(p: any): { canLiquidate: boolean; reason?: strin
     return { canLiquidate: true };
   }
   if (p.attendance === "Did not attend") return { canLiquidate: false, reason: "HR recorded that you did not attend, so there is no liquidation form for this seminar." };
-  if (p.attendance !== "Attended") return { canLiquidate: false, reason: "The form opens once HR records your attendance." };
+  if (p.attendance !== "Attended") {
+    return { canLiquidate: false, reason: currentCertificate(p.id) ? "The form opens once HR records your attendance." : "The form opens once you upload your certificate of attendance and HR records your attendance." };
+  }
   return { canLiquidate: true };
 }
 
@@ -3002,30 +3022,149 @@ const INVALID_DOCS_MESSAGE = "Supporting documents must be a list of files.";
 // (the security review of seminar reimbursements, 2026-10-30). One on a report counts by what the store
 // holds, and only if it hasn't been replaced. One arriving with a request counts by its own bytes,
 // never by what the request says about it.
-const RECEIPT_MIN_BYTES = 75;
+const RECEIPT_MIN_BYTES = MIN_FILE_BYTES;
 function isRealFile(d: any): boolean {
   return !!d && !d.supersededAt && Number(d.stored?.bytes) >= RECEIPT_MIN_BYTES;
 }
 function isRealUpload(d: any): boolean {
   return fileBytes(d?.content) >= RECEIPT_MIN_BYTES;
 }
+// What a reimbursement's receipts are checked against: on a report under the named documents (R5), only a file in
+// the receipts slot; an attendee's certificate, or an itinerary, is no receipt.
+function isReceiptFile(d: any): boolean {
+  return isRealFile(d) && (!d.kind || d.kind === "receipts");
+}
+
+const fileSizeText = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
 
 // New files, checked by documentProblem, as the report keeps them: each goes to the file store, and
 // only what the server knows about it is recorded. Its id, type, size and history are the server's
 // own, whatever came with it, and so is where it is stored. Called once every refusal has passed.
-function claimantDocuments(docs: any[]): LiquidationDocument[] {
+// `named`: a report under the named documents (R5), where each keeps its slot.
+function claimantDocuments(docs: any[], named = false): LiquidationDocument[] {
   const now = new Date().toISOString();
   return docs.map((d: any) => {
     const stored = storeDataUrl(d.content)!;
+    const kind = named ? readDocumentKind(d.kind) : null;
     return {
       id: `doc-${crypto.randomUUID()}`,
+      ...(kind ? { kind } : {}),
       name: cleanFileName(d.name) || "file",
       type: stored.type,
-      size: `${(stored.bytes / 1024).toFixed(1)} KB`,
+      size: fileSizeText(stored.bytes),
       uploadedAt: now,
       stored
     };
   });
+}
+
+// An attendee's certificate of attendance (the instructor's review, R4; src/attendanceCertificate.ts).
+// The one on file is the latest: a replaced one stays, marked.
+function currentCertificate(participantId: string): AttendanceCertificate | null {
+  return (db.attendanceCertificates || []).find(c => c && c.participantId === participantId && !c.supersededAt) || null;
+}
+
+function certificateView(c: AttendanceCertificate | null): AttendanceCertificateView | null {
+  if (!c) return null;
+  const { id, name, size, uploadedAt, uploadedBy } = c;
+  return { id, name, size, uploadedAt, uploadedBy };
+}
+
+// Every upload a seat has had, replaced ones included: the cap counts them all, since each stays on disk.
+function certificateUploads(participantId: string): number {
+  return (db.attendanceCertificates || []).filter(c => c && c.participantId === participantId).length;
+}
+
+// Why a certificate can't be uploaded for this seat now, or "". HR or the Administrator (`ownUpload` false) has
+// a higher limit than the employee, so a seat at the employee's limit isn't stuck.
+function certificateProblemFor(seat: any, prog: any, ownUpload = true): string {
+  return certificateUploadProblem({
+    status: seat.status,
+    attendance: seat.attendance,
+    seminarArchived: !!prog?.archivedAt,
+    lastDay: seminarLastDay(prog),
+    today: manilaToday(),
+    onFile: !!currentCertificate(seat.id),
+    uploads: certificateUploads(seat.id),
+    byOfficer: !ownUpload
+  });
+}
+
+// A file's fingerprint, from its data URL: it tells HR when one file stands for two seats.
+function fileFingerprint(content: string): string {
+  return crypto.createHash("sha256").update(Buffer.from(content.slice(content.indexOf(",") + 1), "base64")).digest("hex");
+}
+
+// `stored` is already in the file store, and `content` is the file as it arrived. Whatever was on file before
+// stays, marked replaced.
+function recordCertificate(
+  participantId: string, name: string, stored: StoredFile, content: string, uploader: { id: string; fullName: string }
+): AttendanceCertificate {
+  const previous = currentCertificate(participantId);
+  const record: AttendanceCertificate = {
+    id: `cert-${crypto.randomUUID()}`,
+    participantId,
+    name,
+    type: stored.type,
+    size: fileSizeText(stored.bytes),
+    uploadedAt: new Date().toISOString(),
+    uploadedBy: uploader.fullName,
+    uploadedById: uploader.id,
+    stored,
+    sha256: fileFingerprint(content)
+  };
+  if (!db.attendanceCertificates) db.attendanceCertificates = [];
+  db.attendanceCertificates.push(record);
+  if (previous) {
+    previous.supersededAt = record.uploadedAt;
+    previous.replacedBy = record.id;
+  }
+  return record;
+}
+
+// A certificate as a report carries it (R4): the same stored file, so there is one copy, under the
+// server's own name, since a group's holder sees the list.
+function certificateDocument(c: AttendanceCertificate, employeeName: string): LiquidationDocument {
+  return {
+    id: `doc-${crypto.randomUUID()}`,
+    kind: "certificate",
+    participantId: c.participantId,
+    name: certificateDocumentName(employeeName, c.type),
+    type: c.type,
+    size: c.size,
+    uploadedAt: c.uploadedAt,
+    stored: c.stored
+  };
+}
+
+// Who a seminar report settles: everyone its group advance covers who attended, or its own seat.
+function reportAttendees(seat: any, group: CashAdvance | null, employeeName: string): Array<{ participantId: string; employeeName: string }> {
+  if (!group) return [{ participantId: seat.id, employeeName }];
+  return group.covers!.filter(c => (db.trainingParticipants || []).find((p: any) => p && p.id === c.participantId)?.attendance === "Attended")
+    .map(c => ({ participantId: c.participantId, employeeName: c.employeeName }));
+}
+
+// Why a report can't be filed for want of a certificate, or "". Each attendee's is theirs to upload.
+function missingCertificatesProblem(attendees: Array<{ participantId: string; employeeName: string }>, ownSeatId: string): string {
+  const without = attendees.filter(a => !currentCertificate(a.participantId));
+  if (without.length === 0) return "";
+  const how = "Each attendee uploads their own from their seminar card, and HR does for staff with no Personnel login.";
+  return without.every(a => a.participantId === ownSeatId)
+    ? "Your certificate of attendance isn't on file. Upload it from your seminar card first."
+    : without.length === 1
+      ? `The certificate of attendance of ${without[0].employeeName} isn't on file. ${how}`
+      : `The certificates of attendance of ${namesText(without.map(a => a.employeeName))} aren't on file. ${how}`;
+}
+
+// A filed group report takes the certificate of anyone recorded "Attended" after it was filed: a report
+// carries the certificate of every attendee it covers (R4). Whether it was added.
+function addCertificateToReport(report: any, participantId: string, employeeName: string): boolean {
+  if (!filedUnderDocuments(report) || !Array.isArray(report.supportingDocs)) return false;
+  if (report.supportingDocs.some((d: any) => d && d.kind === "certificate" && d.participantId === participantId && !d.supersededAt)) return false;
+  const certificate = currentCertificate(participantId);
+  if (!certificate) return false;
+  report.supportingDocs.push(certificateDocument(certificate, employeeName));
+  return true;
 }
 
 // A new file's details are shown on every reviewer's screen, so they must be plain text (an
@@ -3769,8 +3908,7 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
     // Inject assigned training programs. An enrolment archived with an unused seminar (or left off
     // when it was restored) is gone from the employee's list, as a deleted seminar's was; a
     // finished seminar stays as history.
-    const trainings = db.trainingParticipants.filter((p) =>
-      (p.employeeId === altId || p.employeeId === employeeId) && p.status !== "Archived" && p.status !== "Cancelled");
+    const trainings = db.trainingParticipants.filter((p) => isOwnSeat(req.user, p) && p.status !== "Archived" && p.status !== "Cancelled");
     for (const t of trainings) {
       const prog = db.trainingPrograms.find((p) => p.id === t.trainingProgramId);
       if (prog) {
@@ -3809,6 +3947,9 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
             const e = seminarFormEligibility(t);
             return { canLiquidate: e.canLiquidate, liquidationBlockedReason: e.reason || null };
           })(),
+          // Their certificate of attendance (R4): what is on file, and whether they can upload one now.
+          certificate: certificateView(currentCertificate(t.id)),
+          certificateBlockedReason: certificateProblemFor(t, prog) || null,
           // Whether they may ask Finance for their cash advance (advanceRequestEligibility).
           ...(() => {
             const r = advanceRequestEligibility(t);
@@ -3819,13 +3960,18 @@ app.get("/api/activities", authenticateToken, (req: any, res) => {
           groupMembers: (() => {
             const held = advanceCovering(db.cashAdvances || [], t.id, ["Released"]);
             if (!held || !isGroupAdvance(held) || held.activityId !== t.id) return null;
-            return held.covers!.map(c => ({
-              participantId: c.participantId,
-              employeeName: c.employeeName,
-              attendance: (db.trainingParticipants || []).find((x: any) => x && x.id === c.participantId)?.attendance || null,
-              // Whether a vehicle request stands for them: their lines can't be Transportation.
-              onVehicle: !!transportVehicleFor(c.participantId)
-            }));
+            return held.covers!.map(c => {
+              const attendance = (db.trainingParticipants || []).find((x: any) => x && x.id === c.participantId)?.attendance || null;
+              return {
+                participantId: c.participantId,
+                employeeName: c.employeeName,
+                attendance,
+                // Whether a vehicle request stands for them: their lines can't be Transportation.
+                onVehicle: !!transportVehicleFor(c.participantId),
+                // Whether an attendee's certificate is on file for the group's report; never the file (R4).
+                hasCertificate: attendance === "Attended" && !!currentCertificate(c.participantId)
+              };
+            });
           })(),
           // The report a co-participant filed on the group advance covering them: its number and
           // status only (the holder's report, its items and files are the holder's).
@@ -3916,6 +4062,14 @@ app.get("/api/liquidation-submissions/:id/documents/:docId", authenticateToken, 
   if (req.method !== "GET") return res.status(405).set("Allow", "GET").json({ status: "error", message: "Use GET." });
   const doc = sub ? (Array.isArray(sub.supportingDocs) ? sub.supportingDocs : []).find((d: any) => d && String(d.id) === req.params.docId) : null;
   if (!sub || !doc) return res.status(404).json({ status: "error", message: "That file was not found." });
+  // A group's report carries every attendee's certificate, but each is theirs alone (R4): the holder
+  // sees that it is there, and opens only their own.
+  if (!reviewer && doc.kind === "certificate") {
+    const whose = (db.trainingParticipants || []).find((p: any) => p.id === doc.participantId);
+    if (!isOwnSeat(req.user, whose)) {
+      return res.status(403).json({ status: "error", message: "You can only open your own certificate of attendance." });
+    }
+  }
   // The name the list shows (cleaned of invisible and right-to-left characters), so the file saves
   // under it too.
   const name = cleanFileName(String(doc.name || doc.filename || "")) || "file";
@@ -3928,9 +4082,10 @@ app.get("/api/liquidation-submissions/:id/documents/:docId", authenticateToken, 
   // escaped, with the file's id: a crafted name can't pass for a second file or another report
   // in the same entry. An officer's view is always recorded, even of what looks like their own
   // report: an account can be relinked to a staff code, and that mustn't hide a view. A claimant
-  // who is no officer opening their own file isn't recorded.
+  // who is no officer opening their own file isn't recorded. A certificate opened through its report is a view
+  // of the certificate, and is filed as one (R4).
   if (reviewer) {
-    logEvent(req.user.id, req.user.username, req.user.role, "Open Liquidation Document",
+    logEvent(req.user.id, req.user.username, req.user.role, doc.kind === "certificate" ? "Open Certificate of Attendance" : "Open Liquidation Document",
       `Opened ${JSON.stringify(name.slice(0, 120))} (file ${doc.id}) from ${sub.submissionNo} (${sub.employeeName || sub.employeeId}).`);
   }
   res.json({ status: "success", data: { name, type: doc.type || "", content } });
@@ -4278,6 +4433,14 @@ function correctionRequestFrom(
       }
       item.documentIds = [...new Set<string>(raw.documentIds)];
     }
+    // On a report under the named documents, the reviewer names what is missing (R5). A certificate
+    // can't be: it is on the report already, and a new copy is asked for by replacing it.
+    if (field === "addDocument" && filedUnderDocuments(sub)) {
+      if (!Array.isArray(raw.documentKinds) || raw.documentKinds.length === 0 || raw.documentKinds.some((k: any) => !UPLOAD_KINDS.includes(k))) {
+        return { error: "Choose which document is missing." };
+      }
+      item.documentKinds = [...new Set<DocumentKind>(raw.documentKinds)];
+    }
     if (field === "cashAdvance" && advance) {
       return { error: "The cash advance is taken from Finance's record, so it can't be returned for correction." };
     }
@@ -4588,6 +4751,36 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   // the account name; never a name typed in the form.
   const staffRecord = employeeId ? (db.employees || []).find((e: any) => employeeIdForms(employeeId).includes(e.id)) : null;
   const officialName = String(staffRecord?.fullName || "").trim() || fullName;
+
+  // The named documents (the instructor's review, R5; src/reportDocuments.ts): a seminar's report is
+  // filed only with what it needs, and carries each attendee's certificate of attendance by itself (R4).
+  const declarations = seminarEnrolment ? readDeclarations(req.body.travelDeclarations) : [];
+  if (declarations === null) {
+    return res.status(400).json({ status: "error", message: "Tick only what the form offers about the trip." });
+  }
+  const attendees = seminarEnrolment ? reportAttendees(seminarEnrolment, groupAdvance, officialName) : [];
+  if (seminarEnrolment) {
+    if ((supportingDocs || []).some((d: any) => readDocumentKind(d.kind) === null)) {
+      return res.status(400).json({ status: "error", message: "Choose which document each file is." });
+    }
+    // "No travel" takes the travel documents off, so it has to agree with what the server knows of the trip.
+    if (!isReimbursement && declarations.includes("noTravel")) {
+      const travel = noTravelProblem({
+        vehicleRequest: !!transportVehicleFor(seminarEnrolment.id),
+        expenseTypes: (lines ? lines.particulars : []).map((p: any) => p.category)
+      });
+      if (travel) return res.status(400).json({ status: "error", message: travel });
+    }
+    const certificateProblem = missingCertificatesProblem(attendees, seminarEnrolment.id);
+    if (certificateProblem) return res.status(409).json({ status: "error", message: certificateProblem });
+    const missing = missingDocuments(requiredDocuments({
+      reimbursement: isReimbursement,
+      expenseTypes: (lines ? lines.particulars : []).map((p: any) => p.category),
+      handsBack: balance.leftover > 0,
+      declarations
+    }), ["certificate", ...(supportingDocs || []).filter(isRealUpload).map((d: any) => readDocumentKind(d.kind))]);
+    if (missing.length > 0) return res.status(400).json({ status: "error", message: missingDocumentsText(missing) });
+  }
   const newSub = {
     id: `liqsub-${Date.now()}`,
     submissionNo: subNo,
@@ -4603,7 +4796,13 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     totalSpent: spent,
     remainingBalance: pesos(centavos(released) - centavos(spent)),
     remarks: remarks || "",
-    supportingDocs: claimantDocuments(supportingDocs || []),
+    // Every attendee's certificate first: the one stored copy, not a second upload.
+    supportingDocs: [
+      ...attendees.map(a => certificateDocument(currentCertificate(a.participantId)!, a.employeeName)),
+      ...claimantDocuments(supportingDocs || [], !!seminarEnrolment)
+    ],
+    // (Marks a report filed under the named documents, even with nothing ticked.)
+    ...(seminarEnrolment ? { travelDeclarations: isReimbursement ? [] : declarations } : {}),
 
     // COA Liquidation Report fields. A positive remainingBalance is the form's
     // "Amount Refunded"; a negative one is "Amount to be Reimbursed" — the split is
@@ -4832,7 +5031,10 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   // A report filed before Box B existed must name one now, ticked or not.
   if (!may("representative") && sub.representativeId) delete body.representativeId;
   if (!may("remarks")) delete body.remarks;
-  if (!may("addDocument")) delete body.supportingDocs;
+  // A report under the named documents decides further down, once its lines are known: a correction
+  // can make a document required that it didn't need before.
+  const named = filedUnderDocuments(sub);
+  if (!may("addDocument") && !named) delete body.supportingDocs;
 
   // Particulars ticked line by line: only those lines change, and the list keeps its shape.
   const lineItem = open?.items.find(i => i.field === "particulars");
@@ -4863,7 +5065,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   const storedDocs: any[] = Array.isArray(sub.supportingDocs) ? sub.supportingDocs : [];
   const storedDocIds = new Set(storedDocs.map((d: any) => d?.id).filter(Boolean));
   const storedDocNames = new Set(storedDocs.map((d: any) => d?.name));
-  const newDocs: any[] = (body.supportingDocs || []).filter((d: any) => d.id ? !storedDocIds.has(d.id) : !storedDocNames.has(d.name));
+  let newDocs: any[] = (body.supportingDocs || []).filter((d: any) => d.id ? !storedDocIds.has(d.id) : !storedDocNames.has(d.name));
 
   // Files the reviewer asked to replace: each needs a new copy; the old one is kept as history.
   const current = storedDocs.filter((d: any) => d && !d.supersededAt);
@@ -4887,12 +5089,26 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   if (newFileProblem) {
     return res.status(400).json({ status: "error", message: newFileProblem });
   }
-  if (open && ticked.has("addDocument") && newDocs.length === 0) {
+  // On a report under the named documents every new file says which document it is, as at filing.
+  if (named && newDocs.some((d: any) => readDocumentKind(d.kind) === null)) {
+    return res.status(400).json({ status: "error", message: "Choose which document each file is." });
+  }
+  // A certificate's new copy becomes the attendee's certificate wherever it is used, so it has to be the
+  // certificate itself (the security review, 2026-11-01).
+  if (replacements.some(r => r.old.kind === "certificate" && !isRealUpload(r.doc))) {
+    return res.status(400).json({ status: "error", message: "The new certificate of attendance has nothing in it. Choose the certificate itself." });
+  }
+  if (open && ticked.has("addDocument") && newDocs.length === 0 && !named) {
     return res.status(400).json({ status: "error", message: "Attach the missing document the reviewer asked for before resubmitting." });
   }
   // Paid out of pocket: still at least one receipt with something in it once the files change (a
-  // replacement could be an empty copy). Asked before anything is stored.
-  if (sub.withinAllowance && !keptDocs.some(isRealFile) && !incomingDocs.some(isRealUpload)) {
+  // replacement could be an empty copy, and only the receipts slot holds receipts). Asked before anything
+  // is stored.
+  const receiptUploads = [
+    ...newDocs.filter((d: any) => !named || readDocumentKind(d.kind) === "receipts"),
+    ...replacements.filter(r => !r.old.kind || r.old.kind === "receipts").map(r => r.doc)
+  ];
+  if (sub.withinAllowance && !keptDocs.some(isReceiptFile) && !receiptUploads.some(isRealUpload)) {
     return res.status(400).json({ status: "error", message: "Attach your official receipts (OR) for what you paid." });
   }
 
@@ -4924,7 +5140,8 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   const claimantCouldChange = (f: CorrectionField) => may(f)
     || ((f === "cashAdvance" || f === "refundOr") && may("claimType"))
     || (f === "refundOr" && !!sub.withinAdvance && may("particulars"))
-    || (f === "representative" && !hadRepresentative);
+    || (f === "representative" && !hadRepresentative)
+    || (f === "addDocument" && named);
 
   const lines = normalizeParticulars(particulars, sub.particulars || []);
   if (lines && lines.error) {
@@ -5015,6 +5232,37 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     const message = reimbursementProblem({ spent: newSpent, limit: seatReimbursementLimit(sub.activityId) }, pesoText);
     if (message) return res.status(400).json({ status: "error", message });
   }
+  // The named documents (R5). A correction can make one required that the report didn't need, such as a
+  // new Accommodation line or money now handed back: the form opens that slot, so its file is taken even
+  // though nobody asked for it, and the report can't go back without it. Files the reviewer didn't ask
+  // for, and nothing requires, stay off the report.
+  if (named) {
+    const required = requiredDocuments({
+      reimbursement: claimType === "Reimbursement",
+      expenseTypes: (lines ? lines.particulars : sub.particulars || []).map((p: any) => p.category),
+      handsBack: liquidationBalance(recordedAdvance ? recordedAdvance.amount : typedReleased, newSpent).leftover > 0,
+      declarations: sub.travelDeclarations
+    });
+    const onReport: Array<DocumentKind | undefined> = [
+      ...keptDocs.filter(isRealFile).map((d: any) => d.kind),
+      ...replacements.filter(r => isRealUpload(r.doc)).map(r => r.old.kind)
+    ];
+    const asked = open?.items.find(i => i.field === "addDocument")?.documentKinds ?? [];
+    const openSlots = correctionSlots(sub, asked, required, onReport);
+    if (open && openSlots) {
+      newDocs = newDocs.filter((d: any) => {
+        const kind = readDocumentKind(d.kind);
+        return !!kind && openSlots.includes(kind);
+      });
+    }
+    const brought = newDocs.filter(isRealUpload).map((d: any) => readDocumentKind(d.kind));
+    const notBrought = asked.find(kind => !brought.includes(kind));
+    if (notBrought) {
+      return res.status(400).json({ status: "error", message: `Attach the ${documentPlate(notBrought)} the reviewer asked for before resubmitting.` });
+    }
+    const stillMissing = missingDocuments(required, [...onReport, ...brought]);
+    if (stillMissing.length > 0) return res.status(400).json({ status: "error", message: missingDocumentsText(stillMissing) });
+  }
 
   // Update details. An itemised correction recomputes the total from its lines; a
   // submission that was never itemised keeps accepting a plain typed figure.
@@ -5097,17 +5345,42 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   
   // New files join the ones already on the report, which stay as they are.
   if (newDocs.length > 0) {
-    sub.supportingDocs = [...storedDocs, ...claimantDocuments(newDocs)];
+    sub.supportingDocs = [...storedDocs, ...claimantDocuments(newDocs, named)];
   }
-  // A replaced file stays on the report, marked superseded, next to its new copy.
+  // A replaced file stays on the report, marked superseded, next to its new copy, in the same slot.
   const replacedAt = new Date().toISOString();
+  const replacedCertificates: string[] = [];
   replacements.forEach(({ old, doc }) => {
     const fresh: LiquidationDocument = {
       ...claimantDocuments([doc])[0],
       id: `doc-${crypto.randomUUID()}`,
       uploadedAt: replacedAt,
-      replaces: old.id
+      replaces: old.id,
+      ...(old.kind ? { kind: old.kind } : {}),
+      ...(old.participantId ? { participantId: old.participantId } : {})
     };
+    // A certificate a reviewer asked to replace is that attendee's certificate from now on, wherever it
+    // is used: the same stored file. On a group's report the holder brings it, as they file the report.
+    if (old.kind === "certificate" && old.participantId) {
+      const actor = (req as any).user;
+      const whose = (reportGroupAdvance(sub)?.covers || []).find(c => c.participantId === old.participantId)?.employeeName || sub.employeeName;
+      fresh.name = certificateDocumentName(whose, fresh.type);
+      const record = recordCertificate(old.participantId, cleanFileName(doc.name) || "file", fresh.stored!, doc.content, actor);
+      replacedCertificates.push(whose);
+      logEvent(actor.id, actor.username, actor.role, "Replace Certificate of Attendance",
+        `Replaced the certificate of attendance of ${whose} on ${sub.submissionNo}, as the reviewer asked: ${JSON.stringify(record.name.slice(0, 120))} (${record.id}).`);
+      // A colleague's certificate, brought by a group's holder: they are told, since it now stands for them.
+      const seat = old.participantId !== sub.activityId ? (db.trainingParticipants || []).find((p: any) => p && p.id === old.participantId) : null;
+      if (seat) {
+        notifyEmployee(seat.employeeId, {
+          title: "Your certificate of attendance was replaced",
+          message: `${sub.employeeName} replaced your certificate of attendance on the group's liquidation report ${sub.submissionNo}, as the reviewer asked. If it isn't your certificate, tell HR.`,
+          type: "warning",
+          link: { tab: "employee_portal", record: { kind: "assignment", id: seat.id } },
+          dedupeKey: `cert-replaced:${record.id}`
+        });
+      }
+    }
     old.supersededAt = replacedAt;
     old.replacedBy = fresh.id;
     sub.supportingDocs.push(fresh);
@@ -5151,7 +5424,7 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Resubmit Liquidation",
-    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}${sub.withinAdvance ? `; ${balanceText(sub.totalReleased, sub.totalSpent, sub.refundOrNo)}` : ""}`);
+    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}${sub.withinAdvance ? `; ${balanceText(sub.totalReleased, sub.totalSpent, sub.refundOrNo)}` : ""}${replacedCertificates.length ? `; certificate of attendance replaced: ${namesText(replacedCertificates)}` : ""}`);
   saveDB();
   res.json({ status: "success", data: reportForClient(sub) });
 }));
@@ -5266,7 +5539,7 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
     }
     // A seminar paid out of pocket may claim only its attendee's share less what the office paid for
     // them, as it is now: HR may have re-priced the seminar or entered expenses since it was filed.
-    if (sub.withinAllowance && !(sub.supportingDocs || []).some(isRealFile)) {
+    if (sub.withinAllowance && !(sub.supportingDocs || []).some(isReceiptFile)) {
       return res.status(409).json({
         status: "error",
         message: `${sub.submissionNo} has no receipt with anything in it. Return it so the employee can attach their official receipts.`
@@ -5406,8 +5679,9 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
       amount: sub.totalSpent,
       description: `Official travel liquidation for activity: ${act ? act.title : sub.submissionNo}`,
       status: TransactionStatus.LIQUIDATED,
-      // The files the claim stands on now; copies a correction replaced stay on the report.
-      supportingDocuments: (Array.isArray(sub.supportingDocs) ? sub.supportingDocs : []).filter((d: any) => d && !d.supersededAt).map((d: any) => ({
+      // The files the claim stands on now; copies a correction replaced stay on the report. No certificate of
+      // attendance, whose name says whose it is: this row goes to the Budget Officer, who never sees one (R4).
+      supportingDocuments: (Array.isArray(sub.supportingDocs) ? sub.supportingDocs : []).filter((d: any) => d && !d.supersededAt && d.kind !== "certificate").map((d: any) => ({
         id: d.id,
         name: d.name,
         type: d.type,
@@ -5866,9 +6140,7 @@ function createdAtFromId(id: unknown): string {
 // employee's request, made from their seminar card in the portal (Personnel only). Null while one can.
 function noRequestReason(p: any, emp: any): string | null {
   if (!payeeIsActive(emp.employeeId || emp.id)) return "No longer active, so no cash advance can be asked for.";
-  const login = (db.users || []).some((u: any) => u && u.role === UserRole.EMPLOYEE && u.status !== "Archived" && u.status !== "Deactivated"
-    && employeeByKey(String(u.employeeId || ""))?.id === emp.id);
-  if (!login) return "No Personnel login, so they can't ask from the portal. The Administrator can create one, or a colleague's group request can include them.";
+  if (!personnelLoginFor(emp)) return "No Personnel login, so they can't ask from the portal. The Administrator can create one, or a colleague's group request can include them.";
   if (!(round2(Number(p.allowanceAllocated || 0)) > 0)) return "HR has set no allowance for them on this seminar, so there is nothing to ask for yet.";
   const elsewhere = openAdvanceElsewhere(p.employeeId, p.id);
   if (elsewhere) return `Their cash advance ${openAdvanceText(elsewhere)} isn't settled yet. COA rules allow a new one only after it is.`;
@@ -6663,6 +6935,39 @@ function employeeIdForms(employeeId: string): string[] {
 function employeeByKey(key: string): Employee | undefined {
   const all = db.employees || [];
   return all.find(e => e.id === key) ?? all.find(e => e.employeeId === key);
+}
+
+// The staff record an account is linked to. Accounts carry a staff code, so that is matched first: a staff code
+// set to another record's internal id (7j) can't make the account pass for that person.
+function accountEmployee(user: { employeeId?: string } | null | undefined): Employee | undefined {
+  const key = String(user?.employeeId || "");
+  if (!key) return undefined;
+  const all = db.employees || [];
+  return all.find(e => e.employeeId === key) ?? all.find(e => e.id === key);
+}
+
+// Whether an enrolment is the signed-in person's own (their certificate of attendance, R4).
+function isOwnSeat(user: any, seat: any): boolean {
+  const mine = accountEmployee(user);
+  return !!mine && !!seat && employeeByKey(String(seat.employeeId || ""))?.id === mine.id;
+}
+
+// A staff record's Personnel logins that still work.
+function personnelLoginsOf(emp: Employee | undefined): any[] {
+  return emp ? (db.users || []).filter((u: any) => u && u.role === UserRole.EMPLOYEE && u.status !== "Archived" && u.status !== "Deactivated"
+    && accountEmployee(u)?.id === emp.id) : [];
+}
+
+// Whether a staff record has a working Personnel login: the portal is the only way into their own
+// seminar's cash advance, certificate and report.
+function personnelLoginFor(emp: Employee | undefined): boolean {
+  return personnelLoginsOf(emp).length > 0;
+}
+
+// One they can use now. A login still waiting for its first password change can't open the portal, and its
+// temporary password may never have reached them (7d), so HR uploads a certificate for them meanwhile.
+function usablePersonnelLogin(emp: Employee | undefined): boolean {
+  return personnelLoginsOf(emp).some((u: any) => u.status !== "Pending Password Change");
 }
 
 // At least one training per year per employee (the user's rule, 2026-10-23; it replaced "at most
@@ -7572,6 +7877,40 @@ function runLiquidationReminderSweep() {
     }
   } catch (err) {
     console.error("[liquidation-reminders] sweep failed:", err);
+  }
+}
+
+// Reminds an attendee once if no certificate of attendance is on file after their seminar's last day
+// (the instructor's review, R4). The dedupeKey keeps it to one, across restarts. Staff with no Personnel
+// login aren't reminded: HR uploads theirs.
+function runCertificateReminderSweep() {
+  try {
+    const today = manilaToday();
+    let sent = 0;
+    for (const p of db.trainingParticipants || []) {
+      if (p.status !== "Assigned" || p.attendance === "Did not attend" || currentCertificate(p.id)) continue;
+      const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
+      const lastDay = seminarLastDay(prog);
+      if (!prog || prog.archivedAt || !lastDay || lastDay >= today) continue;
+      if (!personnelLoginFor(employeeByKey(p.employeeId))) continue;
+      const title = String(prog.title || "").trim();
+      if (notifyEmployee(p.employeeId, {
+        title: "Upload your certificate of attendance",
+        // (Attendance recorded before the rule: the form is open, and the report needs the certificate.)
+        message: p.attendance === "Attended"
+          ? `Your certificate of attendance for "${title}" isn't on file, and the liquidation report needs it. Upload it from your seminar card.`
+          : `"${title}" has ended and your certificate of attendance isn't on file. HR records your attendance on it, and the liquidation report needs it.`,
+        type: "warning",
+        link: { tab: "employee_portal", record: { kind: "assignment", id: p.id } },
+        dedupeKey: `cert-due:${p.id}`
+      })) sent++;
+    }
+    if (sent > 0) {
+      saveDB();
+      console.log(`[certificate-reminders] sent ${sent} reminder(s)`);
+    }
+  } catch (err) {
+    console.error("[certificate-reminders] sweep failed:", err);
   }
 }
 
@@ -8889,6 +9228,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   // it covers.
   const withAdvance = new Set((db.cashAdvances || []).filter((a: any) => a && a.status !== "Declined").flatMap((a: any) => coveredEnrolmentIds(a)));
   const evaluated = new Set((db.trainingEvaluations || []).filter((e: any) => e && e.trainingParticipantId).map((e: any) => e.trainingParticipantId));
+  // So is one with a certificate of attendance on file: it says they went (R4).
+  const certified = new Set((db.attendanceCertificates || []).filter(Boolean).map(c => c.participantId));
   const requested = Array.isArray(body.participantIds) ? new Set<string>(body.participantIds.map((raw: string) => employeeIdForms(raw)[0])) : null;
   // Seats can't go below the participants the seminar keeps after this save (not counting
   // anyone marked "Did not attend"): each one's allowance is allocation ÷ seats, so together
@@ -8897,7 +9238,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
     const staying = (db.trainingParticipants || []).filter(p => p.trainingProgramId === existingProgram.id
       && p.status !== "Cancelled" && p.status !== "Archived" && p.attendance !== "Did not attend"
       && (!requested || employeeIdForms(p.employeeId).some(f => requested.has(f))
-        || p.status !== "Assigned" || !!p.attendance || withAdvance.has(p.id) || evaluated.has(p.id) || !!p.replaces)).length;
+        || p.status !== "Assigned" || !!p.attendance || withAdvance.has(p.id) || evaluated.has(p.id) || certified.has(p.id) || !!p.replaces)).length;
     if (newSeats! < staying) {
       return res.status(400).json({
         status: "error",
@@ -8996,7 +9337,7 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
       const stillSelected = forms.some(f => requested.has(f));
       // An enrolment with attendance on record is history, so editing the roster keeps it. So is a
       // representative's (12z Part B): deleting it would leave the one they replaced pointing nowhere.
-      if (!stillSelected && p.status === "Assigned" && !p.attendance && !withAdvance.has(p.id) && !evaluated.has(p.id) && !p.replaces) {
+      if (!stillSelected && p.status === "Assigned" && !p.attendance && !withAdvance.has(p.id) && !evaluated.has(p.id) && !certified.has(p.id) && !p.replaces) {
         removedIds.add(p.id);
         continue;
       }
@@ -9012,7 +9353,9 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
               ? `${name} was kept: ${pendingRequestCovering(p.id) ? "a cash advance for them is waiting for Finance" : "Finance has released a cash advance for them for this seminar"}.`
               : evaluated.has(p.id)
                 ? `${name} was kept: their training evaluation is on record.`
-                : `${name} was kept: they were sent in someone's place. To change who goes, send a representative from the attendance list.`);
+                : certified.has(p.id)
+                  ? `${name} was kept: their certificate of attendance is on file.`
+                  : `${name} was kept: they were sent in someone's place. To change who goes, send a representative from the attendance list.`);
       }
       forms.forEach(f => keptForms.add(f));
       keptCount++;
@@ -9110,6 +9453,7 @@ function seminarHistory(prog: TrainingProgram): string {
     : (db.cashAdvances || []).some((a: any) => a && coveredEnrolmentIds(a).some(id => ids.has(id)) && a.status === "Requested") ? "a cash advance request for it is waiting for Finance"
     : (db.trainingEvaluations || []).some((e: any) => e && (e.trainingProgramId === prog.id || ids.has(e.trainingParticipantId))) ? "a training evaluation has been recorded for it"
     : (db.trainingLiquidations || []).some((l: any) => l.trainingProgramId === prog.id) ? "expenses have been recorded for it"
+    : (db.attendanceCertificates || []).some(c => c && ids.has(c.participantId)) ? "a certificate of attendance has been uploaded for it"
     : "";
 }
 
@@ -9269,9 +9613,36 @@ app.get("/api/training/participants", authenticateToken, (req: any, res: any) =>
   // prices seminars exactly as the server does, and where it stands against the TDP (12z; this
   // route, like the justification itself, is HR's and the Administrator's only).
   const programs = new Map((db.trainingPrograms || []).map(p => [p.id, p]));
+  // One file standing for two seats is shown to HR (the security review, 2026-11-01): it may be one certificate
+  // listing several people, or one reused.
+  const byFile = new Map<string, AttendanceCertificate[]>();
+  for (const c of db.attendanceCertificates || []) {
+    if (!c || c.supersededAt || !c.sha256) continue;
+    byFile.set(c.sha256, [...(byFile.get(c.sha256) || []), c]);
+  }
+  const twinOf = (c: AttendanceCertificate): CertificateTwin => {
+    const seat = (db.trainingParticipants || []).find((x: any) => x && x.id === c.participantId);
+    return {
+      name: (seat && employeeByKey(seat.employeeId)?.fullName) || "another participant",
+      seminar: String((seat && programs.get(seat.trainingProgramId)?.title) || "").trim()
+    };
+  };
   const rows: TrainingParticipantRow[] = participantsForBudget().map(p => {
     const prog = programs.get(p.trainingProgramId);
-    return { ...p, tdp: tdpStanding({ identified: !!prog && tdpIdentifies(p.employeeId, prog), tdpException: p.tdpException, underSeminar: p.tdpUnderSeminar, assignedAt: p.assignedAt }) };
+    const certificate = currentCertificate(p.id);
+    const twins = certificate?.sha256 ? (byFile.get(certificate.sha256) || []).filter(c => c.participantId !== p.id) : [];
+    return {
+      ...p,
+      tdp: tdpStanding({ identified: !!prog && tdpIdentifies(p.employeeId, prog), tdpException: p.tdpException, underSeminar: p.tdpUnderSeminar, assignedAt: p.assignedAt }),
+      // HR's basis for "Attended" (R4): what is on file, never the file.
+      certificate: certificate ? { ...certificateView(certificate)!, ...(twins.length ? { sameFileAs: twins.map(twinOf) } : {}) } : null,
+      // Whether they can upload it themselves; otherwise HR or the Administrator does.
+      hasPersonnelLogin: usablePersonnelLogin(employeeByKey(p.employeeId)),
+      certificateCapped: certificateUploads(p.id) >= MAX_CERTIFICATE_UPLOADS,
+      // (As the one looking would upload it: HR's or the Administrator's higher limit, except on their own seat,
+      // where the employee's applies, as the upload route decides.)
+      certificateBlockedReason: certificateProblemFor(p, prog, isOwnSeat(req.user, p)) || null
+    };
   });
   res.json({ status: "success", data: rows });
 });
@@ -9343,6 +9714,10 @@ app.post("/api/training/participants/:id/replace", authenticateToken, transactio
   // A representative goes in someone's place before or during the training, not after it.
   if (isIsoDate(prog.endDate) && String(prog.endDate).slice(0, 10) < manilaToday()) {
     return res.status(409).json({ status: "error", message: `"${title}" is over, so no representative can be sent: record ${originalName}'s attendance instead.` });
+  }
+  // On its last day they may already have uploaded their certificate: they went.
+  if (currentCertificate(original.id)) {
+    return res.status(409).json({ status: "error", message: `${originalName}'s certificate of attendance is on file, so a representative can't take their place: record their attendance instead.` });
   }
   // HR's hand-entered expenses for them would stay on a closed enrolment, no longer netted against the
   // seat's cash (12z Part B review).
@@ -9453,6 +9828,100 @@ app.post("/api/training/participants/:id/replace", authenticateToken, transactio
   res.json({ status: "success", message: `${repEmp.fullName} goes to "${title}" in lieu of ${originalName}.${advanceNote}${vehicleNote}`, data: { replaced: original, representative: rep } });
 }));
 
+// A seminar's certificate of attendance (the instructor's review, R4; src/attendanceCertificate.ts): HR's
+// basis for "Attended", and the proof its report carries. The seat's own employee uploads it from their
+// seminar card; HR or the Administrator does for staff with no Personnel login. Finance reaches it only
+// through a report it supports (the per-file route), and the Budget Officer never does.
+app.post("/api/training/participants/:id/certificate", authenticateToken, transactional((req: any, res: any) => {
+  res.set("Cache-Control", "no-store");
+  const user = req.user;
+  const seat = (db.trainingParticipants || []).find((p: any) => p.id === req.params.id);
+  const own = isOwnSeat(user, seat);
+  const officer = isTrainingRecordsRole(user.role);
+  // (The same answer whether or not the enrolment exists.)
+  if (!own && !officer) {
+    return res.status(403).json({ status: "error", message: "You can only upload your own certificate of attendance." });
+  }
+  if (!seat) return res.status(404).json({ status: "error", message: "Enrolment not found." });
+  const prog = (db.trainingPrograms || []).find((p: any) => p.id === seat.trainingProgramId);
+  if (!prog) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  const emp = employeeByKey(seat.employeeId);
+  const whose = emp?.fullName || seat.employeeId;
+  // HR or the Administrator uploads it for staff who can't use the portal (no Personnel login, or one still
+  // waiting for its first password), and for anyone whose own uploads reached the limit.
+  if (!own && usablePersonnelLogin(emp) && certificateUploads(seat.id) < MAX_CERTIFICATE_UPLOADS) {
+    return res.status(403).json({ status: "error", message: `${whose} has a Personnel login, so they upload their own certificate from their seminar card.` });
+  }
+  const problem = certificateProblemFor(seat, prog, own);
+  if (problem) return res.status(409).json({ status: "error", message: problem });
+  const file = { name: req.body?.name, type: req.body?.type, content: req.body?.content };
+  const fileIssue = documentProblem(file);
+  if (fileIssue) return res.status(400).json({ status: "error", message: fileIssue });
+  if (!isRealUpload(file)) {
+    return res.status(400).json({ status: "error", message: "That file has nothing in it. Choose the certificate itself." });
+  }
+
+  const replaced = !!currentCertificate(seat.id);
+  const name = cleanFileName(file.name) || "file";
+  const certificate = recordCertificate(seat.id, name, storeDataUrl(file.content)!, file.content, user);
+  const title = String(prog.title || "").trim();
+  logEvent(user.id, user.username, user.role, replaced ? "Replace Certificate of Attendance" : "Upload Certificate of Attendance",
+    `${replaced ? "Replaced" : "Uploaded"} the certificate of attendance of ${whose} for ${JSON.stringify(title.slice(0, 120))}: ${JSON.stringify(name.slice(0, 120))} (${certificate.id}).`);
+  // HR's list opens on them. HR uploading it themselves already has it. A seat recorded "Attended" before the
+  // rule (its report needs the certificate) has nothing left for HR to record.
+  if (user.role !== UserRole.HR_OFFICER) {
+    notify({ role: UserRole.HR_OFFICER }, {
+      title: replaced ? "Certificate of attendance replaced" : "Certificate of attendance received",
+      message: seat.attendance === "Attended"
+        ? `${whose}'s certificate of attendance for "${title}" is in, for the attendance recorded earlier.`
+        : `${whose}'s certificate of attendance for "${title}" is ${replaced ? "replaced" : "in"}. Check it, then record their attendance.`,
+      type: "info",
+      link: { tab: "training_development", record: { kind: "attendance", id: seat.id } }
+    });
+  }
+  // Someone with a login hears when an officer uploads theirs, since HR can then record "Attended" on it.
+  if (!own && personnelLoginFor(emp)) {
+    notifyEmployee(seat.employeeId, {
+      title: `Your certificate of attendance was ${replaced ? "replaced" : "uploaded"}`,
+      message: `${user.fullName} ${replaced ? "replaced" : "uploaded"} your certificate of attendance for "${title}". If it isn't your certificate, tell HR.`,
+      type: replaced ? "warning" : "info",
+      link: { tab: "employee_portal", record: { kind: "assignment", id: seat.id } }
+    });
+  }
+  saveDB();
+  res.json({
+    status: "success",
+    message: `Certificate of attendance ${replaced ? "replaced" : "uploaded"}.${seat.attendance === "Attended" ? "" : " HR records the attendance on it."}`,
+    data: certificateView(certificate)
+  });
+}));
+
+// The file itself, for the seat's own employee, HR and the Administrator. An officer's view is recorded,
+// as a report's files are, and so is the Finance or Budget Officer opening their own.
+app.get("/api/training/participants/:id/certificate", authenticateToken, (req: any, res: any) => {
+  res.set("Cache-Control", "no-store");
+  const user = req.user;
+  const seat = (db.trainingParticipants || []).find((p: any) => p.id === req.params.id);
+  const own = isOwnSeat(user, seat);
+  if (!own && !isTrainingRecordsRole(user.role)) {
+    return res.status(403).json({ status: "error", message: "You can only open your own certificate of attendance." });
+  }
+  // (Express answers HEAD with this handler too, which would log a view that sent nothing.)
+  if (req.method !== "GET") return res.status(405).set("Allow", "GET").json({ status: "error", message: "Use GET." });
+  const certificate = seat ? currentCertificate(seat.id) : null;
+  if (!certificate) return res.status(404).json({ status: "error", message: "No certificate of attendance is on file." });
+  const content = readStoredFile(certificate.stored);
+  if (!content || !SAFE_FILE_URL.test(content)) {
+    return res.status(404).json({ status: "error", message: "That certificate has no uploaded file that can be opened." });
+  }
+  if (user.role !== UserRole.EMPLOYEE) {
+    const whose = employeeByKey(seat!.employeeId)?.fullName || seat!.employeeId;
+    logEvent(user.id, user.username, user.role, "Open Certificate of Attendance",
+      `Opened the certificate of attendance of ${whose}: ${JSON.stringify(certificate.name.slice(0, 120))} (${certificate.id}).`);
+  }
+  res.json({ status: "success", data: { name: certificate.name, type: certificate.type, content } });
+});
+
 // Attendance: HR records it per participant once the seminar has started. It is stored
 // apart from the liquidation status, and only "Attended" opens the liquidation form
 // (seminarFormEligibility). Marking someone Attended tells them their form is ready.
@@ -9504,6 +9973,19 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   if (participant.attendance === attendance) {
     return res.json({ status: "success", message: "Attendance was already recorded that way.", data: participant });
   }
+  // HR's basis for "Attended" is the certificate (the instructor's review, R4), correcting a "Did not
+  // attend" included, and it is the one HR's list showed: the employee may replace it until then (the
+  // security review, 2026-11-01). "Did not attend" needs no file.
+  const certificate = attendance === "Attended" ? currentCertificate(participant.id) : null;
+  if (attendance === "Attended") {
+    const who = employeeByKey(participant.employeeId)?.fullName || participant.employeeId;
+    if (!certificate) {
+      return res.status(409).json({ status: "error", message: `${who}'s certificate of attendance isn't on file, so they can't be marked as attended yet.` });
+    }
+    if (req.body?.certificateId !== certificate.id) {
+      return res.status(409).json({ status: "error", message: `${who}'s certificate of attendance was replaced after the list was loaded. Check the one on file now, then record the attendance.` });
+    }
+  }
 
   const actor = req.user;
   const previous = participant.attendance || "not recorded";
@@ -9541,6 +10023,12 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   participant.attendance = attendance;
   participant.attendanceBy = actor.fullName;
   participant.attendanceAt = new Date().toISOString();
+  if (certificate) participant.attendanceCertificateId = certificate.id;
+  else delete participant.attendanceCertificateId;
+  // Corrected to "Attended" after their group's report was filed: it carries their certificate too.
+  const addedTo = attendance === "Attended" && settledBy && !settledBy.financeValidatedAt
+    && addCertificateToReport(settledBy, participant.id, employeeByKey(participant.employeeId)?.fullName || participant.employeeId)
+    ? settledBy.submissionNo : "";
   // A cash advance request still waiting can't be released to someone who didn't attend, so
   // it is closed now rather than left in Finance's list. They may ask again if HR corrects it.
   // (A group request they asked for closes too; one that only covers them is re-priced without
@@ -9602,8 +10090,13 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
       link: { tab: "employee_portal", liquidationActivityId: participant.id }
     });
   }
+  // Which certificate it stands on, and whether the one recording it uploaded it too (HR does for staff with
+  // no Personnel login: allowed, and on record).
+  const certificateNote = certificate
+    ? `; on certificate ${certificate.id}${certificate.uploadedById === actor.id ? ", which they uploaded themselves" : ""}${addedTo ? `, now on ${addedTo}` : ""}`
+    : "";
   logEvent(actor.id, actor.username, actor.role, "Record Attendance",
-    `${name} at "${String(prog.title).trim()}": ${previous} → ${attendance}${budgetNote || heldNote ? `;${budgetNote}${heldNote}` : ""}`);
+    `${name} at "${String(prog.title).trim()}": ${previous} → ${attendance}${certificateNote}${budgetNote || heldNote ? `;${budgetNote}${heldNote}` : ""}`);
   const ownAttendance = isOwnRecord(actor, participant.employeeId);
   if (ownAttendance) flagSelfApproval(actor, `recorded their own attendance at "${String(prog.title).trim()}": ${previous} → ${attendance}`);
   // On a group's advance that covers the HR officer, others' attendance decides when its report can be
@@ -10147,4 +10640,6 @@ app.listen(PORT, "0.0.0.0", () => {
   // deduplicated, so the short interval only makes delivery timelier.
   runLiquidationReminderSweep();
   setInterval(runLiquidationReminderSweep, 60 * 60 * 1000);
+  runCertificateReminderSweep();
+  setInterval(runCertificateReminderSweep, 60 * 60 * 1000);
 });

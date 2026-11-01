@@ -104,6 +104,9 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Validate Financial Record">Ledger validations</option>
             <option value="Upload Support Doc">Doc Uploads</option>
             <option value="Open Liquidation Document">Report files opened</option>
+            <option value="Open Certificate of Attendance">Certificates opened</option>
+            <option value="Upload Certificate of Attendance">Certificates uploaded</option>
+            <option value="Replace Certificate of Attendance">Certificates replaced</option>
             <option value="Self-Approval">Self-approvals (flagged)</option>
             <option value="Division Coverage Override">Division coverage overrides</option>
             <option value="TDP Exception">TDP exceptions</option>

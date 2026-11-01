@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { LiquidationSubmission } from "../../types";
 import { X, Printer } from "lucide-react";
 import LiquidationReportForm from "./LiquidationReportForm";
+import ReportAttachments from "./ReportAttachments";
 
 interface LiquidationReportModalProps {
   submission: LiquidationSubmission | null;
@@ -104,6 +105,7 @@ export default function LiquidationReportModal({
           <div className="shadow-sm print:shadow-none">
             <LiquidationReportForm submission={submission} />
           </div>
+          <ReportAttachments report={submission} />
         </div>
       </div>
     </div>,

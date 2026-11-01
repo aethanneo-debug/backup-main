@@ -94,17 +94,37 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   // A notification opened this screen: a seminar is shown in Programs & Budget (scrolled to and
   // outlined), anything else opens its step.
   const [shownSeminar, setShownSeminar] = useState<{ id: string; key: number } | null>(null);
+  // A seat a notice is about (a certificate that arrived): once a load started after the click is in, its
+  // seminar's attendance list opens on them, or nothing does if they aren't there. Loads are numbered when they
+  // start (loadSeq), and `loads` is the newest one finished, so an older load can't open it on old data.
+  const loadSeq = useRef(0);
+  const [loads, setLoads] = useState(0);
+  const [pendingSeat, setPendingSeat] = useState<{ id: string; key: number; afterLoad: number } | null>(null);
+  const [focusSeat, setFocusSeat] = useState<{ id: string; key: number } | null>(null);
   useEffect(() => {
     if (!focus) return;
     if (focus.record?.kind === "seminar") {
       setActiveTab("programs");
       setShownSeminar({ id: focus.record.id, key: focus.nonce });
+    } else if (focus.record?.kind === "attendance") {
+      setActiveTab("programs");
+      setPendingSeat({ id: focus.record.id, key: focus.nonce, afterLoad: loadSeq.current });
+      fetchData();
     } else if (focus.subTab === "programs" || focus.subTab === "plan-a" || focus.subTab === "plan-d" || focus.subTab === "evaluations") {
       setActiveTab(focus.subTab);
     }
     onFocusHandled?.();
   }, [focus?.nonce]);
   useRecordHighlight(shownSeminar?.id, shownSeminar?.key);
+  useEffect(() => {
+    if (!pendingSeat || loads <= pendingSeat.afterLoad) return;
+    const seat = participants.find(p => p.id === pendingSeat.id);
+    const seminar = seat && programs.find(p => p.id === seat.trainingProgramId);
+    setPendingSeat(null);
+    if (!seminar) return;
+    setAttendanceProgram(seminar);
+    setFocusSeat({ id: pendingSeat.id, key: pendingSeat.key });
+  }, [pendingSeat, loads]);
   const [coverageModalData, setCoverageModalData] = useState<{ rowId: string; isNew: boolean; seminarTitle: string; fiscalYear?: string; selectedTitles: string[] } | null>(null);
   const [showLiqModal, setShowLiqModal] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState("");
@@ -184,6 +204,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   }, []);
 
   async function fetchData() {
+    const seq = ++loadSeq.current;
     const fyRes = await apiCall("/api/fiscal-years/active");
     if (fyRes && !fyRes.error) setActiveFy(fyRes);
 
@@ -201,6 +222,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
 
     const empRes = await apiCall("/api/employees");
     if (empRes.status === "success") setEmployees(empRes.data);
+    setLoads(n => Math.max(n, seq));
   }
 
   async function handleSetAnnualBudget(e: React.FormEvent) {
@@ -1279,7 +1301,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           canRecord={user.role === UserRole.HR_OFFICER}
           canJustify={user.role === UserRole.HR_OFFICER || user.role === UserRole.SUPER_ADMIN}
           currentEmployeeId={user.employeeId}
-          onClose={() => setAttendanceProgram(null)}
+          focusSeat={focusSeat}
+          onClose={() => { setAttendanceProgram(null); setFocusSeat(null); }}
           onChanged={fetchData}
         />
       )}

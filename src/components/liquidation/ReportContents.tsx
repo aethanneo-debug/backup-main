@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle, FileText } from "lucide-react";
+import { declarationsText, documentPlate } from "../../reportDocuments";
 import { formatCurrency, formatDate } from "../../utils";
 import FileViewer, { type ReportFile } from "../ui/FileViewer";
 import { BalanceStatusBadge, FundReturnNote } from "./BalanceCheck";
@@ -124,6 +125,12 @@ export default function ReportContents({ report }: Props) {
 
       <div>
         <p className={LABEL}>Attached Files ({docs.length})</p>
+        {/* What only the employee can say about the trip, and why some documents are or aren't here (R5). */}
+        {declarationsText(report?.travelDeclarations) && (
+          <p className="mb-1.5 text-[11px] text-slate-600">
+            <span className="font-semibold">The employee ticked:</span> {declarationsText(report.travelDeclarations)}.
+          </p>
+        )}
         {docs.length === 0 ? (
           <p className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
             <AlertTriangle size={12} className="shrink-0" aria-hidden="true" /> No files were attached to this report.
@@ -146,7 +153,10 @@ export default function ReportContents({ report }: Props) {
                     }`}
                   >
                     <FileText size={10} className="text-slate-400" aria-hidden="true" />
-                    <span className={doc?.supersededAt ? "line-through" : undefined}>{name}</span>
+                    <span className="flex flex-col text-left">
+                      {doc?.kind && <span className="font-sans text-[9px] font-semibold text-slate-500">{documentPlate(doc.kind)}</span>}
+                      <span className={doc?.supersededAt ? "line-through" : undefined}>{name}</span>
+                    </span>
                     {doc?.supersededAt && <span className="text-[9px] font-bold uppercase">(replaced)</span>}
                   </button>
                 </li>

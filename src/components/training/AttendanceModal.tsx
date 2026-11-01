@@ -1,17 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CalendarCheck, CheckCircle2, Loader2, UserX } from "lucide-react";
 import { AttendanceStatus, Employee, TrainingParticipant, TrainingParticipantRow, TrainingProgram, type TdpJustificationInput } from "../../types";
 import { apiCall, formatDate } from "../../utils";
 import { tdpBadgeText } from "../../tdpRules";
 import ModalDialog from "../ui/ModalDialog";
+import { useRecordHighlight } from "../ui/useRecordHighlight";
 import TdpJustificationForm from "./TdpJustificationForm";
 import SendRepresentativePanel from "./SendRepresentativePanel";
+import CertificatePanel from "./CertificatePanel";
 
 /**
  * HR's attendance roster for one seminar (Training Plan & Budget). Only attendees get a
- * liquidation form, so HR records each participant as Attended or Did not attend once
- * the seminar has started. Someone who already filed a report can't be marked as not
- * attending. The server enforces every one of these rules; this only shows them first.
+ * liquidation form, so HR records each participant as Attended, on their certificate of
+ * attendance, or Did not attend, which can be recorded once the seminar has started and
+ * needs no file. Someone who already filed a report can't be marked as not attending. The
+ * server enforces every one of these rules; this only shows them first.
  */
 
 interface AttendanceModalProps {
@@ -26,6 +29,8 @@ interface AttendanceModalProps {
   canJustify?: boolean;
   /** The signed-in officer's staff code: recording their own attendance is allowed but flagged. */
   currentEmployeeId?: string;
+  /** A seat a notice is about: scrolled to and outlined. */
+  focusSeat?: { id: string; key: number } | null;
   onClose: () => void;
   /** Called after a change so the page can reload its data. */
   onChanged: () => void;
@@ -41,8 +46,13 @@ const BADGE: Record<AttendanceStatus | "none", string> = {
 const ACTION =
   "inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-export default function AttendanceModal({ program, participants, employees, canRecord, canJustify = false, currentEmployeeId, onClose, onChanged }: AttendanceModalProps) {
+export default function AttendanceModal({ program, participants, employees, canRecord, canJustify = false, currentEmployeeId, focusSeat, onClose, onChanged }: AttendanceModalProps) {
+  useRecordHighlight(focusSeat?.id, focusSeat?.key);
+  // The page's list may be older than the certificates uploaded since it loaded: they are HR's basis for "Attended".
+  useEffect(() => { onChanged(); }, []);
   const [savingId, setSavingId] = useState<string | null>(null);
+  // A certificate HR is uploading for someone: the list stays open until it is answered.
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   // The enrolment whose TDP justification form is open (12z), its save, and its own error (shown by the form).
@@ -75,7 +85,7 @@ export default function AttendanceModal({ program, participants, employees, canR
     return p.employeeId === currentEmployeeId || emp?.employeeId === currentEmployeeId || emp?.id === currentEmployeeId;
   };
 
-  async function record(p: TrainingParticipant, attendance: AttendanceStatus) {
+  async function record(p: TrainingParticipantRow, attendance: AttendanceStatus) {
     if (isOwn(p) && !window.confirm(`This is your own attendance. Recording it as "${attendance}" will be marked as self-approved in the audit log. Record it anyway?`)) return;
     setSavingId(p.id);
     setError("");
@@ -83,7 +93,8 @@ export default function AttendanceModal({ program, participants, employees, canR
     try {
       const res = await apiCall(`/api/training/participants/${encodeURIComponent(p.id)}/attendance`, {
         method: "PUT",
-        body: JSON.stringify({ attendance })
+        // "Attended" names the certificate this list showed: the server refuses it if another has replaced it.
+        body: JSON.stringify({ attendance, ...(attendance === "Attended" ? { certificateId: p.certificate?.id } : {}) })
       });
       if (res?.status !== "success") throw new Error(res?.message || "Attendance could not be saved.");
       // The server says what actually happened, e.g. that someone without a Personnel
@@ -93,8 +104,10 @@ export default function AttendanceModal({ program, participants, employees, canR
         : `${nameOf(p)} is marked as not attending, so no liquidation form will open for them.`));
       onChanged();
     } catch (err: any) {
-      // apiCall throws on a refusal with the server's own message (e.g. a report already filed).
+      // apiCall throws on a refusal with the server's own message (e.g. a report already filed). The list is
+      // reloaded, since a refusal can mean it is out of date (a certificate replaced meanwhile).
       setError(err?.message || "Attendance could not be saved.");
+      onChanged();
     } finally {
       setSavingId(null);
     }
@@ -128,13 +141,13 @@ export default function AttendanceModal({ program, participants, employees, canR
       subtitle={`${String(program.title || "").trim()} · ${formatDate(program.startDate)}${program.endDate && program.endDate !== program.startDate ? ` to ${formatDate(program.endDate)}` : ""}${program.venue ? ` · ${program.venue}` : ""}`}
       icon={<CalendarCheck size={16} aria-hidden="true" />}
       onClose={onClose}
-      busy={!!savingId || justifying || sendingRep}
+      busy={!!savingId || justifying || sendingRep || uploading}
       size="lg"
       footer={
         <button
           type="button"
           onClick={onClose}
-          disabled={!!savingId || sendingRep}
+          disabled={!!savingId || sendingRep || uploading}
           className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Close
@@ -144,7 +157,7 @@ export default function AttendanceModal({ program, participants, employees, canR
       <div className="space-y-3 text-xs text-slate-700">
         <p className="text-[11px] text-slate-500">
           Only participants marked <strong>Attended</strong> get a liquidation form. Marking someone attended opens
-          their form and notifies them.
+          their form and notifies them, and needs their certificate of attendance on file. <strong>Did not attend</strong> needs no file.
         </p>
         {!started && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
@@ -177,8 +190,12 @@ export default function AttendanceModal({ program, participants, employees, canR
               const lieuInBadge = !!tdpText && why?.kind === "In lieu of";
               // Before attendance is recorded, someone can be sent in their place (Part B).
               const canSend = canJustify && !p.attendance && p.status === "Assigned" && repFor !== p.id && !sendingRep;
+              // HR and the Administrator upload a certificate for staff who can't use the portal, and for anyone
+              // whose own uploads reached the limit. Once the attendance stands on one, nothing replaces it here.
+              const settled = !!p.certificate && p.attendance === "Attended";
+              const twins = p.certificate?.sameFileAs ?? [];
               return (
-                <li key={p.id} className="px-3 py-2.5">
+                <li key={p.id} data-record-id={p.id} className="px-3 py-2.5">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <p className="font-semibold text-slate-800">{nameOf(p)}</p>
@@ -226,7 +243,8 @@ export default function AttendanceModal({ program, participants, employees, canR
                       <button
                         type="button"
                         onClick={() => record(p, "Attended")}
-                        disabled={locked || p.attendance === "Attended"}
+                        disabled={locked || p.attendance === "Attended" || !p.certificate}
+                        title={!p.certificate && p.attendance !== "Attended" ? "Their certificate of attendance isn't on file yet" : undefined}
                         className={`${ACTION} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 focus-visible:ring-emerald-500`}
                       >
                         {saving ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <CheckCircle2 size={12} aria-hidden="true" />}
@@ -243,6 +261,30 @@ export default function AttendanceModal({ program, participants, employees, canR
                         Did not attend<span className="sr-only">: {nameOf(p)}</span>
                       </button>
                     </div>
+                  </div>
+                  {/* HR's basis for "Attended" (R4). */}
+                  <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-1.5">
+                    <CertificatePanel
+                      participantId={p.id}
+                      certificate={p.certificate}
+                      blockedReason={settled ? null : p.certificateBlockedReason}
+                      canUpload={canJustify && (!p.hasPersonnelLogin || !!p.certificateCapped) && !settled}
+                      ownerName={nameOf(p)}
+                      onUploaded={message => { setError(""); setNotice(message); onChanged(); }}
+                      onBusy={setUploading}
+                    />
+                    {!p.certificate && p.hasPersonnelLogin && !p.certificateCapped && !p.certificateBlockedReason && (
+                      <p className="mt-0.5 text-[10px] text-slate-500">They upload it from their seminar card.</p>
+                    )}
+                    {p.hasPersonnelLogin && p.certificateCapped && !settled && !p.certificateBlockedReason && (
+                      <p className="mt-0.5 text-[10px] text-slate-500">Their own uploads reached the limit, so you can upload it for them.</p>
+                    )}
+                    {twins.length > 0 && (
+                      <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
+                        Same file as the certificate on file for {twins.map(t => `${t.name}${t.seminar ? ` ("${t.seminar}")` : ""}`).join(", ")}.
+                        Check that it names {nameOf(p)} before recording the attendance.
+                      </p>
+                    )}
                   </div>
                   {justifyId === p.id && (
                     <>

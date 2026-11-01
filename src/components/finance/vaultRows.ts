@@ -4,6 +4,7 @@
 // (tests/vaultRows.test.ts). A file counts in its report's fiscal year, the rule the Liquidation
 // Desk and the overview use (reportFiscalYear), so the three never disagree.
 import type { LiquidationDocumentRow } from "../../types";
+import { documentPlate } from "../../reportDocuments";
 import { firstTimestamp } from "../../utils";
 import { REPORT_STAGES, reportFiscalYear } from "./overviewFigures";
 
@@ -38,10 +39,10 @@ export interface VaultView {
 
 const norm = (s: string | undefined) => (s || "").toLocaleLowerCase().trim();
 
-/** Searches the file name, the report number, the employee and the seminar. */
+/** Searches the file name, which document it is, the report number, the employee and the seminar. */
 function matchesQuery(row: LiquidationDocumentRow, query: string): boolean {
   const q = norm(query);
-  return !q || [row.name, row.submissionNo, row.employeeName, row.title].some(v => norm(v).includes(q));
+  return !q || [row.name, documentPlate(row.kind), row.submissionNo, row.employeeName, row.title].some(v => norm(v).includes(q));
 }
 
 export function vaultView(rows: LiquidationDocumentRow[] | null | undefined, filter: VaultFilter): VaultView {

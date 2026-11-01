@@ -42,6 +42,7 @@ export function liquidationDocumentRows(
         dateSubmitted: r.dateSubmitted || undefined,
         docId: String(d.id),
         name: cleanFileName(String(d.name || d.filename || "")) || "File",
+        kind: d.kind || undefined,
         type: String(d.type || ""),
         size: d.size || undefined,
         uploadedAt: d.uploadedAt || undefined,

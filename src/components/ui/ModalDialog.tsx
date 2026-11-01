@@ -9,7 +9,8 @@ import { X } from "lucide-react";
  * - role="dialog" + aria-modal, labelled by its title.
  * - Focus moves in on open (the `initialFocusRef`, else the first control in the body)
  *   and returns to whatever opened it on close.
- * - Tab and Shift+Tab stay inside the dialog; Esc closes it.
+ * - Tab and Shift+Tab stay inside the dialog; Esc closes it. With one dialog on top of another
+ *   (the file viewer over the attendance list), only the one on top answers the keyboard.
  * - While `busy` (a save in flight) it can't be dismissed, so the outcome of the request
  *   is never lost with a dialog that is no longer on screen.
  *
@@ -28,6 +29,9 @@ const FOCUSABLE = [
 ].join(",");
 
 const WIDTHS = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-2xl", xl: "max-w-4xl" } as const;
+
+/** The dialogs on screen, the newest last. */
+const openDialogs: HTMLElement[] = [];
 
 interface ModalDialogProps {
   title: string;
@@ -81,9 +85,19 @@ export default function ModalDialog({
   }, []);
 
   useEffect(() => {
+    const opened = panelRef.current;
+    if (!opened) return;
+    openDialogs.push(opened);
+    return () => {
+      const at = openDialogs.indexOf(opened);
+      if (at >= 0) openDialogs.splice(at, 1);
+    };
+  }, []);
+
+  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const panel = panelRef.current;
-      if (!panel || e.defaultPrevented) return;
+      if (!panel || e.defaultPrevented || openDialogs[openDialogs.length - 1] !== panel) return;
 
       if (e.key === "Escape") {
         if (!latest.current.busy) {

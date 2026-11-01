@@ -9,7 +9,10 @@ import {
   FILE_INPUT_ACCEPT,
   MAX_FILE_BYTES,
   MAX_REPORT_BYTES,
+  MAX_REPORT_FILES,
+  MIN_FILE_BYTES,
   fileBytes,
+  fileExtension,
   fileProblem,
   pickedFileProblem,
   reportFilesProblem,
@@ -67,10 +70,14 @@ test("size limits", () => {
   assert.match(pickedFileProblem("big.pdf", MAX_FILE_BYTES + 1), /larger than 5 MB/);
   assert.match(pickedFileProblem("sheet.docx", 10), /only PDF, JPEG and PNG/);
   assert.match(pickedFileProblem("empty.pdf", 0), /is empty/);
+  assert.equal(MIN_FILE_BYTES, 75, "the size from which the server counts a document");
+  assert.match(pickedFileProblem("stub.pdf", MIN_FILE_BYTES - 1), /almost nothing in it/, "refused on pick, as the server wouldn't count it");
+  assert.equal(pickedFileProblem("small.pdf", MIN_FILE_BYTES), "");
   assert.equal(fileBytes(PDF), 10);
   assert.equal(fileBytes("not a file"), 0);
-  assert.equal(reportFilesProblem(10, MAX_REPORT_BYTES), "");
-  assert.match(reportFilesProblem(11, 1), /up to 10 files/);
+  assert.equal(reportFilesProblem(MAX_REPORT_FILES, MAX_REPORT_BYTES), "");
+  assert.equal(MAX_REPORT_FILES, 20, "raised from 10 with the named documents (R5)");
+  assert.match(reportFilesProblem(MAX_REPORT_FILES + 1, 1), /up to 20 files/);
   assert.match(reportFilesProblem(2, MAX_REPORT_BYTES + 1), /more than 35 MB/);
 });
 
@@ -86,6 +93,14 @@ test("only a file that passes is ever shown, with a type from the list", () => {
 
 test("the input's accept list names the three kinds", () => {
   for (const part of [".pdf", ".jpg", ".jpeg", ".png", "application/pdf", "image/jpeg", "image/png"]) assert.ok(FILE_INPUT_ACCEPT.split(",").includes(part), part);
+});
+
+test("each checked type has an extension, and nothing else does", () => {
+  assert.equal(fileExtension("application/pdf"), "pdf");
+  assert.equal(fileExtension("image/jpeg"), "jpg");
+  assert.equal(fileExtension("image/png"), "png");
+  assert.equal(fileExtension("text/html"), "");
+  assert.equal(fileExtension(undefined), "");
 });
 
 test("the store keeps a file under a random name and gives it back unchanged", () => {

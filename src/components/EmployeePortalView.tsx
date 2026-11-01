@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, LiquidationDocument, ScreenFocus } from "../types";
+import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, DocumentKind, LiquidationDocument, ScreenFocus, TravelDeclaration } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, getLocalTodayString, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../utils";
 import { spendableCentavos } from "../advanceCoverage";
@@ -32,6 +32,10 @@ import BalanceCheck, { BalanceStatusBadge, FundReturnNote } from "./liquidation/
 import { withinAdvanceSubmitProblem } from "./liquidation/withinAdvance";
 import { reimbursementProblem, seminarClaimMode } from "../reimbursement";
 import { liquidationBalance } from "../liquidationMoney";
+import { DOCUMENT_SLOTS, correctionSlots, filedUnderDocuments, missingDocuments, missingDocumentsText, noTravelProblem, requiredDocuments } from "../reportDocuments";
+import RequiredDocuments from "./liquidation/RequiredDocuments";
+import AttachedFileRow from "./liquidation/AttachedFileRow";
+import CertificatePanel from "./training/CertificatePanel";
 import {
   User as UserIcon,
   Send,
@@ -114,6 +118,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // Uploaded receipts carry size + base64 content; older records only a filename. A file
   // replaced in a correction is still listed, marked superseded.
   const [attachedFiles, setAttachedFiles] = useState<LiquidationDocument[]>([]);
+  // What applies to the trip (src/reportDocuments.ts): each tick brings its document in.
+  const [declarations, setDeclarations] = useState<TravelDeclaration[]>([]);
   // Why the last file picked wasn't attached (src/fileRules.ts), and a filed report's file in the viewer.
   const [fileError, setFileError] = useState("");
   const [viewing, setViewing] = useState<ReportFile | null>(null);
@@ -232,7 +238,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     if (!withinAdvanceForm || !a || !Array.isArray(a.covers) || a.covers.length < 2) return undefined;
     const holderCard = (activities ?? []).find((x: any) => x && x.id === a.activityId);
     const members: any[] = Array.isArray(holderCard?.groupMembers) ? holderCard.groupMembers : [];
-    return members.filter(m => m && m.attendance === "Attended").map(m => ({ participantId: String(m.participantId), employeeName: String(m.employeeName), onVehicle: !!m.onVehicle }));
+    return members.filter(m => m && m.attendance === "Attended").map(m => ({
+      participantId: String(m.participantId), employeeName: String(m.employeeName), onVehicle: !!m.onVehicle, hasCertificate: !!m.hasCertificate
+    }));
   }, [activeAdvance, withinAdvanceForm, activities]);
   // The vehicle request standing for this seminar, theirs or their group's: no Transportation line
   // while it does (the instructor's review, R3; the server refuses one too). Unknown while the seminar
@@ -250,6 +258,50 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   }, [activeAdvance, groupAttendees]);
   const balance = liquidationBalance(releasedOnSheet, effectiveSpent);
 
+  // The named documents (the instructor's review, R5): a seminar's report, or a returned one filed under
+  // them. What it needs follows from the form as it stands, by the server's rules (src/reportDocuments.ts).
+  const namedForm = resubmittingItem ? filedUnderDocuments(resubmittingItem) : selectedItem?.source === "seminar";
+  const lineTypes = filledParticulars(particulars).map(p => p.category);
+  const requiredDocs = namedForm
+    ? requiredDocuments({
+        reimbursement: isReimbursement,
+        expenseTypes: lineTypes,
+        // (Nothing is handed back until there is a line to measure: a blank form isn't a refund.)
+        handsBack: hasParticularLines && balance.leftover > 0,
+        declarations
+      })
+    : [];
+  // Each attendee's certificate comes from their own upload (R4). On a correction it is on the report; on
+  // a new one the seminar list says, and until that has loaded the server alone checks it.
+  const certificateOnFile = resubmittingItem
+    ? attachedFiles.some(f => f.kind === "certificate" && !f.supersededAt)
+    : !seatCard || (groupAttendees ? groupAttendees.every(m => m.hasCertificate) : !!seatCard.certificate);
+  const certificateKinds: DocumentKind[] = certificateOnFile ? ["certificate"] : [];
+  const slotOf = (f: LiquidationDocument): DocumentKind => f.kind ?? "receipts";
+  // What a correction opens, by the server's own rule. A file added anywhere else wouldn't be kept. A report
+  // filed before the named documents answers null: its one box stays open.
+  const openKinds = inCorrection && resubmittingItem
+    ? correctionSlots(resubmittingItem, access.addKinds, requiredDocs, [...certificateKinds, ...attachedFiles.filter(f => !f.supersededAt && !f.content).map(slotOf)])
+    : null;
+  const canAddDocument = (kind: DocumentKind) => !openKinds || openKinds.includes(kind);
+  // Still needed: what the report needs and has no file for, and each document the reviewer asked for until a
+  // new copy is added (one already on the report doesn't answer them).
+  const askedMissing = inCorrection ? access.addKinds.filter(k => !attachedFiles.some(f => slotOf(f) === k && !!f.content)) : [];
+  const requiredMissing = missingDocuments(requiredDocs, [...certificateKinds, ...attachedFiles.filter(f => !f.supersededAt).map(slotOf)]);
+  const missingKinds = DOCUMENT_SLOTS.map(s => s.kind).filter(k => askedMissing.includes(k) || requiredMissing.includes(k));
+  // New files in a slot the correction doesn't open, which the server would leave off.
+  const strayFiles = openKinds ? attachedFiles.filter(f => !!f.content && !openKinds.includes(slotOf(f))) : [];
+  // "No travel" has to agree with the trip, as the server checks at filing (ticks stay as filed on a correction).
+  const noTravelBlocked = namedForm && !isReimbursement && !resubmittingItem
+    ? noTravelProblem({ vehicleRequest: vehicleNo !== null, expenseTypes: lineTypes })
+    : "";
+  // (A tick that can't stand comes first: it decides which documents are needed.)
+  const docsProblem = (declarations.includes("noTravel") ? noTravelBlocked : "")
+    || missingDocumentsText(missingKinds)
+    || (strayFiles.length > 0
+      ? `${strayFiles.map(f => `"${f.name}"`).join(", ")} won't be kept: nothing on the report needs ${strayFiles.length === 1 ? "it" : "them"} now. Remove ${strayFiles.length === 1 ? "it" : "them"}.`
+      : "");
+
   // Human label for a liquidation's activity, used on the printed report header.
   function activityLabelFor(activityId: string): string | undefined {
     const item = (liquidatable ?? []).find((a: any) => a.id === activityId);
@@ -265,6 +317,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setTotalSpent(0);
     setLiqRemarks("");
     setAttachedFiles([]);
+    setDeclarations([]);
     setFileError("");
     setParticulars([newParticular()]);
     setParticularErrors({});
@@ -326,6 +379,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setTotalSpent(sub.totalSpent);
     setLiqRemarks(sub.remarks || "");
     setAttachedFiles(sub.supportingDocs || []);
+    setDeclarations(Array.isArray(sub.travelDeclarations) ? sub.travelDeclarations : []);
     setFileError("");
     setParticularErrors({});
     // Box B stays as filed (the copy that prints) unless the claimant picks someone else.
@@ -603,6 +657,13 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // The dropdown's choice of assignment, also used when a seminar title or a notice opens
   // the form: fills what Finance released, if it is on record.
   function chooseActivity(id: string) {
+    // Another seminar's documents and ticks don't belong on this one's report.
+    if (selectedActivityId && id !== selectedActivityId) {
+      if ((attachedFiles ?? []).length > 0 && !window.confirm("Switching to another seminar clears the files and ticks you added for this one. Continue?")) return;
+      setAttachedFiles([]);
+      setDeclarations([]);
+      setFileError("");
+    }
     const wasSeminar = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId)?.source === "seminar";
     setSelectedActivityId(id);
     // What Finance released, if it is on record. Otherwise zero rather than HR's
@@ -923,10 +984,16 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         setError(`Replace "${unreplaced.name}" before resubmitting: the reviewer asked for a new copy.`);
         return;
       }
-      if (access.open?.items.some(i => i.field === "addDocument") && !attachedFiles.some(f => !storedDocIds.has(f.id))) {
+      // (A report under the named documents says which one, below.)
+      if (!namedForm && access.open?.items.some(i => i.field === "addDocument") && !attachedFiles.some(f => !storedDocIds.has(f.id))) {
         setError("Attach the missing document the reviewer asked for before resubmitting.");
         return;
       }
+    }
+    // (The Submit button stays off until they are in; Enter in a box comes here.)
+    if (docsProblem) {
+      setError(docsProblem);
+      return;
     }
     // The file limits, mirroring the server: what this request brings.
     const newFiles = [...attachedFiles.filter(f => f.content), ...Object.values(replacementFiles)];
@@ -956,6 +1023,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           totalSpent: lines.length > 0 ? computedSpent : totalSpent,
           remarks: liqRemarks,
           supportingDocs: attachedFiles,
+          // (Kept as filed on a correction.)
+          ...(resubmittingItem ? {} : { travelDeclarations: declarations }),
           particulars: lines,
           periodCoveredFrom: coaFields.periodCoveredFrom,
           periodCoveredTo: coaFields.periodCoveredTo,
@@ -1000,7 +1069,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const addFileError = (problem: string) => setFileError(prev => (prev ? `${prev} ${problem}` : problem));
 
   // Read file as base64. The server checks the same rules; here the employee hears why at once.
-  const handleFileRead = (file: File) => {
+  // `kind`: the named document it was put under, on a seminar's report.
+  const handleFileRead = (file: File, kind?: DocumentKind) => {
     const picked = pickedFileProblem(file.name, file.size);
     if (picked) {
       addFileError(picked);
@@ -1024,7 +1094,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         size: formattedSize,
         type: file.type || "application/octet-stream",
         content: base64Data, // Save actual base64
-        uploadedAt: new Date().toISOString()
+        uploadedAt: new Date().toISOString(),
+        ...(kind ? { kind } : {})
       };
       setAttachedFiles(prev => [...prev, newDoc]);
     };
@@ -1033,10 +1104,15 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
-    Array.from(e.target.files ?? []).forEach(handleFileRead);
+    Array.from(e.target.files ?? []).forEach(file => handleFileRead(file));
     // So the same file can be picked again, once fixed or after a Remove.
     e.target.value = "";
   };
+
+  function addDocumentFiles(kind: DocumentKind, files: File[]) {
+    setFileError("");
+    files.forEach(file => handleFileRead(file, kind));
+  }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1051,7 +1127,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     e.preventDefault();
     setIsDragging(false);
     setFileError("");
-    Array.from(e.dataTransfer.files ?? []).forEach(handleFileRead);
+    Array.from(e.dataTransfer.files ?? []).forEach(file => handleFileRead(file));
   };
 
   // The shared helper only opens a real uploaded file (a base64 data URL), never a script.
@@ -1104,6 +1180,55 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     };
     reader.readAsDataURL(file);
   }
+
+  // One file on the form. A colleague's certificate on a group's report is theirs alone to open (R4).
+  const fileRow = (file: LiquidationDocument) => (
+    <AttachedFileRow
+      key={file.id}
+      file={file}
+      stored={inCorrection && storedDocIds.has(file.id)}
+      toReplace={inCorrection && access.replaceIds.includes(file.id) && !file.supersededAt}
+      replacement={replacementFiles[file.id]}
+      describedBy={access.noteFor("replaceDocuments") ? "note-replaceDocuments" : undefined}
+      onView={file.kind === "certificate" && file.participantId !== resubmittingItem?.activityId ? undefined : () => viewReportFile(resubmittingItem.id, file)}
+      onDownload={() => downloadBase64File(file.name, file.content ?? "")}
+      onChooseReplacement={chosen => chooseReplacement(file.id, chosen)}
+      onUndoReplacement={() => setReplacementFiles(prev => { const next = { ...prev }; delete next[file.id]; return next; })}
+      onRemove={() => handleRemoveAttached(file.id)}
+    />
+  );
+
+  const reloadAfterUpload = (message: string) => {
+    setSuccess(message);
+    fetchPortalData();
+  };
+
+  // The certificate's slot: what is on the report, or what the report will carry when it is filed.
+  const certificateLines = resubmittingItem
+    ? attachedFiles.filter(f => f.kind === "certificate").map(fileRow)
+    : groupAttendees
+      ? (
+        <ul className="space-y-0.5 text-[10px] text-slate-600">
+          {groupAttendees.map(m => (
+            <li key={m.participantId}>
+              {m.employeeName}: <span className={m.hasCertificate ? "font-semibold text-emerald-700" : "font-semibold text-amber-800"}>{m.hasCertificate ? "on file" : "not on file"}</span>
+            </li>
+          ))}
+          {!certificateOnFile && <li>Each attendee uploads their own from their seminar card, and HR does for staff with no Personnel login.</li>}
+        </ul>
+      )
+      : seatCard
+        ? (
+          <CertificatePanel
+            key={seatCard.id}
+            participantId={seatCard.id}
+            certificate={seatCard.certificate}
+            blockedReason={seatCard.certificate ? null : seatCard.certificateBlockedReason}
+            canUpload={!seatCard.certificate}
+            onUploaded={reloadAfterUpload}
+          />
+        )
+        : null;
 
   return (
     <>
@@ -1643,7 +1768,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           <div className="space-y-6">
             <div className="border-b border-slate-100 pb-4">
               <h1 className="text-base font-bold text-slate-800">My Assigned Activities</h1>
-              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here, then file the liquidation report once you have attended.</p>
+              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here, upload your certificate of attendance once the seminar ends, then file the liquidation report when HR has recorded your attendance.</p>
             </div>
 
             {activities.length === 0 ? (
@@ -1694,6 +1819,20 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     {act.type === "training" && act.participantStatus === "Assigned" && (
                       <div className="border-t border-slate-100 pt-2.5">
                         <LiquidationDueBadge dueDate={act.liquidationDueDate} />
+                      </div>
+                    )}
+
+                    {/* Their certificate of attendance (R4). Once HR has recorded the attendance on it,
+                        there is nothing more to do here. */}
+                    {act.type === "training" && (
+                      <div className="border-t border-slate-100 pt-2.5">
+                        <CertificatePanel
+                          participantId={act.id}
+                          certificate={act.certificate}
+                          blockedReason={act.certificate && act.attendance === "Attended" ? null : act.certificateBlockedReason}
+                          canUpload={!(act.certificate && act.attendance === "Attended")}
+                          onUploaded={reloadAfterUpload}
+                        />
                       </div>
                     )}
 
@@ -2070,7 +2209,31 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 />
               )}
 
-              {/* REAL DRAG & DROP ATTACHMENT UPLOADER */}
+              {/* The named documents on a seminar's report (R5). A report from before them, or a general
+                  activity's, keeps the one box it was filed with. */}
+              {namedForm ? (
+                <RequiredDocuments
+                  required={requiredDocs}
+                  reimbursement={isReimbursement}
+                  declarations={declarations}
+                  declarationsOpen={!resubmittingItem}
+                  onDeclarations={setDeclarations}
+                  noTravelBlocked={noTravelBlocked}
+                  canAdd={canAddDocument}
+                  asked={access.addKinds}
+                  onAddFiles={addDocumentFiles}
+                  files={attachedFiles}
+                  renderFile={fileRow}
+                  certificate={certificateLines}
+                  certificateOnFile={certificateOnFile}
+                >
+                  <CorrectionNote id="note-addDocument" note={access.noteFor("addDocument")} />
+                  <CorrectionNote id="note-replaceDocuments" note={access.noteFor("replaceDocuments")} />
+                  {fileError && (
+                    <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{fileError}</p>
+                  )}
+                </RequiredDocuments>
+              ) : (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center gap-2 bg-blue-600 px-3 py-2">
                   <Package size={12} className="text-white" />
@@ -2120,99 +2283,12 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 {attachedFiles.length > 0 && (
                   <div className="space-y-1.5 border-t border-slate-100 pt-3">
                     <p className="text-[9px] font-bold uppercase text-slate-400 font-mono tracking-wider">Loaded Documents Queue</p>
-                    {attachedFiles.map((file) => {
-                      // In a correction the filed copies stay on the report (only new files
-                      // can be removed); a file marked for replacing gets a new copy instead.
-                      const stored = inCorrection && storedDocIds.has(file.id);
-                      const toReplace = inCorrection && access.replaceIds.includes(file.id) && !file.supersededAt;
-                      const replacement = replacementFiles[file.id];
-                      return (
-                        <div
-                          key={file.id}
-                          className={`flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg border text-[11px] ${
-                            file.supersededAt ? "bg-white border-slate-100 text-slate-400"
-                              : toReplace ? "bg-amber-50 border-amber-200 text-slate-700"
-                              : "bg-slate-50 border-slate-200 text-slate-600"
-                          }`}
-                        >
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className={`truncate font-mono ${file.supersededAt ? "line-through" : ""}`}>📎 {file.name}</span>
-                            {file.size && <span className="text-[9px] bg-slate-200 text-slate-600 font-bold font-mono px-1.5 rounded">{file.size}</span>}
-                            {file.supersededAt && (
-                              <span className="rounded border border-slate-200 bg-slate-50 px-1.5 text-[9px] font-bold uppercase text-slate-500">Replaced, kept in history</span>
-                            )}
-                            {toReplace && !replacement && (
-                              <span className="rounded border border-amber-200 bg-white px-1.5 text-[9px] font-bold uppercase text-amber-700">Replace this file</span>
-                            )}
-                            {replacement && (
-                              <span className="text-[10px] font-semibold text-emerald-700">&rarr; new copy: {replacement.name}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center space-x-1.5">
-                            {file.content && (
-                              <button
-                                type="button"
-                                onClick={() => downloadBase64File(file.name, file.content ?? "")}
-                                className="text-blue-600 hover:text-blue-800 text-[10px] font-bold font-mono uppercase cursor-pointer"
-                              >
-                                Download
-                              </button>
-                            )}
-                            {stored && file.hasFile && (
-                              <button
-                                type="button"
-                                onClick={() => viewReportFile(resubmittingItem.id, file)}
-                                className="text-blue-600 hover:text-blue-800 text-[10px] font-bold font-mono uppercase cursor-pointer"
-                              >
-                                View<span className="sr-only"> {file.name}</span>
-                              </button>
-                            )}
-                            {toReplace && (
-                              <>
-                                <input
-                                  id={`replace-${file.id}`}
-                                  type="file"
-                                  accept={FILE_INPUT_ACCEPT}
-                                  className="hidden"
-                                  onChange={e => {
-                                    const chosen = e.target.files?.[0];
-                                    if (chosen) chooseReplacement(file.id, chosen);
-                                    e.target.value = "";
-                                  }}
-                                />
-                                {replacement ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setReplacementFiles(prev => { const next = { ...prev }; delete next[file.id]; return next; })}
-                                    className="text-slate-500 hover:text-slate-700 text-[10px] font-bold font-mono uppercase cursor-pointer"
-                                  >
-                                    Undo<span className="sr-only"> the new copy of {file.name}</span>
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => document.getElementById(`replace-${file.id}`)?.click()}
-                                    aria-describedby={access.noteFor("replaceDocuments") ? "note-replaceDocuments" : undefined}
-                                    className="rounded border border-amber-300 bg-white px-2 py-0.5 text-amber-800 hover:bg-amber-100 text-[10px] font-bold font-mono uppercase cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                                  >
-                                    Replace file<span className="sr-only">: {file.name}</span>
-                                  </button>
-                                )}
-                              </>
-                            )}
-                            {!stored && !file.supersededAt && (
-                              <button type="button" onClick={() => handleRemoveAttached(file.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold font-mono uppercase cursor-pointer">
-                                Remove
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {attachedFiles.map(fileRow)}
                   </div>
                 )}
                 </div>
               </div>
+              )}
 
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center gap-2 bg-blue-600 px-3 py-2">
@@ -2235,13 +2311,20 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               </div>
 
               <div className="border-t border-slate-200 pt-4">
+              {docsProblem && (
+                <p id="documents-still-needed" role="status" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                  {docsProblem}
+                </p>
+              )}
               <button
                 type="submit"
                 // A new report needs a Box B representative; with none set up it can't be filed.
                 // A seminar's report needs its advance, and items within it (the balance check
-                // above says why).
+                // above says why), and its required documents (the line above says which).
                 disabled={submittingLiq || (signatories !== null && boxBChoices.length === 0 && !resubmittingItem?.representativeId)
-                  || (withinAdvanceForm && (!activeAdvance || balance.status === "Over"))}
+                  || (withinAdvanceForm && (!activeAdvance || balance.status === "Over"))
+                  || !!docsProblem}
+                aria-describedby={docsProblem ? "documents-still-needed" : undefined}
                 className={`px-6 py-2 rounded-lg shadow-sm font-semibold text-xs cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-60 ${
                   resubmittingItem
                     ? "bg-amber-600 hover:bg-amber-700 text-white"
@@ -2388,7 +2471,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                               key={idx}
                               type="button"
                               onClick={() => viewReportFile(sub.id, doc)}
-                              className={`px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[10px] font-mono font-medium inline-flex items-center space-x-1 cursor-pointer ${
+                              // On a group's report, a colleague's certificate is theirs alone to open (R4).
+                              disabled={doc.kind === "certificate" && doc.participantId !== sub.activityId}
+                              className={`px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[10px] font-mono font-medium inline-flex items-center space-x-1 cursor-pointer disabled:cursor-default disabled:text-slate-500 disabled:hover:bg-white ${
                                 doc.supersededAt ? "text-slate-400" : "text-blue-600"
                               }`}
                             >
