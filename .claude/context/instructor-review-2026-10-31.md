@@ -14,8 +14,8 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 
 | Phase | Recommendations | Status (2026-11-01) |
 |---|---|---|
-| 1 | R1 venue, R2 expense lines, R3 transportation | Built and reviewed 2026-11-01 (known-issues 12aa), not committed |
-| 2 | R6 viewer, file allow-list, Print; file storage; 12e | Not started |
+| 1 | R1 venue, R2 expense lines, R3 transportation | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
+| 2 | R6 viewer, file allow-list, Print; file storage; 12e | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 3 | R4 certificate, R5 required documents | Not started |
 | 4 | R7 notices that open on the missing item | Not started |
 | 5 | R8 tables and View | Not started |
@@ -120,7 +120,7 @@ Build:
 
 Said: "nasan yung liquidation? bakit ko pa idodownload? iprint mo na, pag clinick mo si print tapos print preview."
 
-Team's decision: PDF, JPEG and PNG, 5 MB per file. The suggested cap of 10 files per report was accepted before the named slots came in, so re-check it in Phase 3.
+Team's decision: PDF, JPEG and PNG, 5 MB per file. The suggested cap of 10 files per report was accepted before the named slots came in, so re-check it in Phase 3. As built, the cap is on what one request brings, so a report filed with 10 files can still take the missing document a reviewer asks for.
 
 Build:
 - A shared file viewer in `src/components/ui/`. PDF, JPEG and PNG preview in a modal with Print and Download. Any other kind can only be downloaded.

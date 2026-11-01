@@ -11,6 +11,7 @@ Browser (React 19 SPA, Vite, Tailwind v4)
 server.ts  (Express, port 3000, ~9.1k lines, ~115 routes)      ← ACTIVE dev/runtime backend
    │  in-memory `db` object ← getInitialData() ← data_store.json
    │  every mutation → saveDB() → fs.writeFileSync(data_store.json)
+   │  attached files → uploads/ (gitignored), read only through the per-file route
    │  also serves Vite middleware in dev, dist/ in prod
    └─ Gemini (@google/genai) for POST /api/pds/parse ; nodemailer (Gmail SMTP) for emails
 
@@ -42,6 +43,9 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `src/dvNumber.ts` | Disbursement voucher numbers, YYYY-MM-NNNN (12q, 2026-10-29): the voucher date's year and month plus a typed serial, read the same by the release form (`finance/AdvanceRequestsList.tsx`) and the server, tested |
 | `src/reimbursement.ts` | A seminar paid out of the employee's own pocket (HSAC's answer 9, 2026-10-30): whether a seat's report is a Liquidation, waits for a request, or is a Reimbursement (`seminarClaimMode`), its limit (the share less what the office paid) and its checks; shared by the server and the report form, tested |
 | `src/expenseLines.ts` | A liquidation report's lines (the instructor's review, R2 and R3): the expense types an attendee may choose, what a line is called when it has no description, and when a type is refused (Venue Rental and Speaker Fees, Transportation while a vehicle request stands); shared by the server and the form, tested |
+| `src/fileRules.ts` | What can be attached to a report (R6): PDF, JPEG and PNG, whose type, name and first bytes agree, 5 MB a file, 10 files and 35 MB a report; and what may be shown (`viewableFile`). Checked in the browser, on the server and again before viewing, tested |
+| `src/server/fileStore.ts` | Attached files, kept in the gitignored `uploads/` folder under random names; a record holds only `stored: {file, type, bytes}`. Reached only through the per-file route, which checks who is asking |
+| `src/components/ui/FileViewer.tsx` | The shared file viewer (R6): a PDF or image on screen with Print and Download, from a Blob URL of the checked type. Anything else can only be downloaded |
 | `src/server/budgetEnrolments.ts` | The training budget's per-enrolment inputs (cash out, split per group member; spending once settled) |
 | `.claude/context/hsac-answers.md` | HSAC RAB 1's own answers (2026-10-26 and 2026-10-28) that office rules come from: group cash advances, division coverage, Plan A columns, vehicle with the CA, and who may be seated (the TDP, or a justified exception) |
 | `.claude/context/instructor-review-2026-10-31.md` | The instructor's system review: recommendations R1–R12, the team's decisions, the phases and their status, and the documentary requirements for a cash advance's liquidation |
@@ -51,7 +55,8 @@ The frontend currently talks **only** to Express. `IMPLEMENTATION_CHECKLIST.md` 
 | `src/components/EmployeePortalView.tsx`, `PersonalDataSheetForm.tsx` | Employee self-service + PDS |
 | `src/components/*Requests*.tsx`, `ApprovalManagementView.tsx` | Request workflow (Employee → HR endorse → Chief decide), liquidation workflow (HR → Finance → Chief) |
 | `backend_fastapi/{main,models,schemas,database,migrate}.py` | FastAPI app |
-| `data_store.json` | Live JSON "database" — committed to git (see known-issues) |
+| `data_store.json` | Live JSON "database", gitignored since Phase 2 of the instructor's review (known-issues 4): each machine keeps its own, and a fresh clone starts from the seed data |
+| `uploads/` | Files attached to liquidation reports (gitignored, never served; see `src/server/fileStore.ts`) |
 | `patch_*.cjs`, `fix*.cjs/py`, `rewrite_*.cjs`, `update_*.cjs`, `test_*.js`, `*.txt` at root | Historical one-off AI patch scripts & scratch files. Not part of the app. |
 
 ## Roles (`UserRole` in src/types.ts)
