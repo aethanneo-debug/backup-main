@@ -1,232 +1,273 @@
-import { Fragment, useEffect, useState } from "react";
-import { AlertTriangle, Loader2, Plus, X } from "lucide-react";
-import {
-  TrainingNeedCategory,
-  TrainingPlanOffice,
-  TRAINING_NEED_CATEGORIES,
-  TRAINING_NEED_COLUMN_LABELS
-} from "../../types";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, History, Loader2 } from "lucide-react";
+import { PlanAImportResult, TdpUpload, TrainingNeedRow, TrainingPlanOffice } from "../../types";
 import { apiCall } from "../../utils";
-import PlanHeader from "./PlanHeader";
 import PlanAImportPanel from "./import/PlanAImportPanel";
 import MandatedTrainingsPanel from "./MandatedTrainingsPanel";
+import TdpStatusBar from "./TdpStatusBar";
+import TdpPlanWindow from "./TdpPlanWindow";
+import { count } from "./tdpText";
 
-// Plan A of the official form: per employee, the trainings they still need,
-// in three columns, grouped under their office.
+// Training Needs (step 1): the year's TDP. HR uploads the RAB-1 workbook once a year (the instructor's review, R9),
+// and Plan A, what each employee still needs, comes from it. Until then the upload panel shows; once it is in, a bar
+// says which file, when and by whom, with Plan A behind "View uploaded TDP" (read-only) and "Replace with an amended
+// TDP", the only way its needs change (the server refuses adding, renaming or removing one). Needs carried in unmet
+// from an earlier year are in the plan either way, apart from the TDP.
+type Message = { tone: "success" | "warning"; text: string; detail?: string };
+type FocusTarget = "bar" | "replace" | "panel" | "upload";
+
+const REPLACE_PANEL = "tdp-replace-panel";
+
+const MESSAGE_TONE: Record<Message["tone"], string> = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  warning: "border-amber-200 bg-amber-50 text-amber-900"
+};
+
+/** What the first upload did, as the bar will count it. */
+function uploadedMessage(result: PlanAImportResult, fiscalYear: string): Message {
+  const needs = result.tdp?.needs ?? result.imported;
+  const employees = result.tdp?.employees ?? (result.perEmployee ?? []).length;
+  const skipped = [
+    result.skippedRows > 0 ? `${count(result.skippedRows, "row")} skipped` : "",
+    result.skippedAlreadyInPlan > 0 ? `${result.skippedAlreadyInPlan} already in the plan` : "",
+    result.skippedDuplicateInFile > 0 ? `${result.skippedDuplicateInFile} duplicated in the workbook` : ""
+  ].filter(Boolean);
+  return {
+    tone: "success",
+    text: `The FY ${result.fiscalYear || fiscalYear} TDP is uploaded: ${count(needs, "need")} for ${count(employees, "employee")}.`,
+    detail: skipped.length ? `${skipped.join(", ")}.` : undefined
+  };
+}
+
+/** What a replacement did: the server's own counts. */
+function replacedMessage(result: PlanAImportResult, fiscalYear: string): Message {
+  const changes = result.tdp?.changes ?? {
+    added: result.replace?.added ?? result.imported,
+    removed: (result.replace?.removed ?? []).length,
+    kept: (result.replace?.kept ?? []).length,
+    moved: (result.replace?.moved ?? []).length
+  };
+  const file = result.tdp?.filename ? ` with “${result.tdp.filename}”` : "";
+  const moved = changes.moved > 0 ? `${changes.moved} moved to another column, ` : "";
+  return {
+    tone: "success",
+    text: `The FY ${result.fiscalYear || fiscalYear} TDP is replaced${file}: ${count(changes.added, "need")} added, ${moved}${changes.removed} removed, ${changes.kept} kept because still in use.`,
+    detail: result.tdp ? `It now lists ${count(result.tdp.needs, "need")} for ${count(result.tdp.employees, "employee")}.` : undefined
+  };
+}
+
 export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => void }) {
   const [offices, setOffices] = useState<TrainingPlanOffice[]>([]);
   const [fiscalYear, setFiscalYear] = useState("");
+  const [tdp, setTdp] = useState<TdpUpload | null>(null);
+  const [carried, setCarried] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  // Which cell has its "add" box open, keyed employeeId|category
-  const [openCell, setOpenCell] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  // A quiet reload that failed: the screen stays as it was, with Retry.
+  const [reloadError, setReloadError] = useState("");
+  const [message, setMessage] = useState<Message | null>(null);
+  const [replacing, setReplacing] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const [focusTo, setFocusTo] = useState<FocusTarget | null>(null);
+  const loads = useRef(0);
+  const barHeading = useRef<HTMLHeadingElement>(null);
+  const replaceButton = useRef<HTMLButtonElement>(null);
+  const panelHeading = useRef<HTMLHeadingElement>(null);
+  const uploadHeading = useRef<HTMLHeadingElement>(null);
 
-  // `quiet`: refresh in place, without the spinner, so the panels above the table stay mounted and keep
-  // their messages (the mandated trainings' "… is marked as mandated.").
+  // `quiet`: refresh in place, without the spinner, so the panels stay mounted and keep their messages (the mandated
+  // trainings' "… is marked as mandated.", a replacement's refusal). The newest load answers for the screen.
   async function load(quiet = false) {
+    const mine = ++loads.current;
     if (!quiet) setLoading(true);
-    setError("");
     try {
       const res = await apiCall("/api/training/needs");
-      if (res.status === "success") {
-        setOffices(res.data?.offices ?? []);
-        setFiscalYear(res.data?.fiscalYear ?? "");
-      } else {
-        setError(res.message || "Unable to load the plan.");
-      }
+      if (mine !== loads.current) return;
+      if (res.status !== "success") throw new Error(res.message || "Unable to load the plan.");
+      setOffices(res.data?.offices ?? []);
+      setFiscalYear(res.data?.fiscalYear ?? "");
+      setTdp(res.data?.tdp ?? null);
+      setCarried(Number(res.data?.carried) || 0);
+      setError("");
+      setReloadError("");
     } catch (err: any) {
-      setError(err.message || "Unable to load the plan.");
+      if (mine !== loads.current) return;
+      if (quiet) setReloadError(err?.message || "Unable to load the plan.");
+      else setError(err?.message || "Unable to load the plan.");
     } finally {
-      setLoading(false);
+      if (mine === loads.current) setLoading(false);
     }
   }
 
   useEffect(() => { load(); }, []);
 
-  async function addNeed(employeeId: string, category: TrainingNeedCategory) {
-    const title = draft.trim();
-    if (!title) return;
-    setBusy(true);
+  // A control that only exists after the next render (the bar after an upload, the panel once opened) takes the focus
+  // when it arrives.
+  useEffect(() => {
+    if (!focusTo) return;
+    const el = focusTo === "bar" ? barHeading.current : focusTo === "replace" ? replaceButton.current
+      : focusTo === "upload" ? uploadHeading.current : panelHeading.current;
+    if (!el) return;
+    el.focus();
+    setFocusTo(null);
+  }, [focusTo, tdp, replacing, loading]);
+
+  function handleImported(result: PlanAImportResult) {
+    const replaced = !!result.replace || result.tdp?.kind === "replace";
+    setReplacing(false);
+    setMessage(replaced ? replacedMessage(result, fiscalYear) : uploadedMessage(result, fiscalYear));
+    setFocusTo("bar");
+    load(true);
+    onChanged?.();
+  }
+
+  // Refused, e.g. because another officer uploaded the TDP meanwhile (409): the plan is reloaded, so the bar shows the
+  // TDP in force. A first upload's panel goes once it does, so its message is shown here; a replacement shows its own.
+  function handleRefused(text: string, status?: number) {
+    if (!tdp && status === 409 && text) setMessage({ tone: "warning", text });
+    load(true);
+  }
+
+  // A need carried in from an earlier year is no TDP's, so it is the one thing Plan A lets HR take out (the user's
+  // decision of 2026-11-02; the server refuses any other). The window shows what came of it.
+  async function removeCarried(need: TrainingNeedRow): Promise<{ problem: string } | { outside: string[] }> {
     try {
-      const res = await apiCall("/api/training/needs", {
-        method: "POST",
-        body: JSON.stringify({ employeeId, category, title, fiscalYear })
-      });
-      if (res.status === "success") {
-        setDraft("");
-        await load();
-        onChanged?.();
-      } else {
-        alert(res.message || "Could not add that training.");
-      }
+      const res = await apiCall(`/api/training/needs/${encodeURIComponent(need.id)}`, { method: "DELETE" });
+      if (res.status !== "success") return { problem: res.message || "That need couldn't be removed." };
+      // The seminars it was the last need in the plan for, which now need their own justification (12z Part C).
+      const outside = (Array.isArray(res.data?.seminarsOutside) ? res.data.seminarsOutside : [])
+        .map((s: any) => (typeof s?.title === "string" ? s.title : "")).filter(Boolean);
+      await load(true);
+      onChanged?.();
+      return { outside };
     } catch (err: any) {
-      alert(err.message || "Could not add that training.");
-    } finally {
-      setBusy(false);
+      return { problem: err?.message || "That need couldn't be removed." };
     }
   }
 
-  async function removeNeed(id: string, title: string) {
-    if (!confirm(`Remove "${title}" from the plan?`)) return;
-    setBusy(true);
-    try {
-      const res = await apiCall(`/api/training/needs/${id}`, { method: "DELETE" });
-      if (res.status === "success") {
-        await load();
-        onChanged?.();
-      } else {
-        alert(res.message || "Could not remove that training.");
-      }
-    } catch (err: any) {
-      alert(err.message || "Could not remove that training.");
-    } finally {
-      setBusy(false);
-    }
+  function openReplace() {
+    setMessage(null);
+    setReplacing(true);
+    setFocusTo("panel");
+  }
+
+  function closeReplace() {
+    setReplacing(false);
+    setFocusTo("replace");
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center gap-2 text-sm text-slate-500 py-16">
-        <Loader2 size={16} className="animate-spin" /> Loading the Training and Development Plan…
+      <div role="status" className="flex items-center justify-center gap-2 text-sm text-slate-500 py-16">
+        <Loader2 size={16} className="animate-spin" aria-hidden="true" /> Loading the Training and Development Plan…
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-sm flex items-start justify-between gap-3">
-        <span className="flex gap-2"><AlertTriangle size={16} className="shrink-0 mt-0.5" />{error}</span>
-        <button onClick={() => load()} className="font-semibold underline shrink-0">Retry</button>
+      <div role="alert" className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-sm flex items-start justify-between gap-3">
+        <span className="flex gap-2"><AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />{error}</span>
+        <button onClick={() => load()} className="font-semibold underline shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500">Retry</button>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-      <PlanHeader planTitle="Training and Development Plan - A (Training)" subtitle={`For CY ${fiscalYear}`} />
+    <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <div>
+        <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800">Training and Development Plan, FY {fiscalYear}</h3>
+        <p className="mt-0.5 text-xs text-slate-500">
+          HR uploads the year's TDP once, from the RAB-1 workbook. Plan A, what each employee still needs, comes from it and
+          changes only through an amended TDP. Seminars they attend are checked off in <strong>Monitoring</strong>.
+        </p>
+      </div>
 
-      <p className="text-xs text-slate-500 mb-3">
-        List what each employee still needs. Seminars they actually attend are checked off automatically in <strong>Monitoring</strong>.
-      </p>
+      {tdp ? (
+        <TdpStatusBar
+          tdp={tdp}
+          carried={carried}
+          replacing={replacing}
+          replacePanelId={REPLACE_PANEL}
+          onView={() => setViewing(true)}
+          onReplace={() => (replacing ? panelHeading.current?.focus() : openReplace())}
+          headingRef={barHeading}
+          replaceRef={replaceButton}
+        />
+      ) : (
+        <>
+          {carried > 0 && (
+            <p data-tdp="carried" className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <History size={14} className="shrink-0 text-amber-600" aria-hidden="true" />
+              <span>
+                {count(carried, "need")} carried in unmet from an earlier year {carried === 1 ? "is" : "are"} already in the FY {fiscalYear} plan.
+                {carried === 1 ? " It isn't" : " They aren't"} part of the TDP, and {carried === 1 ? "stays" : "stay"} when it is uploaded.
+              </span>
+              <button
+                type="button"
+                data-tdp="view-carried"
+                onClick={() => setViewing(true)}
+                className="cursor-pointer rounded font-semibold text-blue-700 underline hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                View {carried === 1 ? "it" : "them"}
+              </button>
+            </p>
+          )}
+          {/* Reading the official workbook instead of retyping it: once a year. */}
+          <PlanAImportPanel fiscalYear={fiscalYear} mode="upload" onImported={handleImported} onRefused={handleRefused} headingRef={uploadHeading} />
+        </>
+      )}
 
-      {/* Reading the official workbook instead of retyping it. load() is the same
-          refetch every other change here uses. */}
-      <PlanAImportPanel fiscalYear={fiscalYear} onImported={() => load()} />
+      <div role="status" aria-live="polite" data-tdp="message">
+        {message && (
+          <div className={`rounded-lg border px-3 py-2 text-xs ${MESSAGE_TONE[message.tone]}`}>
+            <p className="flex items-start gap-2 font-semibold">
+              {message.tone === "success"
+                ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                : <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />}
+              <span className="min-w-0 break-words">{message.text}</span>
+            </p>
+            {message.detail && <p className="mt-0.5 pl-[22px] text-[11px]">{message.detail}</p>}
+          </div>
+        )}
+      </div>
+
+      {reloadError && (
+        <p role="alert" className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          <span className="flex gap-2"><AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />The plan couldn't be reloaded: {reloadError}</span>
+          <button type="button" onClick={() => load(true)} className="shrink-0 rounded font-semibold underline focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500">Retry</button>
+        </p>
+      )}
+
+      {tdp && replacing && (
+        <PlanAImportPanel
+          id={REPLACE_PANEL}
+          fiscalYear={fiscalYear}
+          mode="replace"
+          current={tdp}
+          onImported={handleImported}
+          onRefused={handleRefused}
+          onClose={closeReplace}
+          headingRef={panelHeading}
+        />
+      )}
 
       {/* Which trainings the law requires (HSAC RAB 1's step 5): they come first everywhere else. */}
       <MandatedTrainingsPanel fiscalYear={fiscalYear} onChanged={() => { load(true); onChanged?.(); }} />
 
-      <div className="overflow-x-auto border border-slate-200 rounded-lg">
-        <table className="w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="bg-slate-900 text-white uppercase text-[9px] tracking-wide">
-              <th className="p-2 w-44 border-r border-slate-700">Name</th>
-              <th className="p-2 w-40 border-r border-slate-700">Position</th>
-              {TRAINING_NEED_CATEGORIES.map(c => (
-                <th key={c} className="p-2 border-r border-slate-700 last:border-r-0">{TRAINING_NEED_COLUMN_LABELS[c]}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {offices.length === 0 && (
-              <tr><td colSpan={5} className="p-6 text-center text-slate-400 italic">No employees on record.</td></tr>
-            )}
-            {offices.map(office => (
-              <Fragment key={office.office}>
-                <tr className="bg-slate-100">
-                  <td colSpan={5} className="p-2 font-bold uppercase text-[10px] tracking-wider text-slate-700">{office.office}</td>
-                </tr>
-                {office.employees.map(emp => (
-                  <tr key={emp.employeeId} className="align-top hover:bg-slate-50/60">
-                    <td className="p-2 font-semibold text-slate-800 border-r border-slate-100">{emp.fullName}</td>
-                    <td className="p-2 text-slate-500 border-r border-slate-100">{emp.position || "—"}</td>
-                    {TRAINING_NEED_CATEGORIES.map(category => {
-                      const cellKey = `${emp.employeeId}|${category}`;
-                      const rows = emp.needs[category] ?? [];
-                      return (
-                        <td key={category} className="p-2 border-r border-slate-100 last:border-r-0 min-w-[200px]">
-                          <ul className="space-y-1">
-                            {rows.map(need => (
-                              <li key={need.id} className="group flex items-start justify-between gap-2">
-                                <span className="min-w-0 text-slate-700 leading-snug">
-                                  {need.title}
-                                  {/* Brought forward unmet by the fiscal-year rollover. The year shown
-                                      is when it was first raised, so a need outstanding for two plan
-                                      years reads as two years old rather than looking new. */}
-                                  {need.carriedFromFiscalYear && (
-                                    <span
-                                      title={`Still unmet since CY ${need.carriedFromFiscalYear}`}
-                                      className="ml-1.5 inline-block rounded border border-amber-200 bg-amber-50 px-1 py-px align-middle font-mono text-[9px] font-bold uppercase tracking-wider text-amber-700"
-                                    >
-                                      from {need.carriedFromFiscalYear}
-                                    </span>
-                                  )}
-                                  {/* The law or a rule requires it (12z Part D): first in Monitoring and planning. */}
-                                  {need.mandate && (
-                                    <span
-                                      title={`Mandated: ${need.mandate.basis}`}
-                                      className="ml-1.5 inline-block rounded border border-blue-200 bg-blue-50 px-1 py-px align-middle text-[9px] font-bold uppercase tracking-wider text-blue-700"
-                                    >
-                                      Mandated<span className="sr-only">: {need.mandate.basis}</span>
-                                    </span>
-                                  )}
-                                </span>
-                                <button
-                                  onClick={() => removeNeed(need.id, need.title)}
-                                  disabled={busy}
-                                  aria-label={`Remove ${need.title}`}
-                                  className="shrink-0 text-slate-300 hover:text-rose-600 group-hover:text-slate-400"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-
-                          {openCell === cellKey ? (
-                            <div className="mt-1.5 flex items-center gap-1">
-                              <input
-                                autoFocus
-                                value={draft}
-                                disabled={busy}
-                                onChange={e => setDraft(e.target.value)}
-                                onKeyDown={e => {
-                                  if (e.key === "Enter") { e.preventDefault(); addNeed(emp.employeeId, category); }
-                                  if (e.key === "Escape") { setOpenCell(null); setDraft(""); }
-                                }}
-                                onBlur={() => { if (!draft.trim()) { setOpenCell(null); } }}
-                                placeholder="Needed training…"
-                                className="flex-1 min-w-0 border border-slate-300 rounded p-1 text-[11px] focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                              />
-                              <button
-                                onMouseDown={e => e.preventDefault()}
-                                onClick={() => addNeed(emp.employeeId, category)}
-                                disabled={busy || !draft.trim()}
-                                className="text-[10px] font-bold uppercase text-white bg-blue-600 px-2 py-1 rounded hover:bg-blue-700 disabled:bg-slate-300"
-                              >
-                                Add
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => { setOpenCell(cellKey); setDraft(""); }}
-                              className="mt-1.5 text-[10px] font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1"
-                            >
-                              <Plus size={11} /> Add
-                            </button>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {viewing && (
+        <TdpPlanWindow
+          fiscalYear={fiscalYear}
+          offices={offices}
+          tdp={tdp}
+          onClose={() => {
+            setViewing(false);
+            // The last carried need removed takes "View them" with it: the focus goes to the upload instead.
+            if (!tdp && carried === 0) setFocusTo("upload");
+          }}
+          onRemoveCarried={removeCarried}
+        />
+      )}
     </div>
   );
 }

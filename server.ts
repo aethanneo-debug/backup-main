@@ -109,8 +109,11 @@ import {
   TdpJustificationInput,
   TrainingParticipantRow,
   SeminarTdpJustificationInput,
-  TrainingProgramRow
+  TrainingProgramRow,
+  TdpUpload,
+  TdpReplaceSummary
 } from "./src/types";
+import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsLeavingTdp, tdpCounts, type TdpNeedUse } from "./src/tdpUpload";
 import {
   coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
   seminarNeedsJustification, seminarTdpStanding, tdpKindText, tdpStanding, type SeatCheck
@@ -170,6 +173,8 @@ interface DBStructure {
   // Training titles the law requires (HSAC RAB 1's step 5): their needs come first (12z Part D).
   trainingMandates: TrainingMandate[];
   attendanceCertificates: AttendanceCertificate[];
+  // The TDP uploads (the instructor's review, R9): every upload and replacement, the latest for a year in force.
+  tdpUploads: TdpUpload[];
   signatories: Signatory[];
 }
 
@@ -519,6 +524,26 @@ function getInitialData(): DBStructure {
       // sends enrolments can carry one. Starts empty.
       if (!Array.isArray(loaded.attendanceCertificates)) {
         loaded.attendanceCertificates = [];
+        changed = true;
+      }
+      // The TDP uploads (the instructor's review, R9): one record per upload or replacement. A year imported before
+      // they were recorded gets one from its plan (needs carried in don't count) and, when the audit log has the
+      // import, who uploaded which file and when.
+      if (!Array.isArray(loaded.tdpUploads)) {
+        loaded.tdpUploads = [];
+        changed = true;
+      }
+      const recordedLate = recordsBeforeUploads({
+        needs: loaded.trainingNeeds,
+        records: loaded.tdpUploads,
+        auditLogs: loaded.auditLogs,
+        fullNameOf: (username: string) => {
+          const user = (Array.isArray(loaded.users) ? loaded.users : []).find((u: any) => u && u.username === username);
+          return typeof user?.fullName === "string" ? user.fullName : "";
+        }
+      });
+      if (recordedLate.length > 0) {
+        loaded.tdpUploads.push(...recordedLate);
         changed = true;
       }
       if (!loaded.cashAdvances) {
@@ -1162,6 +1187,7 @@ function getInitialData(): DBStructure {
     trainingNeeds: [],
     trainingMandates: [],
     attendanceCertificates: [],
+    tdpUploads: [],
     // Entered through Utilities → Manage Signatories; no names in code.
     signatories: []
   };
@@ -8610,7 +8636,7 @@ app.post("/api/training/needs/import/preview", authenticateToken, (req: any, res
   const existing = new Set(
     (db.trainingNeeds || [])
       .filter((n: any) => n.fiscalYear === fiscalYear)
-      .map((n: any) => trainingNeedKey(employeeIdForms(n.employeeId)[0], n.category, n.title))
+      .map((n: any) => trainingNeedKey(needPersonKey(n.employeeId), n.category, n.title))
   );
 
   const seenInFile = new Set<string>();
@@ -8659,7 +8685,7 @@ app.post("/api/training/needs/import/preview", authenticateToken, (req: any, res
 
   const preview = {
     fileDigest: crypto.createHash("sha256").update(buf).digest("hex"),
-    filename: String(filename || "").slice(0, 200).replace(/[\u0000-\u001f]/g, ""),
+    filename: cleanText(String(filename || "").slice(0, 200)).slice(0, 200),
     fiscalYear,
     sheets: scanned.map(s => ({
       name: s.ref.name,
@@ -8696,17 +8722,73 @@ app.post("/api/training/needs/import/preview", authenticateToken, (req: any, res
   res.json({ status: "success", data: preview });
 });
 
+// Plan A comes from the uploaded TDP (the instructor's review, R9): a need is added, removed or renamed only by
+// uploading the year's TDP, or an amended one in its place.
+const PLAN_FROM_TDP = "Plan A comes from the uploaded TDP, so its needs change only through an amended TDP: in Training Needs, replace the TDP with the amended workbook.";
+// The most needs one import takes (the real Plan A lists about 480).
+const MAX_IMPORT_NEEDS = 5000;
+
+// How a Replace names a need it adds, moves, removes or keeps (its summary, the audit entry).
+function replaceNeedOf(need: { employeeId: string; category: TrainingNeedCategory; title: string }): { employee: string; category: TrainingNeedCategory; title: string } {
+  const emp = employeeByKey(need.employeeId);
+  return { employee: cleanText(emp?.fullName || need.employeeId).slice(0, 200), category: need.category, title: cleanText(String(need.title ?? "").slice(0, 300)).slice(0, 300) };
+}
+
+// The key a need is compared by, with its person read as the TDP rule reads them (internal id first, 7j).
+const needPersonKey = (employeeId: string) => employeeByKey(employeeId)?.id ?? employeeId;
+
+// "file.xlsx" on Oct 30, 2026 by the HR officer: how a refusal names the TDP in force (the names quoted, so a file name
+// can't pass for the message's own words).
+function describeTdp(tdp: TdpUpload): string {
+  const day = tdp.uploadedAt && !Number.isNaN(Date.parse(tdp.uploadedAt))
+    ? new Date(tdp.uploadedAt).toLocaleDateString("en-US", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric" })
+    : "";
+  const who = cleanText(tdp.uploadedByName || tdp.uploadedBy || "");
+  const parts = [tdp.filename ? JSON.stringify(cleanText(tdp.filename)) : "", day ? `on ${day}` : "", who ? `by ${who}` : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join(" ")})` : "";
+}
+
 /**
  * Writes a confirmed import. Takes the same file back rather than the parsed rows, so
  * the titles stored are provably the ones HR previewed and a client cannot substitute
  * its own text.
+ *
+ * The TDP is uploaded once a year (the instructor's review, R9): the upload is recorded, and a second one for the
+ * same year is refused unless it replaces the first (`replace`). A replacement keeps what both list, adds what is new,
+ * and removes what the amended TDP leaves out, except a need still in use (a seminar of the year covers it, or it
+ * was accomplished) and needs carried from an earlier year. `dryRun` says what it would do and changes nothing.
+ * One transaction: a replacement removes and adds hundreds of needs, all or none.
  */
-app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res: any) => {
+app.post("/api/training/needs/import/commit", authenticateToken, transactional((req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
 
   const { base64Data, fileDigest, sheetName, filename } = req.body || {};
   const fiscalYear = req.body?.fiscalYear || activeFiscalYearLabel();
   const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+  const replace = req.body?.replace === true;
+  const dryRun = req.body?.dryRun === true;
+
+  // The refusals that need no workbook come first, so a refused request never unpacks one.
+  // Writing into a closed year would put 480 needs somewhere nothing ever shows them.
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === fiscalYear);
+  if (!fy) return res.status(400).json({ status: "error", message: `There is no fiscal year "${fiscalYear}".` });
+  if (fy.status === "Closed") return res.status(400).json({ status: "error", message: `The ${fiscalYear} plan is closed and cannot be changed.` });
+
+  // Uploaded once a year: once the year's TDP is in, a new workbook replaces it, and says so.
+  const inForce = currentTdp(db.tdpUploads, fiscalYear);
+  if (inForce && !replace) {
+    return res.status(409).json({
+      status: "error",
+      message: `The TDP for FY ${fiscalYear} is already uploaded${describeTdp(inForce)}. To change it, replace it with an amended TDP.`
+    });
+  }
+  if (!inForce && replace) {
+    return res.status(409).json({ status: "error", message: `No TDP has been uploaded for FY ${fiscalYear} yet, so there is nothing to replace: upload it first.` });
+  }
+
+  if (assignments.length > 200) {
+    return res.status(400).json({ status: "error", message: "That is more rows than one import can handle." });
+  }
 
   let buf: Buffer;
   let scanned: ReturnType<typeof scanPlanAWorkbook>;
@@ -8718,21 +8800,17 @@ app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res:
     return res.status(400).json({ status: "error", message: msg });
   }
 
-  if (crypto.createHash("sha256").update(buf).digest("hex") !== String(fileDigest || "")) {
+  const digest = crypto.createHash("sha256").update(buf).digest("hex");
+  if (digest !== String(fileDigest || "")) {
     return res.status(400).json({ status: "error", message: "The file changed since the preview. Please upload it again." });
   }
 
   const chosen = scanned.find(s => s.ref.name === sheetName);
   if (!chosen) return res.status(400).json({ status: "error", message: `That workbook has no sheet named "${sheetName}".` });
   if (!chosen.scan.isPlanA) return res.status(400).json({ status: "error", message: chosen.scan.reason || "That sheet is not Plan A." });
-
-  // Writing into a closed year would put 480 needs somewhere nothing ever shows them.
-  const fy = (db.fiscalYears || []).find((f: any) => f.label === fiscalYear);
-  if (!fy) return res.status(400).json({ status: "error", message: `There is no fiscal year "${fiscalYear}".` });
-  if (fy.status === "Closed") return res.status(400).json({ status: "error", message: `The ${fiscalYear} plan is closed and cannot be changed.` });
-
-  if (assignments.length > 200) {
-    return res.status(400).json({ status: "error", message: "That is more rows than one import can handle." });
+  // The real Plan A lists about 480; every need is checked and written in one turn of the server.
+  if (chosen.scan.blocks.reduce((n, b) => n + b.needs.length, 0) > MAX_IMPORT_NEEDS) {
+    return res.status(400).json({ status: "error", message: `That sheet lists more than ${MAX_IMPORT_NEEDS} training needs, more than one import can take.` });
   }
 
   // --- Validate every assignment BEFORE writing anything, so there are no partial imports.
@@ -8748,7 +8826,8 @@ app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res:
     }
     if (!a.employeeId) continue; // deliberately skipped
 
-    const emp = (db.employees || []).find((e: any) => e.id === a.employeeId || e.employeeId === a.employeeId);
+    // By internal id first, as the screen sends it and the TDP rule reads people (7j).
+    const emp = employeeByKey(String(a.employeeId));
     if (!emp) return res.status(404).json({ status: "error", message: `Row ${block.startRow} is mapped to an employee who no longer exists.` });
     if (emp.isActive === false) {
       return res.status(400).json({ status: "error", message: `${emp.fullName} is inactive, so their needs would not appear in the plan.` });
@@ -8759,15 +8838,107 @@ app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res:
     chosenEmployees.set(emp.id, emp);
     resolved.push({ block, emp });
   }
+  // A TDP with nobody in it would record the year as uploaded with nothing in it, and a replacement with nobody in it
+  // would take out every need not in use.
+  if (resolved.length === 0) {
+    return res.status(400).json({ status: "error", message: "No row is assigned to an employee, so there is nothing to upload." });
+  }
+
+  // --- What the TDP does to the year's plan. The plan's own needs are compared by the internal id (as the dedupe key
+  // is); a replacement keeps a need the amended TDP leaves out while it is in use (R9: a seminar must not point at
+  // nothing, nor Monitoring lose an accomplished training).
+  const isImportable = (category: unknown, title: unknown) =>
+    TRAINING_NEED_CATEGORIES.includes(category as TrainingNeedCategory) && typeof title === "string" && !!title.trim() && title.trim().length <= 300;
+  const incoming = resolved.flatMap(({ block, emp }) => block.needs
+    .filter((n: any) => isImportable(n.category, n.title))
+    .map((n: any) => ({ employeeId: emp.id, category: n.category, title: n.title })));
+  // A TDP with nothing in it (rows mapped to people with no needs): an amended one would only remove, and a first one
+  // would record the year as uploaded with nothing in it.
+  if (incoming.length === 0) {
+    return res.status(400).json({
+      status: "error",
+      message: replace
+        ? "The amended TDP lists no training needs for the rows mapped, so it would only remove. Check the sheet and the mapping."
+        : "The TDP lists no training needs for the rows mapped, so there is nothing to upload. Check the sheet and the mapping."
+    });
+  }
+  const yearNeeds = (db.trainingNeeds || [])
+    .filter((n: TrainingNeed) => n && n.fiscalYear === fiscalYear)
+    .map((n: TrainingNeed) => ({ employeeId: needPersonKey(n.employeeId), category: n.category, title: n.title, carriedFromFiscalYear: n.carriedFromFiscalYear, need: n }));
+  const today = manilaToday();
+  const yearSeminars = (db.trainingPrograms || []).filter(p => p && p.fiscalYear === fiscalYear && !p.archivedBeforeUse);
+  // In use for a seminar only for the person seated for it (the user's decision of 2026-11-02): a colleague's seat
+  // can't keep someone the amended TDP dropped identified for the training (12z).
+  const seated = seatedFor(db.trainingParticipants, yearSeminars, needPersonKey);
+  const inUse = (n: { employeeId: string; title: string; need: TrainingNeed }): TdpNeedUse | null => {
+    const seminar = seated.get(`${n.employeeId}|${normalizeTitle(n.title)}`);
+    if (seminar !== undefined) return { reason: "seminar", detail: cleanText(seminar).slice(0, 300) || "a seminar" };
+    const status = needAccomplishment(n.need, today);
+    if (status.accomplished) {
+      return { reason: "accomplished", detail: status.source === "override" ? "marked accomplished in Monitoring" : cleanText(String(status.evidence ?? "")) || "accomplished" };
+    }
+    return null;
+  };
+  // Only a replacement removes: a first upload finds at most needs carried in, which stay.
+  const change = replace ? planTdpReplace<(typeof yearNeeds)[number]>(yearNeeds, incoming, inUse) : null;
+  // The seminars it would leave covering nothing in the plan (they would need their own justification, 12z Part C).
+  const outside = change ? (() => {
+    const gone = new Set(change.removed);
+    const before = new Set(yearNeeds.map(n => normalizeTitle(n.title)));
+    const after = new Set([...yearNeeds.filter(n => !gone.has(n)).map(n => normalizeTitle(n.title)), ...change.added.map(n => normalizeTitle(n.title))]);
+    return seminarsLeavingTdp(yearSeminars, before, after).map(s => ({ id: s.id, title: cleanText(s.title).slice(0, 300) }));
+  })() : [];
+  const summary: TdpReplaceSummary | null = change && {
+    fiscalYear,
+    added: change.added.length,
+    addedNeeds: change.added.map(n => replaceNeedOf(n as { employeeId: string; category: TrainingNeedCategory; title: string })),
+    unchanged: change.unchanged.length,
+    // Named with the column it goes to, and the one it leaves (the need is still in it until the replacement).
+    moved: change.moved.map(m => ({ ...replaceNeedOf(m.need.need), category: m.category as TrainingNeedCategory, from: m.need.need.category })),
+    removed: change.removed.map(r => replaceNeedOf(r.need)),
+    kept: change.kept.map(k => ({ ...replaceNeedOf(k.need.need), reason: k.use.reason, detail: k.use.detail })),
+    seminarsOutside: outside,
+    carried: change.carried.length
+  };
+  // What HR confirms is what happens: the dry run's summary has a fingerprint, over the file and the rows' mapping too,
+  // and a replacement must bring it back. It is refused when the plan changed since (another officer's replacement, a
+  // seminar, Monitoring's mark), with what it does now.
+  const fingerprint = summary
+    ? crypto.createHash("sha256").update(JSON.stringify({ summary, file: digest, sheet: chosen.ref.name, rows: resolved.map(r => [r.block.key, r.emp.id]) })).digest("hex")
+    : null;
+  if (dryRun) {
+    // Nothing above changed the database: a dry run only says what the replacement would do.
+    if (!summary) return res.status(400).json({ status: "error", message: "A dry run shows what replacing the TDP would do; a first upload is checked in its preview." });
+    return res.json({ status: "success", data: { fiscalYear, sheetName: chosen.ref.name, replace: summary, fingerprint } });
+  }
+  if (summary && typeof req.body?.fingerprint !== "string") {
+    return res.status(400).json({ status: "error", message: "Check what the amended TDP changes first, then replace it." });
+  }
+  if (summary && req.body.fingerprint !== fingerprint) {
+    return res.status(409).json({
+      status: "error",
+      message: "The plan changed since you checked what the amended TDP would do. Check what it does now, then replace it.",
+      data: { code: "TDP_CHANGED", replace: summary, fingerprint }
+    });
+  }
+  if (change && change.removed.length > 0) {
+    const gone = new Set(change.removed.map(r => r.need));
+    db.trainingNeeds = (db.trainingNeeds || []).filter((n: TrainingNeed) => !gone.has(n));
+  }
+  // Moved in place: the need keeps its id, Monitoring's override and its remarks; only its column changes. So the write
+  // below finds it already in the plan, under the amended TDP's column.
+  for (const m of change?.moved ?? []) m.need.need.category = m.category as TrainingNeedCategory;
 
   // --- Write. One dedupe index for the whole batch: the per-need scan the single-add
   // path uses would be O(n^2) with an employee lookup inside it at this volume.
   const seen = new Set<string>(
     (db.trainingNeeds || [])
       .filter((n: any) => n.fiscalYear === fiscalYear)
-      .map((n: any) => trainingNeedKey(employeeIdForms(n.employeeId)[0], n.category, n.title))
+      .map((n: any) => trainingNeedKey(needPersonKey(n.employeeId), n.category, n.title))
   );
-  const before = seen.size;
+  // The plan as it was before this batch, so a need the file lists twice counts as a duplicate in the file (as the
+  // preview counts it), not as already in the plan because its first copy was just added.
+  const before = new Set(seen);
 
   let imported = 0, skippedDuplicateInFile = 0, skippedAlreadyInPlan = 0, i = 0;
   const perEmployee: any[] = [];
@@ -8776,41 +8947,110 @@ app.post("/api/training/needs/import/commit", authenticateToken, (req: any, res:
     let mine = 0, skipped = 0;
     for (const need of block.needs) {
       const key = trainingNeedKey(emp.id, need.category, need.title);
-      const wasThereBefore = seen.has(key);
+      const wasThereBefore = before.has(key);
       const r = createTrainingNeed(emp, need.category, need.title, fiscalYear, req.user.username, seen, String(i++));
       if (r.need) { imported++; mine++; }
       else {
         skipped++;
-        if (r.code === "duplicate") { if (wasThereBefore && before > 0) skippedAlreadyInPlan++; else skippedDuplicateInFile++; }
+        if (r.code === "duplicate") { if (wasThereBefore) skippedAlreadyInPlan++; else skippedDuplicateInFile++; }
       }
     }
     perEmployee.push({ employeeId: emp.id, fullName: emp.fullName, imported: mine, skipped });
   }
 
   const skippedRows = chosen.scan.blocks.length - resolved.length;
-  const safeName = String(filename || "").slice(0, 200).replace(/[\u0000-\u001f]/g, "");
+  // Cleaned like typed text (no control, direction or invisible characters), as the record, the audit entry and the
+  // notices show it, and cut again after cleaning (normalising can lengthen it).
+  const safeName = cleanText(String(filename || "").slice(0, 200)).slice(0, 200);
+  const actor = cleanText(req.user.fullName || req.user.username).slice(0, 200);
 
-  // One audit entry, not one per need - 480 rows would bury the log and rewrite
-  // data_store.json each time.
-  logEvent(req.user.id, req.user.username, req.user.role, "Import Plan A Workbook",
-    `Imported ${imported} training need(s) from "${safeName}" sheet "${chosen.ref.name}" into the ${fiscalYear} plan for ${resolved.length} employee(s); ` +
-    `${skippedRows} row(s) skipped, ${skippedDuplicateInFile} duplicate(s) in the file, ${skippedAlreadyInPlan} already in the plan.`);
+  // The upload, as Training Needs shows it: the TDP in force for the year from now on.
+  const counts = tdpCounts(db.trainingNeeds, fiscalYear);
+  const record: TdpUpload = {
+    id: `tdp-${crypto.randomUUID()}`,
+    fiscalYear,
+    kind: replace ? "replace" : "upload",
+    filename: safeName,
+    sheetName: cleanText(String(chosen.ref.name ?? "")).slice(0, 200),
+    uploadedAt: new Date().toISOString(),
+    uploadedBy: req.user.username,
+    uploadedByName: actor,
+    needs: counts.needs,
+    employees: counts.employees,
+    ...(change ? {
+      changes: { added: imported, removed: change.removed.length, kept: change.kept.length, moved: change.moved.length },
+      // So Plan A can say which of its needs the amended TDP left out (kept because still in use).
+      keptNeedIds: change.kept.map(k => k.need.need.id)
+    } : {})
+  };
+  if (!Array.isArray(db.tdpUploads)) db.tdpUploads = [];
+  db.tdpUploads.push(record);
 
-  if (imported > 0) {
-    notify({ role: UserRole.HR_OFFICER }, {
-      title: `${imported} training need(s) imported into Plan A`,
-      message: `Plan A for ${fiscalYear} gained ${imported} need(s) from the uploaded workbook "${safeName}".`,
-      type: "info",
+  if (change && summary) {
+    // What it added, moved, removed and kept, by name, so the log answers "where did this need go?" and "who gained
+    // one?" (the reasons a need was kept too). Names and titles are quoted.
+    const named = (list: { employee: string; title: string }[], extra: (n: any) => string = () => "") =>
+      list.slice(0, 20).map(n => `${auditNeedTitle(n.title)} for ${JSON.stringify(n.employee)}${extra(n)}`).join("; ") + (list.length > 20 ? `; and ${list.length - 20} more` : "");
+    logEvent(req.user.id, req.user.username, req.user.role, "Replace TDP",
+      `Replaced the FY ${fiscalYear} TDP with ${JSON.stringify(record.filename)} sheet ${JSON.stringify(record.sheetName)}: ${imported} need(s) added, ` +
+      `${change.moved.length} moved to another column, ${change.removed.length} removed, ${change.kept.length} kept though the amended TDP leaves them out, ` +
+      `${change.unchanged.length} unchanged; it now lists ${counts.needs} need(s) for ${counts.employees} employee(s).` +
+      (summary.addedNeeds.length ? ` Added: ${named(summary.addedNeeds, n => ` (${n.category})`)}.` : "") +
+      (summary.moved.length ? ` Moved: ${named(summary.moved, n => ` (${n.from} to ${n.category})`)}.` : "") +
+      (summary.removed.length ? ` Removed: ${named(summary.removed)}.` : "") +
+      (summary.kept.length ? ` Kept (in use): ${named(summary.kept)}.` : "") +
+      (summary.seminarsOutside.length ? ` Seminars left covering no need in the plan: ${summary.seminarsOutside.slice(0, 20).map(s => JSON.stringify(s.title)).join("; ")}.` : ""));
+    // Adding a need makes the TDP identify its person for a seminar (12z): one added to the officer's own plan is
+    // allowed, and flagged, as other acts on one's own record are.
+    const self = accountEmployee(req.user)?.id;
+    const own = self ? change.added.filter(n => n.employeeId === self) : [];
+    if (own.length > 0) {
+      flagSelfApproval(req.user, `added ${own.length} need(s) to their own FY ${fiscalYear} plan by replacing the TDP: ` +
+        own.slice(0, 20).map(n => auditNeedTitle(n.title)).join("; ") + (own.length > 20 ? `; and ${own.length - 20} more` : ""));
+    }
+    const notice = {
+      title: `TDP for FY ${fiscalYear} replaced`,
+      message: `${JSON.stringify(actor)} replaced the FY ${fiscalYear} TDP with ${JSON.stringify(record.filename)}: ` +
+        `${imported} need(s) added, ${change.moved.length} moved to another column, ${change.removed.length} removed, ` +
+        `${change.kept.length} kept because they are still in use.` +
+        (summary.seminarsOutside.length ? ` ${summary.seminarsOutside.length} seminar(s) now cover no need in the plan and need their own justification.` : ""),
+      type: "info" as const,
       link: { tab: "training_development", subTab: "plan-a" }
-    });
+    };
+    notify({ role: UserRole.HR_OFFICER }, notice);
+    // The Administrator approves the plan (the CRA, HSAC's step 6), so a replacement is theirs to know of.
+    if (req.user.role !== UserRole.SUPER_ADMIN) notify({ role: UserRole.SUPER_ADMIN }, notice);
+  } else {
+    // One audit entry, not one per need - 480 rows would bury the log and rewrite
+    // data_store.json each time. (Its wording is read back for years imported before uploads were recorded; the names
+    // are quoted as JSON, which that reading still finds.)
+    logEvent(req.user.id, req.user.username, req.user.role, "Import Plan A Workbook",
+      `Imported ${imported} training need(s) from ${JSON.stringify(safeName)} sheet ${JSON.stringify(record.sheetName)} into the ${fiscalYear} plan for ${resolved.length} employee(s); ` +
+      `${skippedRows} row(s) skipped, ${skippedDuplicateInFile} duplicate(s) in the file, ${skippedAlreadyInPlan} already in the plan.`);
+    // A row mapped to the officer's own record gives them needs too, as an addition by replacement does: flagged.
+    const self = accountEmployee(req.user)?.id;
+    const ownCount = self ? perEmployee.find(p => p.employeeId === self)?.imported ?? 0 : 0;
+    if (ownCount > 0) flagSelfApproval(req.user, `added ${ownCount} need(s) to their own FY ${fiscalYear} plan by uploading the TDP`);
+
+    if (imported > 0) {
+      notify({ role: UserRole.HR_OFFICER }, {
+        title: `${imported} training need(s) imported into Plan A`,
+        message: `Plan A for ${fiscalYear} gained ${imported} need(s) from the uploaded workbook ${JSON.stringify(safeName)}.`,
+        type: "info",
+        link: { tab: "training_development", subTab: "plan-a" }
+      });
+    }
   }
 
   saveDB();
   res.json({
     status: "success",
-    data: { fiscalYear, sheetName: chosen.ref.name, imported, skippedRows, skippedDuplicateInFile, skippedAlreadyInPlan, perEmployee }
+    data: {
+      fiscalYear, sheetName: chosen.ref.name, imported, skippedRows, skippedDuplicateInFile, skippedAlreadyInPlan, perEmployee, tdp: record,
+      ...(summary ? { replace: summary } : {})
+    }
   });
-});
+}));
 
 app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
@@ -8834,7 +9074,8 @@ app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) =
     return { title: e.title, employeeCount: e.employees.size, categories: [...e.categories], ...(mandate ? { mandate } : {}) };
   }));
 
-  res.json({ status: "success", data: { fiscalYear, needs: data } });
+  // Whether the year's TDP is in (R9): planning starts from it, and says so when it isn't.
+  res.json({ status: "success", data: { fiscalYear, needs: data, tdp: currentTdp(db.tdpUploads, fiscalYear) } });
 });
 
 // Plan A (needs) and Plan D (the same needs, checked off as of a date).
@@ -8842,7 +9083,11 @@ app.get("/api/training/needs", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();
   const asOf = toIsoDateLoose(req.query.asOf) || manilaToday();
-  res.json({ status: "success", data: { fiscalYear, asOf, offices: buildTrainingPlan(fiscalYear, asOf) } });
+  // The TDP in force for the year (R9), and how many needs were carried in from an earlier one.
+  res.json({
+    status: "success",
+    data: { fiscalYear, asOf, offices: buildTrainingPlan(fiscalYear, asOf), tdp: currentTdp(db.tdpUploads, fiscalYear), carried: tdpCounts(db.trainingNeeds, fiscalYear).carried }
+  });
 });
 
 interface CreateNeedResult {
@@ -8860,15 +9105,13 @@ function trainingNeedKey(employeeInternalId: string, category: string, title: st
 /**
  * The single place a training need is validated and created.
  *
- * Shared by the inline add-box and the workbook import so there is exactly one set of
- * rules. `seen` is the caller's dedupe index: the inline path omits it and pays for a
- * scan of db.trainingNeeds, while the bulk path pre-seeds it once — without that, 480
- * inserts would each re-scan every need and call employeeIdForms (itself a linear scan
- * of db.employees) inside the loop.
+ * Since R9 only the TDP's upload adds needs (the inline add-box is gone), and it is the one
+ * caller. `seen` is its dedupe index, seeded once from the year's plan: a scan per need would
+ * be O(n^2) with an employee lookup inside it, at 480 needs.
  *
  * `idSuffix` exists because `Date.now()` is not unique across a bulk insert: hundreds of
  * needs created in the same millisecond collide often enough that two could share an id,
- * which would make DELETE /api/training/needs/:id remove the wrong row.
+ * which would make Monitoring's override land on the wrong row.
  */
 function createTrainingNeed(
   emp: any,
@@ -8876,8 +9119,8 @@ function createTrainingNeed(
   rawTitle: string,
   fiscalYear: string,
   username: string,
-  seen?: Set<string>,
-  idSuffix?: string
+  seen: Set<string>,
+  idSuffix: string
 ): CreateNeedResult {
 
   if (!TRAINING_NEED_CATEGORIES.includes(category)) {
@@ -8888,18 +9131,12 @@ function createTrainingNeed(
   if (cleanTitle.length > 300) return { need: null, code: "too-long", message: "Keep the needed training under 300 characters." };
 
   const key = trainingNeedKey(emp.id, category, cleanTitle);
-  const isDuplicate = seen
-    ? seen.has(key)
-    : (db.trainingNeeds || []).some(n =>
-        n.fiscalYear === fiscalYear && n.category === category &&
-        employeeIdForms(n.employeeId).includes(emp.id) &&
-        normalizeTitle(n.title) === normalizeTitle(cleanTitle));
-  if (isDuplicate) {
+  if (seen.has(key)) {
     return { need: null, code: "duplicate", message: `"${cleanTitle}" is already listed for ${emp.fullName} under this column.` };
   }
 
   const need: TrainingNeed = {
-    id: `need-${Date.now()}-${idSuffix ?? Math.floor(Math.random() * 100000)}`,
+    id: `need-${Date.now()}-${idSuffix}`,
     employeeId: emp.id,
     fiscalYear,
     category,
@@ -8909,7 +9146,7 @@ function createTrainingNeed(
   };
   if (!db.trainingNeeds) db.trainingNeeds = [];
   db.trainingNeeds.push(need);
-  if (seen) seen.add(key);
+  seen.add(key);
   return { need, code: null, message: "" };
 }
 
@@ -8917,49 +9154,27 @@ function createTrainingNeed(
 // the log, where a direction mark would turn the rest of the line around, and quoted as JSON, where a
 // quote would pass for more of the line.
 function auditNeedTitle(title: unknown): string {
-  return JSON.stringify(cleanText(String(title ?? "").slice(0, 300)));
+  // Cut again after cleaning: normalising can lengthen a title many times over.
+  return JSON.stringify(cleanText(String(title ?? "").slice(0, 300)).slice(0, 300));
 }
 
+// A need is added only through the TDP (R9): uploading the year's, or an amended one in its place.
 app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
-  const { employeeId, category, title } = req.body || {};
-  const fiscalYear = req.body?.fiscalYear || activeFiscalYearLabel();
-
-  const emp = (db.employees || []).find(e => e.id === employeeId || e.employeeId === employeeId);
-  if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
-
-  const result = createTrainingNeed(emp, category, title, fiscalYear, req.user.username);
-  if (!result.need) return res.status(400).json({ status: "error", message: result.message });
-
-  const need = result.need;
-  logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need",
-    `Added ${auditNeedTitle(need.title)} (${category}) for ${emp.fullName} in the ${fiscalYear} Training and Development Plan.`);
-  saveDB();
-  res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
+  res.status(409).json({ status: "error", message: PLAN_FROM_TDP });
 });
 
+// Monitoring's decision on a need, and its remarks. Its title and column are the TDP's (R9): they change only through
+// an amended TDP.
 app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const need = (db.trainingNeeds || []).find(n => n.id === req.params.id);
   if (!need) return res.status(404).json({ status: "error", message: "Training need not found." });
 
   const { title, category, remarks, accomplishedOverride } = req.body || {};
-  // Who the TDP identifies follows these titles (12z), so a rename is logged with the old title too.
-  const titleBefore = need.title;
-  if (title !== undefined) {
-    // As on create: text, at most 300 characters. Every TDP check matches titles (12z), so one far
-    // longer would hold the server up each time.
-    if (typeof title !== "string") return res.status(400).json({ status: "error", message: "Enter the needed training." });
-    const cleanTitle = title.trim();
-    if (!cleanTitle) return res.status(400).json({ status: "error", message: "Enter the needed training." });
-    if (cleanTitle.length > 300) return res.status(400).json({ status: "error", message: "Keep the needed training under 300 characters." });
-    need.title = cleanTitle;
-  }
-  if (category !== undefined) {
-    if (!TRAINING_NEED_CATEGORIES.includes(category)) {
-      return res.status(400).json({ status: "error", message: "Unknown column for this needed training." });
-    }
-    need.category = category;
+  // Sent back as they are, they change nothing; a change is the TDP's.
+  if ((title !== undefined && title !== need.title) || (category !== undefined && category !== need.category)) {
+    return res.status(409).json({ status: "error", message: PLAN_FROM_TDP });
   }
   if (remarks !== undefined) need.remarks = String(remarks).trim() || undefined;
   // null clears the override and hands the decision back to the evidence.
@@ -8971,22 +9186,55 @@ app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
 
   const emp = (db.employees || []).find(e => e.id === need.employeeId || e.employeeId === need.employeeId);
   logEvent(req.user.id, req.user.username, req.user.role, "Update Training Need",
-    `Updated ${titleBefore !== need.title ? `${auditNeedTitle(titleBefore)} to ` : ""}${auditNeedTitle(need.title)} (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
+    `Updated ${auditNeedTitle(need.title)} (${need.category}) for ${emp ? emp.fullName : need.employeeId} in the ${need.fiscalYear} plan.`);
   saveDB();
   res.json({ status: "success", data: { ...need, status: needAccomplishment(need, manilaToday()) } });
 });
 
+// A need leaves the plan only through an amended TDP (R9), except one carried in unmet from an earlier year by the
+// rollover: it is no TDP's, so no replacement can remove it, and HR and the Administrator may (the user's decision of
+// 2026-11-02).
 app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
-  const index = (db.trainingNeeds || []).findIndex(n => n.id === req.params.id);
+  const index = (db.trainingNeeds || []).findIndex(n => n && n.id === req.params.id);
   if (index === -1) return res.status(404).json({ status: "error", message: "Training need not found." });
+  const need = db.trainingNeeds[index];
+  if (!need.carriedFromFiscalYear) return res.status(409).json({ status: "error", message: PLAN_FROM_TDP });
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === need.fiscalYear);
+  if (fy?.status === "Closed") return res.status(400).json({ status: "error", message: `The ${need.fiscalYear} plan is closed and cannot be changed.` });
 
-  const [removed] = db.trainingNeeds.splice(index, 1);
-  const emp = (db.employees || []).find(e => e.id === removed.employeeId || e.employeeId === removed.employeeId);
+  // In use, it stays, as a replacement keeps it: its person seated for it on a seminar of the year (their seat would
+  // read "Outside the TDP", 12z), or accomplished (Monitoring would lose it). Only a need that no longer applies goes.
+  const emp = employeeByKey(need.employeeId);
+  const who = cleanText(emp?.fullName || need.employeeId).slice(0, 200);
+  const yearSeminars = (db.trainingPrograms || []).filter(p => p && p.fiscalYear === need.fiscalYear && !p.archivedBeforeUse);
+  const seatedOn = seatedFor(db.trainingParticipants, yearSeminars, needPersonKey).get(`${needPersonKey(need.employeeId)}|${normalizeTitle(need.title)}`);
+  if (seatedOn !== undefined) {
+    return res.status(409).json({
+      status: "error",
+      message: `${auditNeedTitle(need.title)} can't be removed for ${who}: they are seated for it on ${JSON.stringify(cleanText(seatedOn).slice(0, 300))}, and their seat rests on it.`
+    });
+  }
+  if (needAccomplishment(need, manilaToday()).accomplished) {
+    return res.status(409).json({ status: "error", message: `${auditNeedTitle(need.title)} can't be removed for ${who}: it is accomplished, and Monitoring records it.` });
+  }
+
+  // As a replacement says it (12z Part C): the seminars this was the last need in the plan for now cover none, so they
+  // read "Not in the TDP" and need their own justification.
+  const yearNeeds = (db.trainingNeeds || []).filter(n => n && n.fiscalYear === need.fiscalYear);
+  const outside = seminarsLeavingTdp(
+    yearSeminars,
+    new Set(yearNeeds.map(n => normalizeTitle(n.title))),
+    new Set(yearNeeds.filter(n => n !== need).map(n => normalizeTitle(n.title)))
+  ).map(s => ({ id: s.id, title: cleanText(s.title).slice(0, 300) }));
+
+  db.trainingNeeds.splice(index, 1);
   logEvent(req.user.id, req.user.username, req.user.role, "Remove Training Need",
-    `Removed ${auditNeedTitle(removed.title)} (${removed.category}) for ${emp ? emp.fullName : removed.employeeId} from the ${removed.fiscalYear} plan.`);
+    `Removed ${auditNeedTitle(need.title)} (${need.category}), carried in unmet from FY ${cleanText(String(need.carriedFromFiscalYear)).slice(0, 20)}, ` +
+    `for ${JSON.stringify(who)} from the ${need.fiscalYear} plan.` +
+    (outside.length ? ` Seminars left covering no need in the plan: ${outside.slice(0, 20).map(s => JSON.stringify(s.title)).join("; ")}.` : ""));
   saveDB();
-  res.json({ status: "success", message: "Training need removed." });
+  res.json({ status: "success", message: "Training need removed.", data: { seminarsOutside: outside } });
 });
 
 // --- Mandated trainings (HSAC RAB 1's step 5, "Prioritization – statutory/legal mandates"; 12z Part D) ---

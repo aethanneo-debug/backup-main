@@ -1,6 +1,7 @@
-import { KeyboardEvent, useEffect, useId, useMemo, useState } from "react";
+import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarCheck, ClipboardList, Loader2, Search } from "lucide-react";
 import {
+  TdpUpload,
   TrainingCandidate,
   TrainingNeedCatalogItem,
   TrainingNeedCategory,
@@ -33,13 +34,18 @@ interface PlanNeedPickerProps {
   onPick: (item: TrainingNeedCatalogItem) => void;
   /** Opens step 1, Training Needs, from the empty state. */
   onOpenPlan?: () => void;
+  /** The year's TDP as the plan's list gave it (R9): null when none is uploaded yet, undefined while it loads or
+   * when the list couldn't be loaded. */
+  onTdp?: (tdp: TdpUpload | null | undefined) => void;
 }
 
-export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPlan }: PlanNeedPickerProps) {
+export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPlan, onTdp }: PlanNeedPickerProps) {
   const headingId = useId();
   const helpId = useId();
   const listId = useId();
   const [needs, setNeeds] = useState<TrainingNeedCatalogItem[]>([]);
+  // The year's TDP in force (R9): null when none is uploaded yet.
+  const [tdp, setTdp] = useState<TdpUpload | null>(null);
   const [loading, setLoading] = useState(true);
   // null while there is no error; "" when the server gave no reason.
   const [error, setError] = useState<string | null>(null);
@@ -48,16 +54,23 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  // Read through a ref, so a parent's new callback doesn't reload the list.
+  const tdpListener = useRef(onTdp);
+  tdpListener.current = onTdp;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    tdpListener.current?.(undefined);
     apiCall(`/api/training/needs/catalog?fiscalYear=${encodeURIComponent(fiscalYear)}`)
       .then(res => {
         if (cancelled) return;
-        if (res.status === "success") setNeeds(res.data?.needs ?? []);
-        else setError(res.message || "");
+        if (res.status === "success") {
+          setNeeds(res.data?.needs ?? []);
+          setTdp(res.data?.tdp ?? null);
+          tdpListener.current?.(res.data?.tdp ?? null);
+        } else setError(res.message || "");
       })
       .catch(err => { if (!cancelled) setError(err?.message || ""); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -169,10 +182,11 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
           </button>
         </div>
       ) : needs.length === 0 ? (
-        <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-600">
+        <div data-tdp="picker-empty" className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-600">
           <ClipboardList size={14} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
           <p>
-            No trainings in the {fiscalYear} plan yet. Add them in{" "}
+            {/* The plan comes from the year's TDP (R9): with none uploaded, that is where to go. */}
+            {tdp ? `The FY ${fiscalYear} TDP lists no trainings yet. See it in ` : `No TDP is uploaded for FY ${fiscalYear} yet, so there is nothing to pick from. Upload it in `}
             {onOpenPlan ? (
               <button
                 type="button"

@@ -117,6 +117,9 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Record Training Expense">Training expenses recorded by HR</option>
             <option value="Send Representative">Representatives sent</option>
             <option value="Mandated Training">Mandated trainings</option>
+            <option value="Import Plan A Workbook">TDP uploads</option>
+            <option value="Replace TDP">TDP replaced</option>
+            <option value="Remove Training Need">Plan A needs removed</option>
             <option value="Register Asset">Asset Register</option>
             <option value="Assign Accountability">Accountability (PAR)</option>
             <option value="Act on Request">Filing Actions</option>

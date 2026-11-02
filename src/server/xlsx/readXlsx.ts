@@ -42,8 +42,13 @@ const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
 const SIG_LOCAL = 0x04034b50;
 
-// A single decompressed part above this is refused, so a zip bomb cannot exhaust memory.
-const MAX_PART_BYTES = 40 * 1024 * 1024;
+// A single decompressed part above this is refused, so a zip bomb cannot exhaust memory. The real Plan A workbook's
+// largest part is a few hundred KB.
+const MAX_PART_BYTES = 10 * 1024 * 1024;
+// And all the parts read from one workbook together, and its sheets: each part is parsed once (`grid` keeps it), so a
+// workbook that names one huge part from many sheet tags can't make the server parse it again and again.
+const MAX_TOTAL_BYTES = 30 * 1024 * 1024;
+const MAX_SHEETS = 50;
 
 interface ZipEntry {
   method: number;
@@ -106,12 +111,16 @@ function readPart(buf: Buffer, entries: Map<string, ZipEntry>, name: string): st
   }
   const start = lh + 30 + buf.readUInt16LE(lh + 26) + buf.readUInt16LE(lh + 28);
   const raw = buf.subarray(start, start + e.compressedSize);
+  const tooLarge = "That workbook is too large to read. The Plan A workbook should be well under 20 MB.";
+  // A stored part is its own size: held to the same limit as one unpacked.
+  if (e.method === 0 && raw.length > MAX_PART_BYTES) throw new XlsxReadError(tooLarge);
 
   let out: Buffer;
   try {
     // Stored (0) or deflated (8). Zip deflate has no zlib header, hence inflateRaw.
     out = e.method === 0 ? Buffer.from(raw) : inflateRawSync(raw, { maxOutputLength: MAX_PART_BYTES });
-  } catch {
+  } catch (err: any) {
+    if (err?.code === "ERR_BUFFER_TOO_LARGE") throw new XlsxReadError(tooLarge);
     throw new XlsxReadError("This workbook could not be opened. It may be corrupt or password-protected.");
   }
   return out.toString("utf8");
@@ -151,8 +160,17 @@ export function readXlsxWorkbook(buf: Buffer): XlsxWorkbook {
     throw new XlsxReadError("That file is a zip but not an Excel workbook. Please upload the .xlsx file.");
   }
 
+  // Every part this workbook is read for counts against one total.
+  let total = 0;
+  const read = (name: string) => {
+    const text = readPart(buf, entries, name);
+    total += text.length;
+    if (total > MAX_TOTAL_BYTES) throw new XlsxReadError("That workbook is too large to read. The Plan A workbook should be well under 20 MB.");
+    return text;
+  };
+
   // rId -> target part. Targets are relative to xl/ and may use ../ or a leading slash.
-  const relsXml = readPart(buf, entries, "xl/_rels/workbook.xml.rels");
+  const relsXml = read("xl/_rels/workbook.xml.rels");
   const rels = new Map<string, { target: string; type: string }>();
   for (const m of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)) {
     const tag = m[0];
@@ -169,8 +187,11 @@ export function readXlsxWorkbook(buf: Buffer): XlsxWorkbook {
   // Sheets in tab order. sheetId is NOT the file number - "Plan A - 2026" is sheetId 5
   // but lives in sheet2.xml - so the r:id relationship is the only reliable link.
   const sheets: XlsxSheetRef[] = [];
-  const workbookXml = readPart(buf, entries, "xl/workbook.xml");
+  const workbookXml = read("xl/workbook.xml");
   for (const m of workbookXml.matchAll(/<sheet\b[^>]*?\/?>/g)) {
+    if (sheets.length >= MAX_SHEETS) {
+      throw new XlsxReadError("That workbook has too many sheets. Please upload the Training and Development Plan workbook.");
+    }
     const tag = m[0];
     const name = /\bname="([^"]*)"/.exec(tag)?.[1];
     const rid = /\br:id="([^"]+)"/.exec(tag)?.[1];
@@ -185,14 +206,19 @@ export function readXlsxWorkbook(buf: Buffer): XlsxWorkbook {
   // Shared strings: most cell text lives here and is referenced by index.
   const ssPart = [...rels.values()].find(r => /\/sharedStrings$/.test(r.type))?.target || "xl/sharedStrings.xml";
   const shared: string[] = [];
-  const ssXml = readPart(buf, entries, ssPart);
+  const ssXml = read(ssPart);
   for (const m of ssXml.matchAll(/<si\b(?:[^>]*\/>|[^>]*>([\s\S]*?)<\/si>)/g)) {
     shared.push(m[1] === undefined ? "" : textOf(m[1]));
   }
 
+  // Parsed once per part, however many sheet tags name it.
+  const grids = new Map<string, SheetGrid>();
   function grid(part: string): SheetGrid {
-    const xml = readPart(buf, entries, part);
+    const known = grids.get(part);
+    if (known) return known;
+    const xml = read(part);
     const rows: SheetGrid = new Map();
+    grids.set(part, rows);
 
     for (const m of xml.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attrs = m[1] || "";

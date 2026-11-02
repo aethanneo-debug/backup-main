@@ -7,6 +7,14 @@ interface Props {
   preview: PlanAImportPreview;
   /** key -> employeeId, or null to skip that row. */
   assignments: Record<string, string | null>;
+  /** "replace": an amended TDP. Its counts of what is added come from the dry run, not from here. */
+  mode?: "upload" | "replace";
+  /** The confirm button's label ("Import" by default). */
+  confirmLabel?: string;
+  /** Drawn as a secondary button: another step below is the main one. */
+  confirmSecondary?: boolean;
+  /** A request is on its way: the confirm button waits. */
+  busy?: boolean;
   onAssign: (key: string, employeeId: string | null) => void;
   onSheetChange: (sheetName: string) => void;
   onCancel: () => void;
@@ -29,7 +37,8 @@ const SHORT_CATEGORY: Record<string, string> = {
  * deliberately skipped — before anything is written.
  */
 export default function PlanAImportPreviewTable({
-  preview, assignments, onAssign, onSheetChange, onCancel, onConfirm
+  preview, assignments, mode = "upload", confirmLabel = "Import", confirmSecondary = false, busy = false,
+  onAssign, onSheetChange, onCancel, onConfirm
 }: Props) {
   const [employees, setEmployees] = useState<Option[]>([]);
 
@@ -179,26 +188,41 @@ export default function PlanAImportPreviewTable({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
-        <p className="text-[11px] text-slate-600">
-          Will add <strong className="font-mono text-slate-800">{Math.max(0, willAdd)}</strong> need
-          {willAdd === 1 ? "" : "s"} for <strong className="font-mono text-slate-800">{mappedRows}</strong> employee
-          {mappedRows === 1 ? "" : "s"}. <span className="text-slate-400">{preview.totals.blocks - mappedRows} row(s) skipped.</span>
-        </p>
+        {mode === "replace" ? (
+          // What a replacement adds and removes depends on the whole plan, so the dry run says it; here, only the mapping.
+          <p className="min-w-0 flex-1 basis-64 text-[11px] text-slate-600">
+            <strong className="font-mono text-slate-800">{mappedRows}</strong> of {preview.totals.blocks} row
+            {preview.totals.blocks === 1 ? "" : "s"} mapped to an employee.{" "}
+            <span className="text-slate-500">
+              Anyone in the plan no row is mapped to is left out of the amended TDP: their needs are removed, unless still in use.
+            </span>
+          </p>
+        ) : (
+          <p className="text-[11px] text-slate-600">
+            Will add <strong className="font-mono text-slate-800">{Math.max(0, willAdd)}</strong> need
+            {willAdd === 1 ? "" : "s"} for <strong className="font-mono text-slate-800">{mappedRows}</strong> employee
+            {mappedRows === 1 ? "" : "s"}. <span className="text-slate-400">{preview.totals.blocks - mappedRows} row(s) skipped.</span>
+          </p>
+        )}
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            disabled={busy}
+            className="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            disabled={mappedRows === 0}
-            className="cursor-pointer rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
+            disabled={mappedRows === 0 || busy}
+            data-tdp={mode === "replace" ? "check" : undefined}
+            className={`cursor-pointer rounded-lg px-4 py-1.5 text-xs font-semibold shadow-sm disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 ${
+              confirmSecondary ? "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" : "bg-blue-600 text-white hover:bg-blue-700"
+            }`}
           >
-            Import
+            {busy && mode === "replace" ? "Checking…" : confirmLabel}
           </button>
         </div>
       </div>

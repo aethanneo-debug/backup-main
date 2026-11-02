@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { UserRole, TRAINING_EXPENSE_CATEGORIES, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput, type SeminarTdpJustificationInput, type TrainingProgramRow } from "../types";
+import { UserRole, TRAINING_EXPENSE_CATEGORIES, TrainingProgram, TrainingParticipantRow, TrainingLiquidationExpense, Employee, TrainingNeedCatalogItem, ScreenFocus, type TdpJustificationInput, type SeminarTdpJustificationInput, type TrainingProgramRow, type TdpUpload } from "../types";
 import { useRecordHighlight } from "./ui/useRecordHighlight";
 import { apiCall, apiErrorCode, formatCurrency, getLocalTodayString, type ApiError } from "../utils";
 import { cleanText } from "../inputText";
@@ -28,7 +28,7 @@ const onRoster = (part: { status?: string }) => part.status !== "Cancelled" && p
 
 // The four steps of the cycle, in the order the office works through them.
 const TAB_BLURB: Record<string, string> = {
-  "plan-a": "Step 1 — list what each employee still needs.",
+  "plan-a": "Step 1 — upload the year's TDP: its Plan A lists what each employee still needs.",
   "programs": "Step 2 — run the seminar: create it, link it to the plan, pick participants.",
   "plan-d": "Step 3 — see which needs have been accomplished.",
   "evaluations": "Step 4 — evaluate what each participant brought back from the seminar."
@@ -90,6 +90,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   
   // Opens on Plan A: the plan is written before the seminars that answer it.
   const [activeTab, setActiveTab] = useState<"programs" | "plan-a" | "plan-d" | "evaluations">("plan-a");
+  // The year's TDP as "Add a seminar from the plan" loaded it (R9: seminars start from it): null when none is
+  // uploaded yet, undefined while it is loading or couldn't be.
+  const [planTdp, setPlanTdp] = useState<TdpUpload | null | undefined>(undefined);
 
   // A notification opened this screen: a seminar is shown in Programs & Budget (scrolled to and
   // outlined), anything else opens its step.
@@ -1092,30 +1095,45 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     );
   };
 
+  // HR and the Administrator read the plan and save seminars (server-side): the plan's picker, its notice and the
+  // line that says which way to add a seminar are theirs.
+  const canPlan = [UserRole.SUPER_ADMIN, UserRole.HR_OFFICER].includes(user.role);
+
   return (
     // w-full min-w-0: App's <main> is a flex row, and a flex item never shrinks below its
     // content's width by default. Without these, a row being edited (fixed-width date and
     // time boxes) widened the whole page instead of scrolling inside the table's own box.
     <div className="max-w-7xl mx-auto space-y-6 w-full min-w-0">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Training Development Plan</h2>
-          <p className="text-slate-500">{TAB_BLURB[activeTab]}</p>
-        </div>
-        {activeTab === "programs" && (
-          <div className="flex gap-3">
-            {user.role === UserRole.SUPER_ADMIN && (
-              <button onClick={() => {
-                setNewAnnualBudget(activeNewAnnual.toString());
-                setShowBudgetModal(true);
-              }} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 flex items-center gap-2">
-                <DollarSign size={18} /> Set Annual Budget
-              </button>
-            )}
-            <button onClick={handleAddRow} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
-              <Plus size={18} /> Add Training Program
-            </button>
+      <div>
+        <div className="flex flex-wrap justify-between items-end gap-3">
+          <div className="min-w-0">
+            <h2 className="text-2xl font-bold text-slate-800">Training Development Plan</h2>
+            <p className="text-slate-500">{TAB_BLURB[activeTab]}</p>
           </div>
+          {activeTab === "programs" && (
+            // ml-auto: when the buttons wrap under the title they stay on the right, over their guide line.
+            <div className="ml-auto flex flex-wrap justify-end gap-3">
+              {user.role === UserRole.SUPER_ADMIN && (
+                <button onClick={() => {
+                  setNewAnnualBudget(activeNewAnnual.toString());
+                  setShowBudgetModal(true);
+                }} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 flex items-center gap-2">
+                  <DollarSign size={18} /> Set Annual Budget
+                </button>
+              )}
+              <button onClick={handleAddRow} aria-describedby={canPlan ? "add-seminar-help" : undefined} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                <Plus size={18} /> Add Training Program
+              </button>
+            </div>
+          )}
+        </div>
+        {/* Seminars start from the TDP (R9); "Add Training Program" stays for the exception (the team's decision),
+            held outside the TDP with its justification (HSAC answer 8, 12z Part C). Its own line, under the buttons. */}
+        {activeTab === "programs" && canPlan && (
+          <p id="add-seminar-help" data-tdp="add-help" className="ml-auto mt-1.5 max-w-xl text-right text-[11px] leading-snug text-slate-500">
+            A training in the TDP: <strong className="font-semibold text-slate-700">Add a seminar from the plan</strong>, below.
+            One the TDP doesn't list: <strong className="font-semibold text-slate-700">Add Training Program</strong> (Save asks why it is held outside the TDP).
+          </p>
         )}
       </div>
 
@@ -1170,6 +1188,23 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       {activeTab === "evaluations" && <TrainingEvaluationsDesk />}
 
       {activeTab === "programs" && (<>
+
+      {/* Seminars start from the year's TDP (R9). Until it is uploaded, say so and lead to it. */}
+      {canPlan && planTdp === null && (
+        <div data-tdp="notice" role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="flex min-w-0 items-start gap-2 text-sm text-amber-900">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span><strong>No TDP uploaded for FY {fyLabel} yet:</strong> seminars start from it.</span>
+          </p>
+          <button
+            type="button"
+            onClick={() => setActiveTab("plan-a")}
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            Upload it in Training Needs <ChevronRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4">Fiscal Year Budget ({activeFy?.label || "2026"})</h3>
@@ -1229,7 +1264,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         {/* The quickest start: a training from this year's plan becomes a seminar row with
             its title, its plan link and the employees who listed it. HR and the Administrator
             only: they alone may read the plan and save seminars (server-side). */}
-        {[UserRole.SUPER_ADMIN, UserRole.HR_OFFICER].includes(user.role) && (
+        {canPlan && (
           <PlanNeedPicker
             fiscalYear={fyLabel}
             // A finished seminar still covered its need this year, archived or not; one archived
@@ -1237,6 +1272,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
             seminars={fyPrograms.filter(p => !p.archivedBeforeUse)}
             onPick={handleAddFromPlan}
             onOpenPlan={() => setActiveTab("plan-a")}
+            onTdp={setPlanTdp}
           />
         )}
         <div className="overflow-x-auto border border-slate-200 rounded-lg">

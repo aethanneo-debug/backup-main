@@ -522,6 +522,66 @@ export interface PlanAImportResult {
   skippedDuplicateInFile: number;
   skippedAlreadyInPlan: number;
   perEmployee: { employeeId: string; fullName: string; imported: number; skipped: number }[];
+  /** The upload as recorded (absent on a dry run). */
+  tdp?: TdpUpload;
+  /** A replacement: what it does, or did, to the plan. */
+  replace?: TdpReplaceSummary;
+}
+
+// --- THE TDP, UPLOADED ONCE A YEAR (the instructor's review, R9) ---
+// Plan A comes from the RAB-1 workbook HR uploads for a fiscal year; an amended one replaces it. Every upload and
+// replacement is kept, in order: the latest for a year is the TDP in force.
+
+export interface TdpUpload {
+  id: string;
+  fiscalYear: string;
+  /** "upload": the year's first; "replace": an amended TDP; "before-records": imported before uploads were recorded,
+   * worked out at load from the plan and, when the audit log has it, the import's entry. */
+  kind: "upload" | "replace" | "before-records";
+  filename: string;        // "" when not known
+  sheetName: string;
+  uploadedAt: string;      // ISO; "" when not known
+  uploadedBy: string;      // the username; "" when not known
+  uploadedByName: string;
+  /** The year's TDP needs right after it, and how many employees they are for (needs carried from an earlier year
+   * aren't part of a TDP, so they aren't counted). */
+  needs: number;
+  employees: number;
+  /** A replacement: what it changed. */
+  changes?: { added: number; removed: number; kept: number; moved: number };
+  /** A replacement: the needs it kept though the amended TDP leaves them out (still in use), so Plan A can mark them. */
+  keptNeedIds?: string[];
+}
+
+/** One need named in a replacement's summary. */
+export interface TdpReplaceNeed {
+  employee: string;        // the employee's full name
+  category: TrainingNeedCategory;
+  title: string;
+}
+
+/** What replacing the TDP does to the year's plan (a dry run says it before; the replacement says it after). */
+export interface TdpReplaceSummary {
+  fiscalYear: string;
+  /** In the amended TDP and new to the plan: how many, and which (adding a need is what makes the TDP identify
+   * someone for a seminar, 12z). */
+  added: number;
+  addedNeeds: TdpReplaceNeed[];
+  /** In both, left as they were (with any Monitoring override and remarks). */
+  unchanged: number;
+  /** Listed for the same person under another column (`category`, from `from`): moved there, with any Monitoring
+   * override and remarks. */
+  moved: (TdpReplaceNeed & { from: TrainingNeedCategory })[];
+  /** Not in the amended TDP, and nothing uses them. */
+  removed: TdpReplaceNeed[];
+  /** Not in the amended TDP, but still in use, so kept: its person is seated for it on a seminar of the year, or it
+   * was already accomplished. `detail` names the seminar or the evidence. */
+  kept: (TdpReplaceNeed & { reason: "seminar" | "accomplished"; detail: string })[];
+  /** Seminars of the year in the TDP now that would cover nothing in the plan after it: they would read "Not in the
+   * TDP", and need their own justification (12z Part C). */
+  seminarsOutside: { id: string; title: string }[];
+  /** Carried from an earlier year: not part of any TDP, always kept. */
+  carried: number;
 }
 
 // --- POST-TRAINING PERFORMANCE EVALUATION REPORT ---
