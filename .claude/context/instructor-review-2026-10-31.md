@@ -16,9 +16,9 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 |---|---|---|
 | 1 | R1 venue, R2 expense lines, R3 transportation | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 2 | R6 viewer, file allow-list, Print; file storage; 12e | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
-| 3 | R4 certificate, R5 required documents | Built 2026-11-01; reviewed three times, every finding fixed, 2026-11-02 (known-issues 12aa); not committed |
-| 4 | R7 notices that open on the missing item | Built and reviewed 2026-11-02 (known-issues 12aa), not committed |
-| 5 | R8 tables and View | Not started |
+| 3 | R4 certificate, R5 required documents | Built 2026-11-01; reviewed three times, every finding fixed; pushed 2026-11-02 (known-issues 12aa) |
+| 4 | R7 notices that open on the missing item | Built, reviewed and pushed 2026-11-02 (known-issues 12aa) |
+| 5 | R8 tables and View | Built and reviewed 2026-11-02, every finding fixed but two nits (known-issues 12aa); not committed |
 | 6 | R9 the TDP once a year | Not started |
 | 7 | R10 picker, R11 history and reports | Not started |
 | 8 | R12 demo data | Not started; ask first |
@@ -159,6 +159,12 @@ Build (with the `ui-designer` agent):
 - The Liquidations Index rows open the same View. So does the portal's settlement log, as a table.
 - Cash Advance Requests and the Reimbursement Queue also stack as cards, so they get the same treatment. Check the other lists.
 - Keep notice deep links, the self-approval warnings, the Return checklist and focus handling (`ui/ModalDialog.tsx`, `useRecordHighlight`). Newest first is the instructor's rule for request lists.
+
+Decided in Phase 5's plan (2026-11-02):
+- The other lists that stacked as cards became tables too: the Cash Advance Desk (its "latest 5" lists became chips over one table) and the Reimbursement Queue ("Ready to pay" and "Paid"). HR's and the Administrator's request lists, already tables, gained the search and the pages; their header tick takes only the page on screen. My Filed Requests, the seminar cards and Security Audit Logs stay as they are.
+- A notice opens the report's View on Finance's desk, and moves its list to that row's page, clearing a search or filter that hides it. A returned report on the portal still lands on the form (R7).
+- Newest first everywhere; any column can be sorted. Validate closes the View with a message instead of a pop-up; the self-approval warning and its confirmation stay.
+- Report Excel exports every row the Liquidations Index matches, on all its pages.
 
 ### R9. The TDP is uploaded once a year, and seminars come from it
 
