@@ -1,49 +1,99 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, HandCoins, Loader2, Printer, Wallet } from "lucide-react";
-import type { LiquidationSubmission } from "../../types";
-import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, HandCoins, Wallet } from "lucide-react";
+import { firstTimestamp, formatCurrency, formatDate } from "../../utils";
+import { sumPesos } from "../../liquidationMoney";
+import type { SortValue } from "../../tableView";
 import SectionCard, { SectionCount } from "../ui/SectionCard";
-import { dvNumberFrom, dvPrefix, readDvNumber } from "../../dvNumber";
-import DvNumberFields from "./DvNumberFields";
+import { DataTable, TableChips, TablePager, TableSearch, ViewButton, type TableColumn } from "../ui/DataTable";
+import { useTableView } from "../ui/useTableView";
 import { overspendOf, OverspendBadge } from "../liquidation/overspend";
+import { ClaimTypeBadge, ClaimTypeFilter, ClaimTypeFilterEmpty, ClaimTypeFilterValue, matchesClaimType } from "../liquidation/ClaimType";
 import {
-  ClaimTypeBadge,
-  ClaimTypeFilter,
-  ClaimTypeFilterEmpty,
-  ClaimTypeFilterValue,
-  matchesClaimType
-} from "../liquidation/ClaimType";
+  EmployeeCell,
+  ReportNoCell,
+  REPORT_SORTS,
+  SeminarCell,
+  peso,
+  reportRowId,
+  reportSearchText,
+  reportText,
+  type Report
+} from "../liquidation/reportColumns";
+import { isPayableClaim, mismatch } from "./claimChecks";
 
 interface Props {
   /** Every liquidation submission Finance can see. Filtered here, not by the caller. */
-  submissions: any[];
-  /** Re-runs the parent's fetch so a recorded payment leaves the queue. */
-  onRecorded: () => void;
-  /** The signed-in officer's staff code: paying their own claim is allowed but flagged. */
+  submissions: Report[];
+  /** The signed-in officer's staff code: nobody records the payment of their own claim. */
   currentEmployeeId?: string;
-  /** Opens a report's official form in print preview. */
-  onPrint: (report: LiquidationSubmission) => void;
+  /** Opens the report's View, where a claim is paid. */
+  onView: (id: string) => void;
+  /** A report a notice opened: its row is brought to the screen. */
+  reveal: { id: string; key: number } | null;
 }
 
-/**
- * HR set money aside but the claimant says they received less. Either the advance really
- * was never released (the legitimate case this whole flow exists for), or the claim would
- * pay out money already advanced. Finance cannot read the HR training tables, so this
- * stamped figure is the only thing that makes the difference visible.
- */
-function mismatch(sub: any): boolean {
-  if (sub?.allocatedAtFiling === undefined) return false;
-  return Number(sub.allocatedAtFiling) > Number(sub.totalReleased || 0);
+type Chip = "ready" | "paid";
+
+const MONEY = "whitespace-nowrap font-mono tabular-nums";
+const FLAG = "inline-block rounded border px-1.5 py-px text-[9px] font-bold";
+
+const owedOf = (report: Report) => peso(report.reimbursementAmount);
+
+/** What Finance must look at before paying a claim, in a word: the View has it in full. */
+function ClaimFlags({ report, own }: { report: Report; own: boolean }) {
+  const over = overspendOf(report);
+  return (
+    <span className="flex flex-col items-start gap-1">
+      {report.withinAllowance ? (
+        <span className={`${FLAG} border-purple-200 bg-purple-50 text-purple-700`}>Paid by the employee</span>
+      ) : mismatch(report) && report.claimType === "Reimbursement" ? (
+        <span className={`inline-flex items-center gap-1 ${FLAG} border-amber-200 bg-amber-50 text-amber-700`}>
+          <AlertTriangle size={10} aria-hidden="true" /> No advance on record
+        </span>
+      ) : mismatch(report) ? (
+        <span className={`inline-flex items-center gap-1 ${FLAG} border-rose-200 bg-rose-50 text-rose-700`}>
+          <AlertTriangle size={10} aria-hidden="true" /> Confirm the advance
+        </span>
+      ) : null}
+      {/* An out-of-pocket claim often IS an overspend; say so at payment time. */}
+      {over && <OverspendBadge over={over} />}
+      {own && <span className={`${FLAG} border-amber-200 bg-amber-50 text-amber-700`}>Your claim</span>}
+    </span>
+  );
 }
 
-// Shown in red: a mismatch, but not on a seminar paid out of pocket, which has no advance by design.
-const flagged = (sub: any) => mismatch(sub) && !sub?.withinAllowance;
+const READY_SORTS: Record<string, (report: Report) => SortValue> = {
+  no: REPORT_SORTS.no,
+  employee: REPORT_SORTS.employee,
+  seminar: REPORT_SORTS.seminar,
+  claim: REPORT_SORTS.claim,
+  share: report => (report.allocatedAtFiling === undefined ? null : Number(report.allocatedAtFiling)),
+  spent: REPORT_SORTS.spent,
+  owed: owedOf,
+  validated: report => firstTimestamp(report.financeValidatedAt) || null
+};
 
-// The Manila day of a stored timestamp (YYYY-MM-DD), or "" when there is none.
-function manilaDay(at: unknown): string {
-  const t = Date.parse(String(at || ""));
-  return Number.isFinite(t) ? new Date(t + 8 * 3600e3).toISOString().slice(0, 10) : "";
-}
+const PAID_SORTS: Record<string, (report: Report) => SortValue> = {
+  no: REPORT_SORTS.no,
+  employee: REPORT_SORTS.employee,
+  claim: REPORT_SORTS.claim,
+  amount: owedOf,
+  dv: report => reportText(report.reimbursementDvNo),
+  paid: report => firstTimestamp(report.reimbursementDate) || null
+};
+
+const numberCell: TableColumn<Report>["cell"] = report => <ReportNoCell report={report} />;
+const employeeCell: TableColumn<Report>["cell"] = report => <EmployeeCell report={report} />;
+const claimCell: TableColumn<Report>["cell"] = report => <ClaimTypeBadge claimType={report.claimType} />;
+
+const PAID_COLUMNS: TableColumn<Report>[] = [
+  { key: "no", header: "Report No.", sortable: true, cell: numberCell },
+  { key: "employee", header: "Employee", sortable: true, cell: employeeCell },
+  { key: "claim", header: "Claim Type", sortable: true, cell: claimCell },
+  { key: "amount", header: "Amount", sortable: true, align: "right", cell: report => <span className={`text-slate-800 ${MONEY}`}>{formatCurrency(owedOf(report))}</span> },
+  { key: "dv", header: "DV No.", sortable: true, cell: report => <span className="whitespace-nowrap font-mono text-[11px] text-slate-600">{reportText(report.reimbursementDvNo) || "—"}</span> },
+  { key: "paid", header: "Date Paid", sortable: true, cell: report => <span className="whitespace-nowrap font-mono text-[11px] text-slate-600">{reportText(report.reimbursementDate) ? formatDate(reportText(report.reimbursementDate)) : "—"}</span> }
+];
 
 /**
  * Claims where the employee spent more than they received.
@@ -51,96 +101,75 @@ function manilaDay(at: unknown): string {
  * An employee assigned to a seminar who never got the cash advance pays out of pocket,
  * and their Liquidation Report doubles as the claim to get it back. Finance validating
  * that report does NOT hand over any money — until the disbursement voucher is recorded
- * here, the claimant is still out of pocket, which is why these stay visible.
+ * in the report's View, the claimant is still out of pocket, which is why these stay visible.
  */
-export default function ReimbursementQueue({ submissions, onRecorded, currentEmployeeId, onPrint }: Props) {
-  // The officer's own claim (reports carry the claimant's staff code): allowed, but they are told
-  // it will be marked as self-approved in the audit log (the user's decision, 2026-10-20).
-  const isOwnClaim = (sub: any) => !!currentEmployeeId && sub?.employeeId === currentEmployeeId;
-  const [openId, setOpenId] = useState<string | null>(null);
-  // The voucher's serial; its year and month are the voucher date's (YYYY-MM-NNNN, as on a release).
-  const [dvSerial, setDvSerial] = useState("");
-  const [payDate, setPayDate] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
+export default function ReimbursementQueue({ submissions, currentEmployeeId, onView, reveal }: Props) {
+  const [chip, setChip] = useState<Chip>("ready");
   // Liquidations that spent more than the advance and Reimbursements (paid out of pocket)
   // both end up here; the filter tells them apart (instructor's note 10).
   const [filter, setFilter] = useState<ClaimTypeFilterValue>("All");
 
   const claims = useMemo(
-    () => (submissions ?? []).filter(
-      s => s?.reimbursementStatus === "Awaiting Reimbursement" && Number(s?.reimbursementAmount || 0) > 0
-    ),
+    () => (submissions ?? []).filter(s => s?.reimbursementStatus === "Awaiting Reimbursement" && Number(s?.reimbursementAmount || 0) > 0),
     [submissions]
   );
+  // The server refuses to release money on a report that is not yet validated. Those claims are
+  // counted below instead, so Finance can still see money is coming.
+  const payable = useMemo(() => claims.filter(isPayableClaim), [claims]);
+  const notYetValidated = useMemo(() => claims.filter(s => !isPayableClaim(s)), [claims]);
+  const settled = useMemo(() => (submissions ?? []).filter(s => s?.reimbursementStatus === "Reimbursed"), [submissions]);
 
-  // The server refuses to release money on a report that is not yet validated, so showing
-  // a "Record Payment" button on one would only produce a 400. Those claims are counted
-  // below instead, so Finance can still see money is coming.
-  const payable = useMemo(() => claims.filter(s => s.status === "Completed"), [claims]);
-  const notYetValidated = useMemo(() => claims.filter(s => s.status !== "Completed"), [claims]);
-  // The filter narrows the list Finance acts on, the claims ready to pay; its counts are
-  // of that list too, so they agree with the header.
-  const pending = useMemo(() => payable.filter(s => matchesClaimType(s, filter)), [payable, filter]);
+  const common = {
+    rowId: reportRowId,
+    searchText: reportSearchText,
+    filter: (report: Report) => matchesClaimType(report, filter),
+    filterKey: filter,
+    clearFilter: () => setFilter("All")
+  };
+  const ready = useTableView<Report>({ ...common, rows: payable, sorts: READY_SORTS, defaultSort: { key: "validated", dir: "desc" } });
+  const paid = useTableView<Report>({ ...common, rows: settled, sorts: PAID_SORTS, defaultSort: { key: "paid", dir: "desc" } });
 
-  const settled = useMemo(
-    () => (submissions ?? [])
-      .filter(s => s?.reimbursementStatus === "Reimbursed")
-      .sort((a, b) => String(b.reimbursementDate || "").localeCompare(String(a.reimbursementDate || ""))),
-    [submissions]
-  );
-
-  const owedTotal = useMemo(
-    () => pending.reduce((sum, s) => sum + Number(s.reimbursementAmount || 0), 0),
-    [pending]
-  );
-
-  function openForm(id: string) {
-    setOpenId(id);
-    setDvSerial("");
-    // Default to today (Manila); Finance can back-date to the DV's actual date.
-    setPayDate(getLocalTodayString());
-    setError("");
-  }
-
-  async function recordPayment(sub: any) {
-    setError("");
-    // The same voucher rules as a release (src/dvNumber.ts); the server checks them and refuses a number
-    // already on an advance or another reimbursement.
-    if (!dvPrefix(payDate)) {
-      setError("Choose the voucher's date first.");
-      return;
+  useEffect(() => {
+    if (!reveal) return;
+    if (payable.some(s => s.id === reveal.id)) {
+      setChip("ready");
+      ready.reveal(reveal.id);
+    } else if (settled.some(s => s.id === reveal.id)) {
+      setChip("paid");
+      paid.reveal(reveal.id);
     }
-    const dvNo = dvNumberFrom(payDate, dvSerial);
-    const read = readDvNumber(dvNo, payDate);
-    if ("problem" in read) {
-      setError(dvSerial ? read.problem : "Type the voucher's serial number, the digits after its year and month.");
-      return;
-    }
-    if (isOwnClaim(sub) && !window.confirm(`${sub.submissionNo} is your own claim. Recording its payment will be marked as self-approved in the audit log. Record it anyway?`)) {
-      return;
-    }
+  }, [reveal?.key]);
 
-    setSaving(true);
-    try {
-      const res = await apiCall(`/api/liquidation-submissions/${sub.id}/record-reimbursement`, {
-        method: "PUT",
-        body: JSON.stringify({ dvNo, date: payDate })
-      });
-      if (res.status === "success") {
-        setOpenId(null);
-        onRecorded();
-      } else {
-        setError(res.message || "Could not record the reimbursement.");
-      }
-    } catch (err: any) {
-      // apiCall throws on a non-2xx, so the server's message only surfaces here.
-      setError(err.message || "Could not record the reimbursement.");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const isOwnClaim = (report: Report) => !!currentEmployeeId && report.employeeId === currentEmployeeId;
+  const readyColumns = useMemo<TableColumn<Report>[]>(() => [
+    { key: "no", header: "Report No.", sortable: true, cell: numberCell },
+    { key: "employee", header: "Employee", sortable: true, className: "min-w-[110px]", cell: employeeCell },
+    { key: "seminar", header: "Seminar", sortable: true, className: "min-w-[130px]", cell: report => <SeminarCell report={report} /> },
+    { key: "claim", header: "Claim Type", sortable: true, cell: claimCell },
+    {
+      key: "share",
+      header: "Share / Allocated",
+      sortable: true,
+      align: "right",
+      cell: report => (
+        <span className={`text-slate-700 ${MONEY}`}>
+          {report.allocatedAtFiling === undefined ? "Not on record" : formatCurrency(Number(report.allocatedAtFiling))}
+        </span>
+      )
+    },
+    { key: "spent", header: "Spent", sortable: true, align: "right", cell: report => <span className={`text-slate-700 ${MONEY}`}>{formatCurrency(peso(report.totalSpent))}</span> },
+    { key: "owed", header: "Owed", sortable: true, align: "right", cell: report => <span className={`font-bold text-amber-700 ${MONEY}`}>{formatCurrency(owedOf(report))}</span> },
+    { key: "flag", header: "Check", cell: report => <ClaimFlags report={report} own={isOwnClaim(report)} /> },
+    { key: "validated", header: "Validated", sortable: true, cell: report => <span className="whitespace-nowrap font-mono text-[11px] text-slate-600">{report.financeValidatedAt ? formatDate(report.financeValidatedAt) : "—"}</span> }
+  ], [currentEmployeeId]);
+
+  const table = chip === "ready" ? ready : paid;
+  const listed = chip === "ready" ? payable : settled;
+  // What the total is of, when it isn't everything ready to pay.
+  const owedScope = [filter !== "All" ? filter : "", ready.query.trim() ? "matching" : ""].filter(Boolean).join(", ");
+  const owedTotal = sumPesos(ready.matching.map(s => s.reimbursementAmount));
+  const view = (report: Report) => <ViewButton label={reportText(report.submissionNo)} onClick={() => onView(report.id)} />;
+  const filterEmpty = <div className="m-4 mt-2"><ClaimTypeFilterEmpty filter={filter} onShowAll={() => setFilter("All")} what={chip === "ready" ? "claims ready to pay" : "claims paid"} /></div>;
 
   return (
     <SectionCard
@@ -148,216 +177,103 @@ export default function ReimbursementQueue({ submissions, onRecorded, currentEmp
       title="Reimbursement Queue"
       action={<SectionCount>{payable.length}</SectionCount>}
       caption="Money Back"
+      bodyClassName=""
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-[11px] text-slate-500 max-w-2xl">
-          Money owed to employees: Reimbursements, paid out of their own pocket, and Liquidations
-          that spent more than the cash advance. Validating the report does not release any
-          money &mdash; record the disbursement voucher here to close the claim.
-        </p>
-        <div className="flex shrink-0 items-start gap-2">
-          {payable.length > 0 && (
-            <ClaimTypeFilter
-              value={filter}
-              onChange={setFilter}
-              items={payable}
-              label="Filter the claims ready to pay by claim type"
-            />
-          )}
-          {pending.length > 0 && (
+      <div className="space-y-3 p-4 pb-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="max-w-2xl text-[11px] text-slate-500">
+            Money owed to employees: Reimbursements, paid out of their own pocket, and Liquidations
+            that spent more than the cash advance. Validating the report does not release any
+            money &mdash; record the disbursement voucher in the report&rsquo;s View to close the claim.
+          </p>
+          {chip === "ready" && ready.matching.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right">
-              <span className="block text-[9px] font-mono font-bold uppercase tracking-wider text-amber-700">
-                Total Owed{filter !== "All" ? ` (${filter})` : ""}
+              <span className="block font-mono text-[9px] font-bold uppercase tracking-wider text-amber-700">
+                Total Owed{owedScope ? ` (${owedScope})` : ""}
               </span>
-              <strong className="text-sm font-mono text-amber-800">{formatCurrency(owedTotal)}</strong>
+              <strong className="font-mono text-sm text-amber-800">{formatCurrency(owedTotal)}</strong>
             </div>
           )}
         </div>
+
+        {notYetValidated.length > 0 && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            {notYetValidated.length} further claim{notYetValidated.length === 1 ? "" : "s"} worth{" "}
+            <strong>{formatCurrency(sumPesos(notYetValidated.map(s => s.reimbursementAmount)))}</strong>{" "}
+            {notYetValidated.length === 1 ? "is" : "are"} still moving through HR verification and validation.
+            {notYetValidated.length === 1 ? " It becomes" : " They become"} payable once validated.
+          </p>
+        )}
+
+        <TableChips<Chip>
+          chips={[
+            { id: "ready", label: "Ready to pay", count: payable.length },
+            { id: "paid", label: "Paid", count: settled.length }
+          ]}
+          value={chip}
+          onChange={setChip}
+          label="Claims ready to pay or paid"
+        />
       </div>
 
-      {notYetValidated.length > 0 && (
-        <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-          {notYetValidated.length} further claim{notYetValidated.length === 1 ? "" : "s"} worth{" "}
-          <strong>{formatCurrency(notYetValidated.reduce((t, s) => t + Number(s.reimbursementAmount || 0), 0))}</strong>{" "}
-          {notYetValidated.length === 1 ? "is" : "are"} still moving through HR verification and validation.
-          {notYetValidated.length === 1 ? " It becomes" : " They become"} payable once validated.
-        </p>
+      {listed.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <TableSearch
+            key={chip}
+            table={table}
+            id="reimbursement-search"
+            label={chip === "ready" ? "Search the claims ready to pay" : "Search the claims paid"}
+            placeholder="Report, employee, seminar, status or DV"
+          />
+          <ClaimTypeFilter
+            value={filter}
+            onChange={setFilter}
+            items={listed}
+            label={chip === "ready" ? "Filter the claims ready to pay by claim type" : "Filter the claims paid by claim type"}
+          />
+        </div>
       )}
 
-      {pending.length === 0 && payable.length > 0 ? (
-        <ClaimTypeFilterEmpty filter={filter} onShowAll={() => setFilter("All")} what="claims ready to pay" />
-      ) : pending.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
-          <Wallet size={28} className="mx-auto text-slate-400 mb-2" />
-          <p className="text-xs font-semibold text-slate-600">No reimbursements ready to pay</p>
-          <p className="text-[11px] text-slate-500 mt-1">
-            A claim becomes payable here once a <strong>validated</strong> liquidation shows more spent than was advanced.
-          </p>
-        </div>
+      {chip === "ready" ? (
+        <DataTable
+          table={ready}
+          columns={readyColumns}
+          caption="Claims validated and ready to pay, latest validated first"
+          rowId={reportRowId}
+          actions={view}
+          minWidth={1000}
+          searchId="reimbursement-search"
+          empty={
+            <div className="m-4 mt-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <Wallet size={28} className="mx-auto mb-2 text-slate-400" aria-hidden="true" />
+              <p className="text-xs font-semibold text-slate-600">No reimbursements ready to pay</p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                A claim becomes payable here once a <strong>validated</strong> liquidation shows more spent than was advanced.
+              </p>
+            </div>
+          }
+          filteredEmpty={filterEmpty}
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4">
-          {pending.map(sub => {
-            const owed = Number(sub.reimbursementAmount || 0);
-            const isOpen = openId === sub.id;
-            return (
-              <div key={sub.id} data-record-id={sub.id} className="p-4 border border-amber-200 rounded-xl bg-amber-50/20 space-y-3">
-                {/* A seminar paid out of the employee's own pocket (2026-10-30): every cash advance now
-                    goes through the system, so none was released for the seat; it is owed within their
-                    share. An older Reimbursement shows HR's allocation without an advance, and the
-                    server already refuses to pay one with an advance on record, so it gets a
-                    reminder rather than an alarm. */}
-                {sub.withinAllowance ? (
-                  <p className="text-[11px] text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
-                    <strong>Paid by the employee:</strong> no cash advance was released for this seminar, so the{" "}
-                    <strong>{formatCurrency(owed)}</strong> claimed is owed back to them
-                    {Number(sub.allocatedAtFiling) > 0 ? <>, within their {formatCurrency(Number(sub.allocatedAtFiling))} share</> : null}.
-                  </p>
-                ) : mismatch(sub) && sub.claimType === "Reimbursement" ? (
-                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" aria-hidden="true" />
-                    <span>
-                      HR set aside <strong>{formatCurrency(Number(sub.allocatedAtFiling))}</strong> for this
-                      assignment and no cash advance is on record. Pay only if none was released outside the system.
-                    </span>
-                  </p>
-                ) : mismatch(sub) && (
-                  <p className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" aria-hidden="true" />
-                    <span>
-                      HR set aside <strong>{formatCurrency(Number(sub.allocatedAtFiling))}</strong> for this
-                      assignment, but the claimant reports receiving{" "}
-                      <strong>{formatCurrency(Number(sub.totalReleased || 0))}</strong>. Confirm the advance was
-                      never released before paying &mdash; otherwise this would pay the same money twice.
-                    </span>
-                  </p>
-                )}
-
-                {isOwnClaim(sub) && (
-                  <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    <strong>This is your own claim.</strong> You can record its payment, but it will be marked as
-                    self-approved in the audit log.
-                  </p>
-                )}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-mono bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
-                    {sub.serialNo || sub.submissionNo}
-                  </span>
-                  <ClaimTypeBadge claimType={sub.claimType} />
-                  {/* An out-of-pocket claim often IS an overspend; say so at payment time. */}
-                  {overspendOf(sub) && <OverspendBadge over={overspendOf(sub)!} />}
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {formatDate(sub.createdAt || sub.dateSubmitted)}
-                  </span>
-                </div>
-
-                <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-                  <div className="space-y-2 flex-1 min-w-0">
-                    <h3 className="text-xs font-bold text-slate-800">{sub.employeeName}</h3>
-                    <p className="text-[11px] text-slate-500 truncate">{sub.activityTitle || sub.activityId}</p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-2xl">
-                      <div className="bg-white p-2 rounded border border-slate-100">
-                        <span className="text-[9px] text-slate-400 font-semibold block font-mono">{sub.withinAllowance ? "Their Share" : "HR Allocated"}</span>
-                        <strong className="text-xs text-slate-700 font-mono">
-                          {sub.allocatedAtFiling === undefined ? "Not on record" : formatCurrency(Number(sub.allocatedAtFiling))}
-                        </strong>
-                      </div>
-                      <div className={`p-2 rounded border ${flagged(sub) ? "bg-rose-50 border-rose-200" : "bg-white border-slate-100"}`}>
-                        <span className={`text-[9px] font-semibold block font-mono ${flagged(sub) ? "text-rose-700" : "text-slate-400"}`}>Claimant States Received</span>
-                        <strong className={`text-xs font-mono ${flagged(sub) ? "text-rose-800" : "text-slate-700"}`}>{formatCurrency(Number(sub.totalReleased || 0))}</strong>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-slate-100">
-                        <span className="text-[9px] text-slate-400 font-semibold block font-mono">Total Spent</span>
-                        <strong className="text-xs text-slate-700 font-mono">{formatCurrency(Number(sub.totalSpent || 0))}</strong>
-                      </div>
-                      <div className="bg-amber-50 p-2 rounded border border-amber-200">
-                        <span className="text-[9px] text-amber-700 font-semibold block font-mono">Owed to Employee</span>
-                        <strong className="text-xs text-amber-800 font-mono">{formatCurrency(owed)}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onPrint(sub)}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                    >
-                      <Printer size={12} aria-hidden="true" />
-                      Print<span className="sr-only"> {sub.submissionNo}</span>
-                    </button>
-                    {!isOpen && (
-                      <button
-                        onClick={() => openForm(sub.id)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
-                      >
-                        Record Payment
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {isOpen && (
-                  <div className="border-t border-amber-200 pt-3 space-y-3">
-                    {/* The voucher it is paid on: its date, then only the serial (DvNumberFields.tsx). It
-                        can't be dated before the report was validated. */}
-                    <DvNumberFields prefix="rb" recordId={sub.id} dvDate={payDate} onDvDate={setPayDate} serial={dvSerial} onSerial={setDvSerial}
-                      onWarning={setError} disabled={saving} minDate={manilaDay(sub.financeValidatedAt)} />
-
-                    {error && (
-                      <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                        {error}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => recordPayment(sub)}
-                        disabled={saving}
-                        className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm cursor-pointer flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
-                      >
-                        {saving && <Loader2 size={12} className="animate-spin" />}
-                        {saving ? "Recording…" : `Confirm ${formatCurrency(owed)} Released`}
-                      </button>
-                      <button
-                        onClick={() => { setOpenId(null); setError(""); }}
-                        disabled={saving}
-                        className="bg-white border border-slate-300 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-60"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <DataTable
+          table={paid}
+          columns={PAID_COLUMNS}
+          caption="Claims paid, latest payment first"
+          rowId={reportRowId}
+          actions={view}
+          minWidth={760}
+          searchId="reimbursement-search"
+          empty={
+            <div className="m-4 mt-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <Wallet size={28} className="mx-auto mb-2 text-slate-400" aria-hidden="true" />
+              <p className="text-xs font-semibold text-slate-600">No reimbursements paid yet</p>
+              <p className="mt-1 text-[11px] text-slate-500">A claim is listed here once its disbursement voucher is recorded.</p>
+            </div>
+          }
+          filteredEmpty={filterEmpty}
+        />
       )}
-
-      {settled.length > 0 && (
-        <div className="border-t border-slate-200 pt-3">
-          <h3 className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider mb-2">
-            Recently Reimbursed
-          </h3>
-          <ul className="divide-y divide-slate-100">
-            {settled.slice(0, 5).map(sub => (
-              <li key={sub.id} data-record-id={sub.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11px]">
-                <span className="flex items-center gap-2 min-w-0">
-                  <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
-                  <span className="font-mono text-slate-500">{sub.serialNo || sub.submissionNo}</span>
-                  <ClaimTypeBadge claimType={sub.claimType} />
-                  <span className="text-slate-700 truncate">{sub.employeeName}</span>
-                </span>
-                <span className="text-slate-500 font-mono shrink-0">
-                  {formatCurrency(Number(sub.reimbursementAmount || 0))} &middot; DV {sub.reimbursementDvNo || "—"} &middot; {formatDate(sub.reimbursementDate)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <TablePager table={table} label={chip === "ready" ? "Pages of the claims ready to pay" : "Pages of the claims paid"} />
     </SectionCard>
   );
 }

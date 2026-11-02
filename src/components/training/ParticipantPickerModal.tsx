@@ -4,8 +4,9 @@ import { TrainingCandidate, type TdpJustification, type TdpJustificationInput, t
 import { apiCall, getLocalTodayString } from "../../utils";
 import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 import { tdpBadgeText } from "../../tdpRules";
+import { searchTerms } from "../../tableView";
 import { TONE } from "./candidateBadges";
-import ParticipantChecklist, { rowMatches, searchTerms, type PickGroup, type PickRow } from "./ParticipantChecklist";
+import ParticipantChecklist, { rowMatches, type PickGroup, type PickRow } from "./ParticipantChecklist";
 import PlanAViewSwitch from "./PlanAViewSwitch";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.

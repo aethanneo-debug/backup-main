@@ -1,4 +1,4 @@
-import { CORRECTION_FIELDS, CorrectionField, CorrectionRequest, DocumentKind, LiquidationSubmission } from "../../../types";
+import { CORRECTION_FIELDS, CorrectionField, CorrectionItem, CorrectionRequest, DocumentKind, LiquidationSubmission } from "../../../types";
 
 /**
  * Whether the claimant can correct and resubmit the report, by the server's rule: returned,
@@ -12,12 +12,18 @@ export function canResubmit(report: Partial<LiquidationSubmission> | null | unde
 
 /** The correction the claimant is working on: the latest Return not yet answered. */
 export function openCorrectionOf(report: Partial<LiquidationSubmission> | null | undefined): CorrectionRequest | null {
-  const list = report?.corrections ?? [];
+  const list = roundsOf(report);
   for (let i = list.length - 1; i >= 0; i--) {
     if (!list[i].resolvedAt) return list[i];
   }
   return null;
 }
+
+// Older or damaged records may hold anything where a list belongs, and a screen that read it as one would go blank
+// (there is no error boundary): only lists are read, and only the entries in them that are there.
+const listOf = <T>(value: unknown): T[] => (Array.isArray(value) ? value.filter(Boolean) : []);
+const roundsOf = (report: Partial<LiquidationSubmission> | null | undefined) => listOf<CorrectionRequest>(report?.corrections);
+const itemsOf = (correction: CorrectionRequest | null | undefined) => listOf<CorrectionItem>(correction?.items);
 
 export interface CorrectionAccess {
   /** The open request, or null: a new report, or one returned before checklists existed. */
@@ -44,17 +50,18 @@ export interface CorrectionAccess {
  */
 export function correctionAccess(report: Partial<LiquidationSubmission> | null | undefined): CorrectionAccess {
   const open = openCorrectionOf(report);
-  const ticked = new Set((open?.items ?? []).map(i => i.field));
+  const items = itemsOf(open);
+  const ticked = new Set(items.map(i => i.field));
   return {
     open,
     editable: (field) => !open || ticked.has(field)
       || ((field === "cashAdvance" || field === "refundOr") && ticked.has("claimType"))
       || (field === "refundOr" && !!report?.withinAdvance && ticked.has("particulars"))
       || (field === "representative" && !report?.representativeId),
-    noteFor: (field) => open?.items.find(i => i.field === field)?.remark,
-    lineIds: open?.items.find(i => i.field === "particulars")?.lineIds,
-    replaceIds: open?.items.find(i => i.field === "replaceDocuments")?.documentIds ?? [],
-    addKinds: open?.items.find(i => i.field === "addDocument")?.documentKinds ?? []
+    noteFor: (field) => items.find(i => i.field === field)?.remark,
+    lineIds: items.find(i => i.field === "particulars")?.lineIds,
+    replaceIds: items.find(i => i.field === "replaceDocuments")?.documentIds ?? [],
+    addKinds: items.find(i => i.field === "addDocument")?.documentKinds ?? []
   };
 }
 
@@ -79,27 +86,31 @@ const PART_NAME: Record<CorrectionField, string> = {
 const joinAnd = (parts: string[]) =>
   parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 
-/**
- * For reviewers: when the report came back from a correction, which round it answered, what
- * the claimant changed, and any part they were asked to correct but left as it was. Null when
- * the latest Return is still open or there was none.
- */
-export function answeredCorrectionSummary(report: Partial<LiquidationSubmission> | null | undefined): string | null {
-  const list = report?.corrections ?? [];
-  const last = list[list.length - 1];
-  if (!last?.resolvedAt) return null;
-  const changed = last.changedFields ?? [];
-  const edited = changed.filter(f => f !== "replaceDocuments" && f !== "addDocument").map(f => PART_NAME[f]);
+/** What the claimant did with a Return: what they changed, and any part they were asked to correct but left as it was. */
+export function correctionAnswer(correction: CorrectionRequest): string {
+  const changed = listOf<CorrectionField>(correction.changedFields);
+  const items = itemsOf(correction);
+  const edited = changed.filter(f => f !== "replaceDocuments" && f !== "addDocument").map(f => PART_NAME[f]).filter(Boolean);
   const done = [
     edited.length ? `changed ${joinAnd(edited)}` : "",
     changed.includes("replaceDocuments") ? "replaced the files marked for replacing" : "",
     // (On a report under the named documents a change can require one nobody asked for, e.g. a new Accommodation line.)
     changed.includes("addDocument")
-      ? (last.items.some(i => i.field === "addDocument") ? "added the missing document" : "added a document the correction made necessary")
+      ? (items.some(i => i.field === "addDocument") ? "added the missing document" : "added a document the correction made necessary")
       : ""
   ].filter(Boolean);
-  const untouched = last.items.map(i => i.field).filter(f => !changed.includes(f)).map(f => PART_NAME[f]);
-  return `Corrected after Return ${last.round > 1 ? `round ${last.round} ` : ""}by ${last.requestedBy}: ${
-    done.length ? joinAnd(done) : "resubmitted without changes"}${
-    untouched.length && done.length ? `; left ${joinAnd(untouched)} as ${untouched.length === 1 ? "it was" : "they were"}` : ""}.`;
+  const untouched = items.map(i => i.field).filter(f => !changed.includes(f)).map(f => PART_NAME[f]).filter(Boolean);
+  return `${done.length ? joinAnd(done) : "resubmitted without changes"}${
+    untouched.length && done.length ? `; left ${joinAnd(untouched)} as ${untouched.length === 1 ? "it was" : "they were"}` : ""}`;
+}
+
+/**
+ * For reviewers: when the report came back from a correction, which round it answered and what
+ * the claimant did with it. Null when the latest Return is still open or there was none.
+ */
+export function answeredCorrectionSummary(report: Partial<LiquidationSubmission> | null | undefined): string | null {
+  const list = roundsOf(report);
+  const last = list[list.length - 1];
+  if (!last?.resolvedAt) return null;
+  return `Corrected after Return ${last.round > 1 ? `round ${last.round} ` : ""}by ${last.requestedBy}: ${correctionAnswer(last)}.`;
 }

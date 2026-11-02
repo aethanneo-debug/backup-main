@@ -6,6 +6,7 @@ import {
   TRAINING_NEED_CATEGORIES,
   TRAINING_NEED_COLUMN_LABELS
 } from "../../../types";
+import { csvCell } from "../../../utils";
 import { longDate } from "../evaluation/evaluationQueue";
 
 /** GET /api/training/needs, kept whole: the plan year, the date it was judged at, the sheet. */
@@ -103,22 +104,12 @@ export function planDCsvRows(plan: PlanDSnapshot): string[][] {
 }
 
 /**
- * Excel starts a formula at a leading = + - @ even inside quotes, and names and positions can
- * come from an uploaded PDS. A leading apostrophe keeps such a cell as text.
- */
-function csvCell(value: string): string {
-  const text = String(value ?? "");
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
-
-/**
  * The byte-order mark matters: without it Excel opens the file as ANSI and "Niño" arrives
  * as "NiÃ±o".
  */
 export function downloadPlanDCsv(plan: PlanDSnapshot) {
   const text = planDCsvRows(plan).map(row => row.map(csvCell).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob(["﻿", text], { type: "text/csv;charset=utf-8;" }));
+  const url = URL.createObjectURL(new Blob([String.fromCharCode(0xfeff), text], { type: "text/csv;charset=utf-8;" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = `${planDFileName(plan)}.csv`;

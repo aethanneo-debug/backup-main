@@ -12,15 +12,15 @@ const STYLE: Record<ClaimType, string> = {
   Reimbursement: "border-purple-200 bg-purple-50 text-purple-700"
 };
 
-/** Compact marker for a list row. Shows nothing for a stale copy without a claim type. */
-export function ClaimTypeBadge({ claimType }: { claimType?: ClaimType }) {
+/** Compact marker for a list row. Shows nothing for a stale copy without a claim type. `small` is for a narrow table. */
+export function ClaimTypeBadge({ claimType, small = false }: { claimType?: ClaimType; small?: boolean }) {
   if (!claimType || !STYLE[claimType]) return null;
   const Icon = claimType === "Liquidation" ? ReceiptText : HandCoins;
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${STYLE[claimType]}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border font-mono text-[9px] font-bold ${small ? "px-1.5 py-0.5" : "px-2 py-0.5 uppercase tracking-wider"} ${STYLE[claimType]}`}
     >
-      <Icon size={10} aria-hidden="true" />
+      {!small && <Icon size={10} aria-hidden="true" />}
       {claimType}
     </span>
   );

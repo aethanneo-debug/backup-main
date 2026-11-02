@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { User, RequestStatus, ScreenFocus, LiquidationSubmission } from "../types";
 import { apiCall, firstTimestamp, firstDateString } from "../utils";
 import { overspendOf, OverspendBadge, OverspendNotice } from "./liquidation/overspend";
@@ -8,6 +8,10 @@ import LiquidationReportModal from "./liquidation/LiquidationReportModal";
 import { ClaimTypeBadge } from "./liquidation/ClaimType";
 import VehicleTripDetails from "./requests/VehicleTripDetails";
 import { answeredCorrectionSummary } from "./liquidation/resubmit/correctionModel";
+import { TablePager, TableSearch, ViewButton } from "./ui/DataTable";
+import { useDetailsWindow } from "./ui/useDetailsWindow";
+import { useTableView } from "./ui/useTableView";
+import { searchField } from "../tableView";
 import { Check, Undo2, RefreshCcw, X, Info, Printer } from "lucide-react";
 
 interface HrUnifiedRequestsProps {
@@ -37,6 +41,11 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
   const [remarks, setRemarks] = useState("");
   const [bulkActionType, setBulkActionType] = useState<"verify" | "return" | null>(null);
   const [viewItem, setViewItem] = useState<any | null>(null);
+  const detailsRef = useRef<HTMLDivElement>(null);
+  // An action sent from the details window: the window stays until the answer comes, and Confirm can't be sent twice.
+  const [acting, setActing] = useState(false);
+  const actingRef = useRef(false);
+  useDetailsWindow(detailsRef, viewItem?._unifiedId, () => setViewItem(null), acting);
   // The official form of the report being read, in print preview (the instructor's review, R6).
   const [printing, setPrinting] = useState<LiquidationSubmission | null>(null);
   const [modalActionType, setModalActionType] = useState<"verify" | "return" | null>(null);
@@ -63,8 +72,12 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
   useEffect(() => {
     if (!wanted || loads <= wanted.afterLoad) return;
     const item = allItems.find(i => i._unifiedId === wanted.uid);
-    if (item) setViewItem(item);
-    else setError(prev => prev || "The item that notification is about is no longer in this list.");
+    if (item) {
+      setViewItem(item);
+      table.reveal(item._unifiedId);
+    } else {
+      setError(prev => prev || "The item that notification is about is no longer in this list.");
+    }
     setWanted(null);
   }, [wanted, loads]);
 
@@ -136,7 +149,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
     }
   }
 
-  const filteredItems = allItems.filter(item => {
+  const matchesFilters = (item: any) => {
     let catMatch = true;
     if (filterCategory !== "All") {
       if (["Personnel Request", "Liquidation"].includes(filterCategory)) {
@@ -148,21 +161,44 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
         catMatch = item.requestType === filterCategory || item.leaveType === filterCategory;
       }
     }
-    
+
     let statMatch = true;
     if (filterStatus !== "All") {
       statMatch = item.status && item.status.includes(filterStatus);
     }
-    
+
     return catMatch && statMatch;
+  };
+
+  // 25 a page, still newest first (fetchData sorts them). A long list is reached by the search or the pages.
+  const table = useTableView<any>({
+    rows: allItems,
+    rowId: item => item._unifiedId,
+    // Only text, and only its start: a reason or purpose has no limit on the server (12w).
+    searchText: item => [item._title, item._requester, item._category, item.status, item.purpose, item.reason, item.submissionNo, item.activityTitle].map(searchField).join(" "),
+    filter: matchesFilters,
+    filterKey: `${filterCategory}\u0000${filterStatus}`,
+    clearFilter: () => {
+      setFilterCategory("All");
+      setFilterStatus("All");
+    }
   });
+  const pageItems = table.page.rows;
 
   const isActionable = (status: string) => {
     if (!status) return false;
     return status === "Pending" || status === "Pending HR Review";
   };
 
-  const actionableItems = filteredItems.filter(item => isActionable(item.status));
+  // The tick in the header takes the page on screen, nothing unseen.
+  const actionableItems = pageItems.filter(item => isActionable(item.status));
+
+  // A tick can't outlive its row on the screen: a new page, search or filter drops it, so a bulk action only
+  // ever touches what the officer can see.
+  useEffect(() => {
+    const onPage = new Set(pageItems.map(item => item._unifiedId));
+    setSelectedIds(ids => (ids.every(id => onPage.has(id)) ? ids : ids.filter(id => onPage.has(id))));
+  }, [pageItems]);
 
   const toggleSelect = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -178,6 +214,12 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
     } else {
       setSelectedIds(actionableItems.map(item => item._unifiedId));
     }
+  };
+
+  const openItem = (item: any) => {
+    setViewItem(item);
+    setModalActionType(null);
+    setModalRemarks("");
   };
 
   async function handleBulkAction(action: "verify" | "return") {
@@ -282,6 +324,10 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
       {error && <div className="p-3 bg-rose-50 text-rose-700 text-xs border-b border-rose-100">{error}</div>}
       {success && <div className="p-3 bg-emerald-50 text-emerald-700 text-xs border-b border-emerald-100">{success}</div>}
 
+      <div className="border-b border-slate-100 px-4 py-2">
+        <TableSearch table={table} id="hr-request-search" label="Search the requests" placeholder="Title, requester, status, reason, report or seminar" />
+      </div>
+
       {/* Bulk Actions */}
       {selectedIds.length > 0 && (
         <div className="p-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
@@ -301,7 +347,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
 
       {viewItem && (
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg flex flex-col max-h-[90vh] overflow-hidden">
+          <div ref={detailsRef} role="dialog" aria-modal="true" aria-label="Request details" tabIndex={-1} className="bg-white rounded-xl shadow-lg w-full max-w-lg flex flex-col max-h-[90vh] overflow-hidden focus:outline-none">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">Request Details</h3>
@@ -313,8 +359,8 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                     <Printer size={12} aria-hidden="true" /> Print
                   </button>
                 )}
-                <button onClick={() => setViewItem(null)} className="text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded p-1">
-                  <X size={16} />
+                <button onClick={() => setViewItem(null)} disabled={acting} aria-label="Close request details" className="text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded p-1 disabled:opacity-40">
+                  <X size={16} aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -433,18 +479,23 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                   </div>
                   {modalActionType && (
                     <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Remarks</label>
-                      <input 
-                        type="text" 
+                      <label htmlFor="hr-action-remarks" className="text-[10px] font-bold text-slate-500 uppercase font-mono">Remarks (the employee sees these)</label>
+                      <input
+                        id="hr-action-remarks"
+                        type="text"
                         value={modalRemarks}
                         onChange={e => setModalRemarks(e.target.value)}
                         placeholder="Optional remarks..."
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500"
                       />
                       <button
+                        disabled={acting}
                         onClick={async () => {
+                          if (actingRef.current) return;
                           if (modalActionType === "verify" && isOwnReport(viewItem)
                             && !window.confirm(`${viewItem.submissionNo} ${coversMe(viewItem) ? "is a group's report that covers you" : "is your own report"}. Endorsing it will be marked as self-approved in the audit log. Endorse it anyway?`)) return;
+                          actingRef.current = true;
+                          setActing(true);
                           setLoading(true);
                           try {
                             if (viewItem._category === "Personnel Request") {
@@ -470,9 +521,12 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                             // The server's reason (e.g. the request is no longer waiting for HR), not a bare failure.
                             setError(err?.message || "Action failed.");
                             setLoading(false);
+                          } finally {
+                            actingRef.current = false;
+                            setActing(false);
                           }
                         }}
-                        className="w-full py-2 bg-slate-900 text-white font-bold text-xs rounded-lg shadow-sm hover:bg-slate-800"
+                        className="w-full py-2 bg-slate-900 text-white font-bold text-xs rounded-lg shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Confirm {modalActionType === "verify" ? "Endorsement" : "Return"}
                       </button>
@@ -486,14 +540,15 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+      <div className="custom-scrollbar relative overflow-x-auto">
+        <table className="w-full min-w-[860px] text-left border-collapse">
           <thead>
             <tr className="bg-slate-100/50 border-b border-slate-200">
               <th className="p-3 w-10 text-center">
-                <input 
-                  type="checkbox" 
-                  checked={selectedIds.length === actionableItems.length && actionableItems.length > 0} 
+                <input
+                  type="checkbox"
+                  aria-label="Select every request waiting for HR on this page"
+                  checked={selectedIds.length === actionableItems.length && actionableItems.length > 0}
                   onChange={toggleSelectAll}
                   disabled={actionableItems.length === 0}
                   className="cursor-pointer"
@@ -505,21 +560,34 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
               <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Requester</th>
               <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
               <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Amount</th>
+              <th className="sticky right-0 border-l border-slate-200 bg-slate-50 p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">View</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={7} className="p-8 text-center text-xs text-slate-400">Loading records...</td></tr>
-            ) : filteredItems.length === 0 ? (
-              <tr><td colSpan={7} className="p-8 text-center text-xs text-slate-400">No records found matching criteria.</td></tr>
+              <tr><td colSpan={8} className="p-8 text-center text-xs text-slate-400">Loading records...</td></tr>
+            ) : table.matching.length === 0 ? (
+              <tr><td colSpan={8} className="p-8 text-center text-xs text-slate-500">
+                No records found matching criteria.
+                {table.query.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => { table.setQuery(""); document.getElementById("hr-request-search")?.focus(); }}
+                    className="ml-1.5 cursor-pointer rounded font-semibold text-blue-700 underline hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  >
+                    Clear the search
+                  </button>
+                )}
+              </td></tr>
             ) : (
-              filteredItems.map(item => (
-                <tr key={item._unifiedId} onClick={() => { setViewItem(item); setModalActionType(null); setModalRemarks(""); }} className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedIds.includes(item._unifiedId) ? "bg-blue-50/30" : ""}`}>
+              pageItems.map(item => (
+                <tr key={item._unifiedId} onClick={() => openItem(item)} className={`group hover:bg-slate-50 transition-colors cursor-pointer ${selectedIds.includes(item._unifiedId) ? "bg-blue-50/30" : ""}`}>
                   <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
                     {isActionable(item.status) && (
-                      <input 
-                        type="checkbox" 
-                        checked={selectedIds.includes(item._unifiedId)} 
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${item._title}, ${item._requester}`}
+                        checked={selectedIds.includes(item._unifiedId)}
                         onChange={() => toggleSelect(item._unifiedId)}
                         className="cursor-pointer"
                       />
@@ -527,7 +595,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                   </td>
                   <td className="p-3 text-[11px] text-slate-600 whitespace-nowrap">{item._displayDate ? item._displayDate.split("T")[0] : "-"}</td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${
+                    <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold border ${
                       item._category === "Personnel Request" ? "bg-blue-50 text-blue-700 border-blue-200" :
                       item._category === "Liquidation" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
                       "bg-purple-50 text-purple-700 border-purple-200"
@@ -548,7 +616,7 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                   </td>
                   <td className="p-3 text-xs text-slate-600">{item._requester}</td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
                       item.status?.includes("Approved") || item.status?.includes("Cleared") || item.status?.includes("Endorsed") ? "bg-green-100 text-green-800" :
                       item.status?.includes("Returned") || item.status?.includes("Rejected") ? "bg-red-100 text-red-800" :
                       item.status?.includes("Pending") || item.status?.includes("Endorsed to Division Chief") ? "bg-amber-100 text-amber-800" :
@@ -560,12 +628,17 @@ export default function HrUnifiedRequests({ user, onRefresh, focus, onFocusHandl
                   <td className="p-3 text-xs text-right font-mono text-slate-700">
                     {item._amount != null ? `₱${item._amount.toLocaleString()}` : "-"}
                   </td>
+                  {/* The row's click stays; this is the way in by keyboard. The cell stops the click, or it would open twice. */}
+                  <td className="sticky right-0 border-l border-slate-200 bg-white p-2 text-right group-hover:bg-slate-50" onClick={e => e.stopPropagation()}>
+                    <ViewButton label={`${item._title}, ${item._requester}`} onClick={() => openItem(item)} />
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+      {!loading && <TablePager table={table} label="Pages of the requests" />}
 
       {/* Bulk Action Modal */}
       {bulkActionType && (

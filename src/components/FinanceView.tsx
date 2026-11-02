@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import {
   FinancialTransaction,
@@ -9,7 +9,6 @@ import {
   CashAdvance,
   ScreenFocus
 } from "../types";
-import { useRecordHighlight } from "./ui/useRecordHighlight";
 import {
   LayoutDashboard,
   Plus,
@@ -27,7 +26,9 @@ import LiquidationDeskView from "./finance/LiquidationDeskView";
 import FinanceOverview from "./finance/FinanceOverview";
 import DocumentsVault from "./finance/DocumentsVault";
 import { reportFiscalYear } from "./finance/overviewFigures";
-import { apiCall, formatCurrency } from "../utils";
+import { manilaDay } from "./finance/claimChecks";
+import { peso } from "./liquidation/reportColumns";
+import { apiCall, csvCell, formatCurrency } from "../utils";
 
 interface FinanceViewProps {
   user: User;
@@ -71,8 +72,6 @@ export default function FinanceView({
     { advances: CashAdvance[] | null; reportsFailed: boolean; budgetFailed: boolean } | undefined
   >(undefined);
   const [submissions, setSubmissions] = useState<any[]>([]);
-  const [selectedSub, setSelectedSub] = useState<any>(null);
-  const [subRemarks, setSubRemarks] = useState("");
 
   // Selected details
   const [selectedLiq, setSelectedLiq] = useState<Liquidation | null>(null);
@@ -114,10 +113,11 @@ export default function FinanceView({
 
   const isBudgetOrAdmin = [UserRole.SUPER_ADMIN, UserRole.BUDGET_OFFICER].includes(user.role);
 
-  // A notification opened the Liquidation Desk (App sets the sub-tab): reload it, then show the
-  // report (scrolled to and outlined). Only after the fresh load lands (counted by
-  // financeLoads): until then the report may still sit where it was before, e.g. in the index
-  // rather than in the queue.
+  // A notification opened the Liquidation Desk (App sets the sub-tab): reload it, and the desk opens the
+  // report's View once a load started after that has landed. Loads are counted by ticket, so one already on
+  // its way carries the list from before the notice, and can't be taken for the fresh one; and a load a newer one
+  // has overtaken drops what it brings, so older data landing late can't replace newer.
+  const loadTicket = useRef(0);
   const [financeLoads, setFinanceLoads] = useState(0);
   const [shownReport, setShownReport] = useState<{ id: string; key: number; afterLoad: number } | null>(null);
   // An employee's cash advance request: the request list loads on its own and shows it.
@@ -125,14 +125,13 @@ export default function FinanceView({
   useEffect(() => {
     if (!focus) return;
     if (focus.record?.kind === "liquidationReport") {
-      setShownReport({ id: focus.record.id, key: focus.nonce, afterLoad: financeLoads });
+      setShownReport({ id: focus.record.id, key: focus.nonce, afterLoad: loadTicket.current });
       fetchFinanceAddons();
     } else if (focus.record?.kind === "cashAdvance") {
       setFocusAdvance({ id: focus.record.id, nonce: focus.nonce });
     }
     onFocusHandled?.();
   }, [focus?.nonce]);
-  useRecordHighlight(shownReport && financeLoads > shownReport.afterLoad ? shownReport.id : null, shownReport?.key);
 
   // Budget Monitoring is the Budget Officer's (and the Administrator's). Nothing in Financial
   // Tracking leads there, and anyone else who lands on it anyway is sent back to the overview.
@@ -143,17 +142,21 @@ export default function FinanceView({
     if (!known || (activeSubTab === "budgets" && !isBudgetOrAdmin)) setActiveSubTab("dashboard");
   }, [activeSubTab, isBudgetOrAdmin]);
 
-  // Opens the Liquidation Desk on a report, as a notification does: it is shown (scrolled to and
-  // outlined) once the desk's fresh load lands. Used by the overview and the Documents Vault.
+  // Opens the Liquidation Desk on a report, as a notification does: its View opens once the desk's
+  // fresh load lands. Used by the overview and the Documents Vault.
   const openReportOnDesk = (id: string) => {
-    setShownReport({ id, key: Date.now(), afterLoad: financeLoads });
+    setShownReport({ id, key: Date.now(), afterLoad: loadTicket.current });
     setActiveSubTab("liquidation");
   };
 
   // Fetch liquidations, budgets, and logs
   async function fetchFinanceAddons() {
+    const ticket = ++loadTicket.current;
+    // A newer load has started since: this one's answers are older than what is coming, so they are dropped.
+    const overtaken = () => ticket !== loadTicket.current;
     try {
       const resFy = await apiCall("/api/fiscal-years").catch(() => null);
+      if (overtaken()) return;
       if (Array.isArray(resFy)) setFiscalYears(resFy);
       // Open on the active fiscal year (the calendar year if none can be read), then stay
       // on whichever year the user picks with the FY button.
@@ -165,11 +168,13 @@ export default function FinanceView({
       }
 
       const resLiq = await apiCall("/api/finance/liquidations").catch(() => ({ status: "error", data: [] }));
+      if (overtaken()) return;
       if (resLiq.status === "success") {
         setLiquidations(resLiq.data || []);
       }
       // Never without a year: an empty label returns every year's division budgets.
       const resBud = await apiCall(`/api/budgets?fiscalYearLabel=${fyLabel}`).catch(() => ({ status: "error", data: [] }));
+      if (overtaken()) return;
       if (Array.isArray(resBud)) {
         setBudgets(resBud); // Assuming endpoint returns array
       } else if (resBud.status === "success") {
@@ -177,10 +182,12 @@ export default function FinanceView({
       }
 
       const resHb = await apiCall("/api/hsac-budgets").catch(() => ({ status: "error", data: [] }));
+      if (overtaken()) return;
       if (resHb.status === "success") {
         setHsacBudgets(resHb.data || []);
       }
       const resTb = await apiCall("/api/training/budgets").catch(() => ({ status: "error", data: [] }));
+      if (overtaken()) return;
       if (resTb.status === "success") {
         setTrainingBudgets(resTb.data || []);
       }
@@ -190,12 +197,14 @@ export default function FinanceView({
       const resSub = activeSubTab === "budgets" || activeSubTab === "vault"
         ? null
         : await apiCall("/api/liquidation-submissions").catch(() => ({ status: "error", data: [] }));
+      if (overtaken()) return;
       if (resSub?.status === "success") {
         setSubmissions(resSub.data || []);
       }
       // The Overview Dashboard also counts cash advances (requests waiting, advances still out).
       if (activeSubTab === "dashboard") {
         const resCa = await apiCall("/api/cash-advances").catch(() => ({ status: "error", data: [] }));
+        if (overtaken()) return;
         setOverviewLoad({
           advances: resCa.status === "success" ? (resCa.data || []) : null,
           reportsFailed: resSub?.status !== "success",
@@ -204,9 +213,9 @@ export default function FinanceView({
       }
     } catch (err) {
       console.error("Error loading supplementary finance modules", err);
-      if (activeSubTab === "dashboard") setOverviewLoad({ advances: null, reportsFailed: true, budgetFailed: true });
+      if (!overtaken() && activeSubTab === "dashboard") setOverviewLoad({ advances: null, reportsFailed: true, budgetFailed: true });
     } finally {
-      setFinanceLoads(n => n + 1);
+      setFinanceLoads(n => Math.max(n, ticket));
     }
   }
 
@@ -270,23 +279,19 @@ export default function FinanceView({
     }
   }
 
-  // Validate a liquidation report (Finance officer). A Return goes through its checklist
-  // dialog on the Liquidation Desk instead.
+  // Validate a liquidation report (Finance officer). It throws the server's reason, which the report's
+  // View shows and stays open on. Either way the lists reload: a refusal can mean the report was acted
+  // on elsewhere. A Return goes through its checklist dialog on the Liquidation Desk instead.
   async function handleFinanceValidate(subId: string, remarks: string) {
     try {
-      const res = await apiCall(`/api/liquidation-submissions/${subId}/finance-action`, {
+      const res = await apiCall(`/api/liquidation-submissions/${encodeURIComponent(subId)}/finance-action`, {
         method: "PUT",
         body: JSON.stringify({ action: "Validate", remarks: remarks || "Financial documentations validated & finalized." })
       });
-      if (res.status === "success") {
-        alert("Dossier validated and finalized successfully!");
-        setSelectedSub(null);
-        setSubRemarks("");
-        fetchFinanceAddons();
-        onRefresh();
-      }
-    } catch (err: any) {
-      alert(err.message || "Failed to process liquidation validation.");
+      if (res?.status !== "success") throw new Error(res?.message || "The report could not be validated.");
+    } finally {
+      fetchFinanceAddons();
+      onRefresh();
     }
   }
 
@@ -312,21 +317,18 @@ export default function FinanceView({
 
   // Simulated export to CSV for financial reports
   function generateFinancialReport(title: string, headers: string[], rows: string[][], filename: string) {
+    // Every line goes through csvCell, the header's too: an account's name is typed by the Administrator.
     const csvContent = [
-      `HSAC REGIONAL FINANCE OFFICE REPORT: ${title.toUpperCase()}`,
-      `Generated on: ${new Date().toLocaleString()}`,
-      `Generated by: ${user.fullName} (${user.role})`,
+      csvCell(`HSAC REGIONAL FINANCE OFFICE REPORT: ${title.toUpperCase()}`),
+      csvCell(`Generated on: ${new Date().toLocaleString()}`),
+      csvCell(`Generated by: ${user.fullName} (${user.role})`),
       "",
-      headers.join(","),
-      ...rows.map(row => 
-        row.map(val => {
-          const s = String(val || "").replace(/"/g, '""');
-          return `"${s}"`;
-        }).join(",")
-      )
+      headers.map(csvCell).join(","),
+      ...rows.map(row => row.map(csvCell).join(","))
     ].join("\r\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    // The byte-order mark: without it Excel opens the file as ANSI, and a name with an ñ arrives garbled.
+    const blob = new Blob([String.fromCharCode(0xfeff), csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
@@ -338,20 +340,21 @@ export default function FinanceView({
 
   // Render Export actions
   const exportMethods = {
-    // The Liquidation Desk passes the index rows on screen (its claim-type filter applied).
+    // The Liquidation Desk passes every row its index matches, on all its pages (its search and
+    // claim-type filter applied).
     liquidations: (list: any[] = yearFilteredSubmissions) => {
-      const headers = ["Liquidation Number", "Claim Type", "Reference Request", "Employee", "Department", "Allocated Released", "Liquidated Amount", "Remaining Balance Return", "Status", "Close Date"];
+      const headers = ["Liquidation Number", "Claim Type", "Seminar", "Employee", "Allocated Released", "Liquidated Amount", "Remaining Balance Return", "Status", "Close Date"];
       const rows = list.map(l => [
         l.submissionNo,
         l.claimType || "",
-        l.activityId,
+        l.activityTitle || l.activityId,
         l.employeeName,
-        "N/A",
-        l.totalReleased.toString(),
-        l.totalSpent.toString(),
-        l.remainingBalance.toString(),
+        // Read as the desk reads them: an older report may hold text here, or nothing.
+        String(peso(l.totalReleased)),
+        String(peso(l.totalSpent)),
+        String(peso(l.remainingBalance)),
         l.status,
-        l.liquidationDate
+        manilaDay(l.financeValidatedAt)
       ]);
       generateFinancialReport("Cash Advance and Liquidation Monitors", headers, rows, "HSAC_Liquidation_Logistics");
     },
@@ -477,13 +480,11 @@ export default function FinanceView({
             yearFilteredSubmissions={yearFilteredSubmissions}
             activeFiscalYear={activeFiscalYear}
             yearControl={fyButton}
-            selectedSub={selectedSub}
-            subRemarks={subRemarks}
-            setSelectedSub={setSelectedSub}
-            setSubRemarks={setSubRemarks}
             onValidate={handleFinanceValidate}
             onExport={exportMethods.liquidations}
             onQueueRefresh={() => { fetchFinanceAddons(); onRefresh(); }}
+            focusReport={shownReport && financeLoads > shownReport.afterLoad ? shownReport : null}
+            onFocusReportHandled={() => setShownReport(null)}
             focusAdvance={focusAdvance}
             onFocusAdvanceHandled={() => setFocusAdvance(null)}
           />

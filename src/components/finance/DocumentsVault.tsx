@@ -16,6 +16,8 @@ import type { LiquidationDocumentRow } from "../../types";
 import { apiCall, downloadBase64File, firstDateString, formatDate } from "../../utils";
 import { documentPlate } from "../../reportDocuments";
 import FileViewer, { type ReportFile } from "../ui/FileViewer";
+import { TablePager } from "../ui/DataTable";
+import { useTableView } from "../ui/useTableView";
 import { reportStatusBadgeClass } from "./overviewFigures";
 import { VAULT_STAGES, fileKindLabel, vaultView, type VaultStage } from "./vaultRows";
 
@@ -76,6 +78,12 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
     () => vaultView(files ?? [], { fiscalYear, stage, query, includeReplaced }),
     [files, fiscalYear, stage, query, includeReplaced]
   );
+  // The vault keeps its own search and counts (vaultRows.ts), and only takes its 25 a page from here.
+  const table = useTableView<LiquidationDocumentRow>({
+    rows: view.rows,
+    rowId: rowKey,
+    filterKey: `${fiscalYear}\u0000${stage}\u0000${query}\u0000${includeReplaced}`
+  });
 
   async function download(row: LiquidationDocumentRow) {
     const key = rowKey(row);
@@ -270,7 +278,7 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
                   </td>
                 </tr>
               ) : (
-                view.rows.map(row => {
+                table.page.rows.map(row => {
                   const key = rowKey(row);
                   const busy = downloading.has(key);
                   const problem = rowProblems[key] || "";
@@ -366,9 +374,11 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
 
         {!loading && files !== null && files.length > 0 && (
           <p className="border-t border-slate-200 px-4 py-2.5 text-[10px] text-slate-500">
-            {view.rows.length} file{view.rows.length === 1 ? "" : "s"} shown of {view.yearTotal} in FY {fy}
+            {/* How many the filters leave; the pager under it says which of them are on the page. */}
+            {view.rows.length} of the {view.yearTotal} file{view.yearTotal === 1 ? "" : "s"} in FY {fy}
           </p>
         )}
+        {!loading && table.page.pageCount > 1 && <TablePager table={table} label="Pages of the documents vault" />}
       </section>
       <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </div>

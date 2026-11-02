@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { LiquidationSubmission } from "../../types";
 import { X, Printer } from "lucide-react";
+import { useDialogLayer } from "../ui/ModalDialog";
 import LiquidationReportForm from "./LiquidationReportForm";
 import ReportAttachments from "./ReportAttachments";
 
@@ -18,7 +19,8 @@ interface LiquidationReportModalProps {
  * print` block in src/index.css can then hide every other body child outright, which is
  * the only reliable way to strip the sidebar and page chrome from the printout. While it
  * is open <body> carries `.lr-printing`, so the browser's own Ctrl+P behaves exactly
- * like the Print button here.
+ * like the Print button here. It can open over a report's View window, so it takes its place in the stack of
+ * dialogs: while it is on top, Esc closes only this and Tab stays in it.
  */
 export default function LiquidationReportModal({
   submission,
@@ -26,16 +28,8 @@ export default function LiquidationReportModal({
   onClose,
 }: LiquidationReportModalProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
-
-  // Esc closes, matching the other modals in the portal.
-  useEffect(() => {
-    if (!submission) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [submission, onClose]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogLayer(panelRef, onClose, false, !!submission);
 
   // Focus once per opened report - not on every parent re-render, which would yank
   // focus back while the user is reading - and give it back to the opener on close.
@@ -59,11 +53,13 @@ export default function LiquidationReportModal({
 
   return createPortal(
     <div
+      ref={panelRef}
       id="lr-print-portal"
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm print:static print:block print:overflow-visible print:bg-transparent print:p-0 print:backdrop-blur-none"
       role="dialog"
       aria-modal="true"
       aria-label="Liquidation Report preview"
+      tabIndex={-1}
     >
       <div className="my-auto w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl print:my-0 print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
         {/* Modal chrome - never printed */}

@@ -80,6 +80,16 @@ function sideways(control: HTMLElement, box: HTMLElement): number {
   return sidewaysOffset(control.getBoundingClientRect(), { left: box.getBoundingClientRect().left, width: box.clientWidth });
 }
 
+// A table scrolls inside the desk's own scrolling area: a box inside another has to come into view itself.
+function showBox(box: HTMLElement) {
+  const outer = scrollingBox(box);
+  if (outer === document.scrollingElement || outer === document.documentElement) return;
+  const r = box.getBoundingClientRect();
+  const o = outer.getBoundingClientRect();
+  if (r.top >= o.top && r.bottom <= o.bottom) return;
+  outer.scrollBy({ top: r.top - o.top - (outer.clientHeight - r.height) / 2, behavior: "smooth" });
+}
+
 // Brings a control to the middle of the box that scrolls it, and sideways only as far as needed. Not
 // scrollIntoView: the form's parts sit in cards that clip their rounded corners with overflow:hidden, which makes
 // each card a scroll box of its own, and the browser then centres the whole card. On a narrow screen a card is
@@ -87,6 +97,7 @@ function sideways(control: HTMLElement, box: HTMLElement): number {
 function centre(control: HTMLElement) {
   const box = scrollingBox(control);
   const page = box === document.scrollingElement || box === document.documentElement;
+  if (!page) showBox(box);
   const r = control.getBoundingClientRect();
   const top = r.top - (page ? 0 : box.getBoundingClientRect().top) - ((page ? window.innerHeight : box.clientHeight) - r.height) / 2;
   const across = sidewaysBox(control);

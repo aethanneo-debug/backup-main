@@ -28,73 +28,27 @@ const FOCUSABLE = [
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
 
-const WIDTHS = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-2xl", xl: "max-w-4xl" } as const;
+const WIDTHS = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-2xl", xl: "max-w-4xl", "2xl": "max-w-5xl" } as const;
 
 /** The dialogs on screen, the newest last. */
 const openDialogs: HTMLElement[] = [];
 
-interface ModalDialogProps {
-  title: string;
-  /** One line under the title: who or what the dialog is about. */
-  subtitle?: string;
-  /** A small lucide icon shown before the title. Pass aria-hidden="true". */
-  icon?: ReactNode;
-  onClose: () => void;
-  busy?: boolean;
-  /** What to focus on open. Defaults to the first focusable control in the body. */
-  initialFocusRef?: RefObject<HTMLElement | null>;
-  size?: keyof typeof WIDTHS;
-  /** The action buttons, right-aligned (stacked on narrow screens). */
-  footer: ReactNode;
-  children: ReactNode;
-}
-
-export default function ModalDialog({
-  title,
-  subtitle,
-  icon,
-  onClose,
-  busy = false,
-  initialFocusRef,
-  size = "md",
-  footer,
-  children
-}: ModalDialogProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const titleId = useId();
-  const subtitleId = useId();
-
+/**
+ * Makes a panel a dialog in the stack: while it is on top, Esc closes it (unless `busy`) and Tab stays inside it.
+ * Anything drawn as a dialog over another one needs this, or Esc closes both and Tab leaves the one on top.
+ */
+export function useDialogLayer(panelRef: RefObject<HTMLElement | null>, onClose: () => void, busy = false, open = true) {
   // The key handler is bound once; it reads the latest props through this ref.
   const latest = useRef({ onClose, busy });
   useEffect(() => {
     latest.current = { onClose, busy };
   });
 
-  // Focus in once per opening, and give focus back to the opener on close.
-  useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const target =
-      initialFocusRef?.current ??
-      bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE) ??
-      panelRef.current;
-    target?.focus();
-    return () => {
-      if (opener && opener.isConnected) opener.focus();
-    };
-  }, []);
-
   useEffect(() => {
     const opened = panelRef.current;
-    if (!opened) return;
+    if (!open || !opened) return;
     openDialogs.push(opened);
-    return () => {
-      const at = openDialogs.indexOf(opened);
-      if (at >= 0) openDialogs.splice(at, 1);
-    };
-  }, []);
 
-  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const panel = panelRef.current;
       if (!panel || e.defaultPrevented || openDialogs[openDialogs.length - 1] !== panel) return;
@@ -131,7 +85,58 @@ export default function ModalDialog({
       }
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      const at = openDialogs.indexOf(opened);
+      if (at >= 0) openDialogs.splice(at, 1);
+    };
+  }, [open]);
+}
+
+interface ModalDialogProps {
+  title: string;
+  /** One line under the title: who or what the dialog is about. */
+  subtitle?: string;
+  /** A small lucide icon shown before the title. Pass aria-hidden="true". */
+  icon?: ReactNode;
+  onClose: () => void;
+  busy?: boolean;
+  /** What to focus on open. Defaults to the first focusable control in the body. */
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  size?: keyof typeof WIDTHS;
+  /** The action buttons, right-aligned (stacked on narrow screens). */
+  footer: ReactNode;
+  children: ReactNode;
+}
+
+export default function ModalDialog({
+  title,
+  subtitle,
+  icon,
+  onClose,
+  busy = false,
+  initialFocusRef,
+  size = "md",
+  footer,
+  children
+}: ModalDialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const subtitleId = useId();
+  useDialogLayer(panelRef, onClose, busy);
+
+  // Focus in once per opening, and give focus back to the opener on close.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const target =
+      initialFocusRef?.current ??
+      bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE) ??
+      panelRef.current;
+    target?.focus();
+    return () => {
+      if (opener && opener.isConnected) opener.focus();
+    };
   }, []);
 
   return createPortal(

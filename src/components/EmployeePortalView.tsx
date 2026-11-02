@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, ActiveSignatory, ClaimType, CashAdvance, DocumentKind, LiquidationDocument, NotificationLink, ScreenFocus, TravelDeclaration } from "../types";
+import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, LiquidationSubmissionView, ActiveSignatory, ClaimType, CashAdvance, DocumentKind, LiquidationDocument, NotificationLink, ScreenFocus, TravelDeclaration } from "../types";
 import { useFocusTarget, useRecordHighlight } from "./ui/useRecordHighlight";
 import { correctionTarget as firstCorrectionTarget, correctionTargetSelectors } from "../correctionTarget";
 import { apiCall, getLocalTodayString, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../utils";
@@ -10,7 +10,7 @@ import {
   sumParticulars,
   filledParticulars
 } from "./liquidation/particularLines";
-import { expenseLineLabel, expenseTypeProblem, isBlankExpenseLine, keptExpenseType, vehicleNoForLine } from "../expenseLines";
+import { expenseTypeProblem, isBlankExpenseLine, keptExpenseType, vehicleNoForLine } from "../expenseLines";
 import { FILE_INPUT_ACCEPT, MAX_REPORT_FILES, fileBytes, fileProblem, pickedFileProblem, reportFilesProblem } from "../fileRules";
 import FileViewer, { type ReportFile } from "./ui/FileViewer";
 import { CoaHeaderFields, emptyCoaHeaderFields } from "./liquidation/LiquidationCoaFields";
@@ -19,17 +19,11 @@ import { amountText } from "./liquidation/sheet/sheetFormat";
 import LiquidationReportModal from "./liquidation/LiquidationReportModal";
 import CorrectionRequestPanel from "./liquidation/resubmit/CorrectionRequestPanel";
 import CorrectionNote from "./liquidation/resubmit/CorrectionNote";
-import { canResubmit, correctionAccess } from "./liquidation/resubmit/correctionModel";
-import {
-  ClaimTypeBadge,
-  ClaimTypeFilter,
-  ClaimTypeFilterEmpty,
-  ClaimTypeFilterValue,
-  matchesClaimType
-} from "./liquidation/ClaimType";
+import { canResubmit, correctionAccess, openCorrectionOf } from "./liquidation/resubmit/correctionModel";
+import SettlementLog from "./liquidation/SettlementLog";
 import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal";
 import AdvanceRequestPanel, { currentAdvanceOf } from "./liquidation/AdvanceRequestPanel";
-import BalanceCheck, { BalanceStatusBadge, FundReturnNote } from "./liquidation/BalanceCheck";
+import BalanceCheck from "./liquidation/BalanceCheck";
 import { withinAdvanceSubmitProblem } from "./liquidation/withinAdvance";
 import { reimbursementProblem, seminarClaimMode } from "../reimbursement";
 import { liquidationBalance } from "../liquidationMoney";
@@ -52,9 +46,10 @@ import {
   Paperclip,
   Trash2,
   Bell,
-  Package,
-  Printer
+  Package
 } from "lucide-react";
+
+const LIQUIDATION_FORM_TOP = ["#liquidation-form-top"];
 
 interface EmployeePortalViewProps {
   user: User;
@@ -169,8 +164,6 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // chooses (instructor's note 10).
   const effectiveClaimType: ClaimType | "" = allowanceForm ? "Reimbursement" : withinAdvanceForm ? "Liquidation" : claimType;
   const isReimbursement = effectiveClaimType === "Reimbursement";
-  // My Settlement Log Entries, narrowed by claim type.
-  const [logFilter, setLogFilter] = useState<ClaimTypeFilterValue>("All");
 
   // --- COA Liquidation Report (PARTICULARS block + header fields) ---
   const [particulars, setParticulars] = useState<LiquidationParticular[]>([newParticular()]);
@@ -435,7 +428,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   // and outlined, once the fresh load has landed (portalLoads). A visit to Liquidations made
   // this way shows that report, so it doesn't open the latest returned one for correction.
   // A certificate reminder also puts the keyboard focus on the card's Upload button (R7).
-  const [shownRecord, setShownRecord] = useState<{ id: string; key: number; afterLoad: number; control?: string } | null>(null);
+  // A report opens its View in the settlement log instead, which then gives the row the focus.
+  const [shownRecord, setShownRecord] = useState<{ id: string; key: number; afterLoad: number; control?: string; isReport: boolean } | null>(null);
   const focusVisit = useRef(false);
   useEffect(() => {
     if (!focus) return;
@@ -456,12 +450,15 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         id: record.id,
         key: focus.nonce,
         afterLoad: portalLoads,
-        control: focus.focus === "certificateUpload" ? `#${CSS.escape(`certificate-upload-${record.id}`)}` : undefined
+        control: focus.focus === "certificateUpload" ? `#${CSS.escape(`certificate-upload-${record.id}`)}` : undefined,
+        isReport: section === "liquidations"
       });
     }
     onFocusHandled?.();
   }, [focus?.nonce]);
-  useRecordHighlight(shownRecord && portalLoads > shownRecord.afterLoad ? shownRecord.id : null, shownRecord?.key, shownRecord?.control);
+  const freshRecord = shownRecord && portalLoads > shownRecord.afterLoad ? shownRecord : null;
+  useRecordHighlight(freshRecord && !freshRecord.isReport ? freshRecord.id : null, shownRecord?.key, shownRecord?.control);
+  const reportToOpen = useMemo(() => (freshRecord?.isReport ? { id: freshRecord.id, key: freshRecord.key } : null), [freshRecord?.isReport, freshRecord?.id, freshRecord?.key]);
 
   // A seminar title (Trainings and Seminar) or a "form is ready" notice asked App to open
   // this seminar's liquidation form.
@@ -523,6 +520,28 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     return target ? correctionTargetSelectors(target) : null;
   }, [correctionFocusKey, resubmittingItem, access.open]);
   useFocusTarget(correctionFocus, correctionFocusKey);
+
+  // "Fix & Resubmit" in a report's View lands as a notice does. A report returned before checklists has no part
+  // to land on, so the form's top is brought into view instead.
+  const [formTopKey, setFormTopKey] = useState<number | null>(null);
+  useFocusTarget(LIQUIDATION_FORM_TOP, formTopKey);
+  // A report being filled in or corrected, which opening another one would throw away.
+  const hasDraftReport = () => !!resubmittingItem || (!!selectedActivityId && (
+    (attachedFiles ?? []).length > 0 ||
+    (particulars ?? []).some(p => !isBlankExpenseLine(p))
+  ));
+  function fixAndResubmit(report: LiquidationSubmissionView) {
+    const land = () => {
+      setCorrectionFocusKey(Date.now());
+      if (!firstCorrectionTarget(openCorrectionOf(report), report)) setFormTopKey(Date.now());
+    };
+    // Already correcting it: keep what was typed, and only land on it. Anything else being filled in is dropped only
+    // after asking, as a notice does.
+    if (resubmittingItem?.id === report.id) return land();
+    if (hasDraftReport() && !window.confirm("Discard the report you are filling in and correct this one instead?")) return;
+    loadForResubmission(report);
+    land();
+  }
 
   // The Liquidations tab opens straight into the latest returned report (requirement 5),
   // once per visit, so the claimant can still cancel it and file something else. Each visit
@@ -746,11 +765,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       setCorrectionFocusKey(Date.now());
       return;
     }
-    const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
-      (attachedFiles ?? []).length > 0 ||
-      (particulars ?? []).some(p => !isBlankExpenseLine(p))
-    ));
-    if (hasDraft && !window.confirm("Discard the report you are filling in and open the returned report instead?")) {
+    if (hasDraftReport() && !window.confirm("Discard the report you are filling in and open the returned report instead?")) {
       setActiveSubMenu("liquidations");
       return;
     }
@@ -792,11 +807,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       return;
     }
     // Don't silently throw away a report being filled in or corrected.
-    const hasDraft = !!resubmittingItem || (!!selectedActivityId && (
-      (attachedFiles ?? []).length > 0 ||
-      (particulars ?? []).some(p => !isBlankExpenseLine(p))
-    ));
-    if (hasDraft && !window.confirm("Discard the report you are filling in and open this seminar's form instead?")) {
+    if (hasDraftReport() && !window.confirm("Discard the report you are filling in and open this seminar's form instead?")) {
       setActiveSubMenu("liquidations");
       return;
     }
@@ -1173,13 +1184,13 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
   // The shared helper only opens a real uploaded file (a base64 data URL), never a script.
   const downloadBase64File = (name: string, content: string) => {
-    if (!saveAttachedFile(name, content)) alert(`"${name}" has no uploaded file that can be opened.`);
+    if (!saveAttachedFile(name, content)) setFileError(`"${name}" has no uploaded file that can be opened.`);
   };
 
   // A filed report's file, in the viewer. The server sends it only to its owner and the reviewers.
   function viewReportFile(reportId: string, doc: any) {
     if (doc?.hasFile) setViewing({ reportId, docId: doc.id, name: doc.name });
-    else alert(`"${doc?.name}" has no uploaded file that can be opened.`);
+    else setFileError(`"${doc?.name}" has no uploaded file that can be opened.`);
   }
 
   function handleRemoveAttached(id: string) {
@@ -1920,7 +1931,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
 
             {/* CREATE SUBMISSION FORM */}
             <form onSubmit={handleLiquidationSubmit} className="space-y-4 p-5 border border-slate-200 rounded-xl bg-slate-50/30">
-              <h2 className="text-xs font-bold text-blue-700 uppercase font-mono tracking-wider flex items-center justify-between">
+              <h2 id="liquidation-form-top" tabIndex={-1} className="text-xs font-bold text-blue-700 uppercase font-mono tracking-wider flex items-center justify-between focus:outline-none">
                 <span>{resubmittingItem ? `Correct & Resubmit Report: ${resubmittingItem.submissionNo}` : "File Liquidation Voucher Report"}</span>
                 {resubmittingItem && (
                   <button
@@ -2398,155 +2409,18 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
             </form>
 
             {/* PAST REPORT ENTRIES LIQUIADTION LEDGER */}
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider">My Settlement Log Entries</h2>
-                {!loading && (submissions ?? []).length > 0 && (
-                  <ClaimTypeFilter value={logFilter} onChange={setLogFilter} items={submissions ?? []} />
-                )}
-              </div>
-              {loading ? (
-                <div className="space-y-3" aria-hidden="true">
-                  {[0, 1].map(i => (
-                    <div key={i} className="p-4 border border-slate-100 rounded-xl bg-white space-y-2.5 animate-pulse">
-                      <div className="h-3 w-40 bg-slate-100 rounded" />
-                      <div className="h-2.5 w-64 bg-slate-100 rounded" />
-                      <div className="h-12 bg-slate-50 rounded" />
-                    </div>
-                  ))}
-                </div>
-              ) : (submissions ?? []).length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 py-10 text-center">
-                  <FileText size={22} className="text-slate-300" aria-hidden="true" />
-                  <p className="text-xs font-semibold text-slate-600">No settlement reports logged yet</p>
-                  <p className="max-w-sm text-[10px] text-slate-400 font-sans">
-                    File your first Liquidation Report using the form above. It will appear here once HR receives it.
-                  </p>
-                </div>
-              ) : !(submissions ?? []).some(s => matchesClaimType(s, logFilter)) ? (
-                <ClaimTypeFilterEmpty filter={logFilter} onShowAll={() => setLogFilter("All")} />
-              ) : (
-                <div className="space-y-3">
-                  {(submissions ?? []).filter(s => matchesClaimType(s, logFilter)).map((sub: any) => (
-                    <div key={sub.id} data-record-id={sub.id} className="p-4 border border-slate-100 rounded-xl bg-slate-50/10 space-y-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="font-mono font-bold text-slate-800">{sub.serialNo || sub.submissionNo}</span>
-                          <ClaimTypeBadge claimType={sub.claimType} />
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            Cash Advance: {formatCurrency(Number(sub.totalReleased) || 0)} · Spent: {formatCurrency(Number(sub.totalSpent) || 0)}
-                          </span>
-                          {/* A seminar report kept within its advance shows its balance; others
-                              their refund or reimbursement, as before. */}
-                          <BalanceStatusBadge report={sub} />
-                          {!sub.withinAdvance && Number(sub.remainingBalance) !== 0 && (
-                            <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border ${
-                              Number(sub.remainingBalance) > 0
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                : "bg-amber-50 text-amber-700 border-amber-200"
-                            }`}>
-                              {Number(sub.remainingBalance) > 0 ? "Refunded" : "To Reimburse"}: {formatCurrency(Math.abs(Number(sub.remainingBalance) || 0))}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => setReportSubmission(sub as LiquidationSubmission)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold rounded text-[9px] uppercase tracking-wider cursor-pointer font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350"
-                          >
-                            <Printer size={10} aria-hidden="true" />
-                            Print / View Report
-                          </button>
-                          {canResubmit(sub) && (
-                            <button
-                              type="button"
-                              onClick={() => loadForResubmission(sub)}
-                              className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold rounded text-[9px] uppercase tracking-wider cursor-pointer font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                            >
-                              Fix & Resubmit
-                            </button>
-                          )}
-                          <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded border ${
-                            sub.status === "Approved" || sub.status === "Completed"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : sub.status === "Rejected"
-                              ? "bg-rose-50 text-rose-700 border-rose-200"
-                              : sub.status === "Returned"
-                              ? "bg-amber-50 text-amber-700 border-amber-200"
-                              : "bg-blue-50 text-blue-700 border-blue-200"
-                          }`}>
-                            {sub.status}
-                          </span>
-                        </div>
-                      </div>
-
-                      <FundReturnNote report={sub} />
-
-                      {/* PARTICULARS FILED ON THIS REPORT */}
-                      {(sub.particulars ?? []).length > 0 && (
-                        <div className="rounded-lg border border-slate-100 bg-white p-2">
-                          <p className="font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">Particulars Filed</p>
-                          <ul className="mt-1 space-y-0.5">
-                            {(sub.particulars ?? []).map((p: any, idx: number) => (
-                              <li key={p.id || idx} className="flex items-baseline justify-between gap-3 text-[10px]">
-                                <span className="truncate text-slate-600">
-                                  <span className="mr-1 font-mono text-slate-400">{idx + 1}.</span>
-                                  {expenseLineLabel(p)}
-                                </span>
-                                <span className="shrink-0 font-mono tabular-nums text-slate-700">
-                                  {formatCurrency(Number(p.amount) || 0)}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {/* REMARKS AND TRIAL CORRECTION VIEWS */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[10px] font-sans">
-                        <div className="p-2 bg-white rounded border border-slate-100">
-                          <span className="text-blue-700 font-bold uppercase font-mono">HR Verification:</span>
-                          <p className="text-slate-500 italic mt-0.5">"{sub.hrRemarks || 'Pending review'}"</p>
-                        </div>
-                        <div className="p-2 bg-white rounded border border-slate-100">
-                          <span className="text-emerald-700 font-bold uppercase font-mono">Finance Check:</span>
-                          <p className="text-slate-500 italic mt-0.5">"{sub.financeRemarks || 'Awaiting HR forward'}"</p>
-                        </div>
-                        <div className="p-2 bg-white rounded border border-slate-100 font-sans">
-                          <span className="text-purple-700 font-bold uppercase font-mono">Chief Approval:</span>
-                          <p className="text-slate-500 italic mt-0.5">"{sub.divisionChiefRemarks || 'Pending endorsements'}"</p>
-                        </div>
-                      </div>
-
-                      {/* ATTACHED DOCUMENTS VIEW AND DOWNLOAD */}
-                      {sub.supportingDocs && sub.supportingDocs.length > 0 && (
-                        <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2 items-center">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase font-mono tracking-wider">Receipt Ledger:</span>
-                          {sub.supportingDocs.map((doc: any, idx: number) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => viewReportFile(sub.id, doc)}
-                              // On a group's report, a colleague's certificate is theirs alone to open (R4).
-                              disabled={doc.kind === "certificate" && doc.participantId !== sub.activityId}
-                              className={`px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded text-[10px] font-mono font-medium inline-flex items-center space-x-1 cursor-pointer disabled:cursor-default disabled:text-slate-500 disabled:hover:bg-white ${
-                                doc.supersededAt ? "text-slate-400" : "text-blue-600"
-                              }`}
-                            >
-                              <span className={doc.supersededAt ? "line-through" : undefined}>📎 {doc.name}</span>
-                              {doc.size && <span className="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">{doc.size}</span>}
-                              {/* A correction replaced it; the old copy stays for the record. */}
-                              {doc.supersededAt && <>{" "}<span className="text-[8px] font-bold uppercase">(replaced)</span></>}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <SettlementLog
+              reports={submissions}
+              loading={loading}
+              open={reportToOpen}
+              onOpenHandled={found => {
+                setShownRecord(null);
+                // Not when the load failed: its own message says so, and the list is the one from before.
+                if (!found && !error) setError("That liquidation report could not be found.");
+              }}
+              onPrint={setReportSubmission}
+              onResubmit={fixAndResubmit}
+            />
           </div>
         )}
 

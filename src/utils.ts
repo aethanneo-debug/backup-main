@@ -23,6 +23,20 @@ export function formatDate(dateString: string): string {
   }
 }
 
+/**
+ * One CSV cell. Excel starts a formula at a leading = + - @ even inside quotes, and names and titles can come from
+ * an uploaded PDS or a typed form: a leading apostrophe keeps such a cell as text. Some spreadsheets read past leading
+ * spaces, and full-width signs ("＝") are the same signs to them, so those count too. A plain negative amount is no
+ * formula, and stays a number.
+ */
+export function csvCell(value: unknown): string {
+  const text = String(value ?? "");
+  const lead = text.normalize("NFKC").trimStart();
+  const formulaLike = /^[\t\r\n]/.test(text) || /^[=+\-@]/.test(lead);
+  const safe = formulaLike && !/^-?\d+(\.\d+)?$/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
 // Convert JSON arrays to CSV format and prompt browser download
 export function downloadCSV(data: any[], headers: string[], filename: string) {
   const csvContent = [
@@ -165,17 +179,19 @@ export function daysUntil(dateString: string): number {
  */
 export function firstTimestamp(...candidates: (string | undefined | null)[]): number {
   for (const c of candidates) {
-    if (!c) continue;
+    // Only text: a stored date that is a number or an object (an older or tampered record) is passed over.
+    if (typeof c !== "string" || !c) continue;
     const t = new Date(c).getTime();
     if (!isNaN(t)) return t;
   }
   return 0;
 }
 
-/** The first candidate that parses as a date, for display. Empty string when none do. */
+/** The first candidate that parses as a date, for display. Empty string when none do. Only text counts: the lists
+ * call `.split` on what this returns, and a number stored as a request's date would take the screen down. */
 export function firstDateString(...candidates: (string | undefined | null)[]): string {
   for (const c of candidates) {
-    if (!c) continue;
+    if (typeof c !== "string" || !c) continue;
     if (!isNaN(new Date(c).getTime())) return c;
   }
   return "";

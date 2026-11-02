@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Search, SearchX, Sparkles, Users, X } from "lucide-react";
 import type { TdpJustificationInput, TrainingCandidate } from "../../types";
+import { matchesTerms, searchTerms } from "../../tableView";
 import { BADGE, CandidateBadges, RecommendedBadge } from "./candidateBadges";
 import ParticipantOrderKey from "./ParticipantOrderKey";
 import TdpJustificationForm from "./TdpJustificationForm";
@@ -42,14 +43,7 @@ export interface PickGroup {
   rows: PickRow[];
 }
 
-// Case and accents don't count, so "pena" finds "Peña": NFD splits "ñ" into "n" and a combining mark
-// (\p{M}), which is dropped. Every word must match.
-const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-export const searchTerms = (query: string) => fold(query).split(/\s+/).filter(Boolean);
-export const rowMatches = (r: PickRow, terms: string[]) => {
-  const text = fold(`${r.name} ${r.c?.position ?? ""} ${r.c?.division ?? ""}`);
-  return terms.every(t => text.includes(t));
-};
+export const rowMatches = (r: PickRow, terms: string[]) => matchesTerms(terms, `${r.name} ${r.c?.position ?? ""} ${r.c?.division ?? ""}`);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 interface Props {
