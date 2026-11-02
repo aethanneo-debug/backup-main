@@ -18,8 +18,8 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 | 2 | R6 viewer, file allow-list, Print; file storage; 12e | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 3 | R4 certificate, R5 required documents | Built 2026-11-01; reviewed three times, every finding fixed; pushed 2026-11-02 (known-issues 12aa) |
 | 4 | R7 notices that open on the missing item | Built, reviewed and pushed 2026-11-02 (known-issues 12aa) |
-| 5 | R8 tables and View | Built and reviewed 2026-11-02, every finding fixed but two nits (known-issues 12aa); not committed |
-| 6 | R9 the TDP once a year | Not started |
+| 5 | R8 tables and View | Built, reviewed and pushed 2026-11-02, every finding fixed but two nits (known-issues 12aa) |
+| 6 | R9 the TDP once a year | Built and reviewed 2026-11-02 (known-issues 12aa); not committed |
 | 7 | R10 picker, R11 history and reports | Not started |
 | 8 | R12 demo data | Not started; ask first |
 
@@ -37,7 +37,6 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 
 - **R12 / Q9, demo data:** how the data gets in. Decide in Phase 8.
 - **R11 / Q10, 12r:** the team asked what the records are and why they would be removed. Unless told otherwise, the Review buttons get fixed in Phase 7, not removed.
-- **R9, "Add Training Program":** how it stays while seminars still start from the TDP. Confirm in Phase 6's plan.
 - **Known limit, accepted:** a certificate that arrives late holds up the attendance record, then the report (due 30 days after the seminar) and the employee's next cash advance. If this proves common, add "HR records it with a reason", flagged in the audit log.
 
 ## The recommendations
@@ -180,6 +179,22 @@ Build:
 - **Replace with an amended TDP.** HR and the Administrator only, with a confirmation and an audit entry. A second import today only adds and never removes, so this is new work. Seminar links and Monitoring match needs by title, so a replace must not leave them pointing at nothing.
 - **Keep working:** the Mandated trainings panel, and Monitoring's accomplished override, which uses the same route as editing a need.
 - **Programs & Budget.** Keep "Other training (not in the TDP)" as the exception, through the existing justification dialog (HSAC answer 8, 12z Part C). If no TDP has been uploaded, say so and link to Training Needs.
+
+Decided in Phase 6's plan (2026-11-02; the four defaults approved):
+- **Plan A is locked on the server.** Adding, removing, renaming or moving a need to another column is refused; only an amended TDP changes them. Monitoring's accomplished override and remarks stay editable.
+- **A replacement keeps a need still in use,** even when the amended TDP leaves it out. Needs carried from an earlier year are always kept.
+  - As approved, "in use" meant a need a seminar of the year covers, or one already accomplished.
+  - Both reviews then showed that per title this kept everyone's need for the training: people the amended TDP dropped stayed identified, and could be seated with no justification (12z).
+  - The user narrowed it the same day: a need stays for a seminar only when its own person holds a seat on one that covers it, or it is accomplished.
+  - The summary names any seminar that would then cover nothing in the plan, since it would need its own justification.
+- **Needs carried in from an earlier year can be removed** (the user's decision of 2026-11-02, from the code review). They are no TDP's, so no replacement can touch them, and the lock stopped HR deleting them. HR and the Administrator can now remove one, with an audit entry. TDP needs stay locked.
+  - From the code review's re-check: one still in use (its person seated for it, or accomplished) is refused with the reason, as a replacement would keep it.
+  - The removal names any seminar it leaves covering nothing in the plan.
+- **The Administrator is told when HR replaces the TDP.** HR is told of every replacement.
+- **Years imported before uploads were recorded get a record at load,** taken from the latest "Import Plan A Workbook" audit entry. Only a year with needs of its own counts.
+- **"Add Training Program" stays as it is,** as the way in for a training the TDP doesn't list: Save asks why it is held outside the TDP (12z Part C). "Add a seminar from the plan" is the way in for one the TDP lists. A line beside the buttons says which is which.
+- Added during the build: what HR confirms is what happens. The check's summary carries a fingerprint, and a replacement is refused, with what it would do now, if the plan changed in between.
+- From the code review: a need the amended TDP lists for the same person under another column moves there, keeping its Monitoring mark and remarks, instead of being listed in both columns.
 
 ### R10. A participant picker that suggests the right people and shows who already went
 
