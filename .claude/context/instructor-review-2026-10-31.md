@@ -12,15 +12,15 @@ If a recommendation conflicts with an HSAC answer or a recorded decision, stop a
 
 Work one phase at a time: a short plan, the team's OK, build, verify, code review and security review, fix, update the docs. Nothing is committed without being asked.
 
-| Phase | Recommendations | Status (2026-11-02) |
+| Phase | Recommendations | Status (2026-11-03) |
 |---|---|---|
 | 1 | R1 venue, R2 expense lines, R3 transportation | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 2 | R6 viewer, file allow-list, Print; file storage; 12e | Built, reviewed and pushed 2026-11-01 (known-issues 12aa) |
 | 3 | R4 certificate, R5 required documents | Built 2026-11-01; reviewed three times, every finding fixed; pushed 2026-11-02 (known-issues 12aa) |
 | 4 | R7 notices that open on the missing item | Built, reviewed and pushed 2026-11-02 (known-issues 12aa) |
 | 5 | R8 tables and View | Built, reviewed and pushed 2026-11-02, every finding fixed but two nits (known-issues 12aa) |
-| 6 | R9 the TDP once a year | Built and reviewed 2026-11-02 (known-issues 12aa); not committed |
-| 7 | R10 picker, R11 history and reports | Not started |
+| 6 | R9 the TDP once a year | Built and reviewed 2026-11-02, re-checked and pushed 2026-11-03 (known-issues 12aa) |
+| 7 | R10 picker, R11 history and reports | Built and reviewed 2026-11-03 (known-issues 12aa); not committed |
 | 8 | R12 demo data | Not started; ask first |
 
 ## Decisions that change earlier ones
@@ -36,7 +36,6 @@ Work one phase at a time: a short plan, the team's OK, build, verify, code revie
 ## Still open
 
 - **R12 / Q9, demo data:** how the data gets in. Decide in Phase 8.
-- **R11 / Q10, 12r:** the team asked what the records are and why they would be removed. Unless told otherwise, the Review buttons get fixed in Phase 7, not removed.
 - **Known limit, accepted:** a certificate that arrives late holds up the attendance record, then the report (due 30 days after the seminar) and the employee's next cash advance. If this proves common, add "HR records it with a reason", flagged in the audit log.
 
 ## The recommendations
@@ -223,6 +222,9 @@ Build:
 - **Output.** A table on screen, Print (a print preview with the HSAC header, like `training/PlanHeader.tsx`) and CSV (`downloadCSV`). These CSVs will carry typed text such as the venue, so neutralise spreadsheet formulas the way `csvCell` in `training/planD/planDRows.ts` does (security review, 2026-11-01).
 - **Money.** From what already computes it (`seminarBudget`, the reports' own totals), rounded to centavos. Don't calculate it a second way.
 - **Fix HR's add-training form.** It sends `date_conducted`, `training_hours` and `certificate_file_name`, which the server ignores, so every record gets 8 hours and no date.
+- Approved for Phase 7 (2026-11-03), with R10's: "completed" means the last day is past on Manila's calendar, leaving out a seminar archived before use. Finance and the Budget Officer get only their own history, and no training reports. HR and the Administrator see the advance's amount, DV and status in histories. Recommended and Select all count only the rows on screen, and "Add a seminar from the plan" seats only Plan A listers with no training yet this FY, plus mandated listers.
+- HR's Review buttons were fixed, not removed (Q10, 12r). There are no employee submissions yet.
+- Changed on the reviews' findings (the user, 2026-11-03): a record HR returns no longer counts toward the year, Plan D or "already sent", and the printed PDS leaves it out. It stays in the history with HR's reason, and HR records the corrected training. This replaces the plan's "a review doesn't change what counts".
 
 ### R12. Demo data for the final defense (not code)
 
