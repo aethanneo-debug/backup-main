@@ -51,6 +51,23 @@ export function advancesCovering<T extends CoverableAdvance>(advances: readonly 
   return (advances ?? []).filter((a) => !!a && advanceCovers(a, enrolmentId));
 }
 
+/** An advance with the dates of what happened to it. */
+export interface DatedAdvance extends CoverableAdvance {
+  refundedAt?: string;
+  liquidatedAt?: string;
+  decidedAt?: string;
+  issuedAt?: string;
+  requestedAt?: string;
+}
+
+/** Of the advances that pay for an enrolment, the one that stands: one waiting, else one out, else the one with the
+ * latest event (a refund or settlement comes after the release). */
+export function currentAdvance<T extends DatedAdvance>(advances: readonly T[]): T | null {
+  const when = (a: T) => String(a.refundedAt || a.liquidatedAt || a.decidedAt || a.issuedAt || a.requestedAt || "");
+  return advances.find((a) => a.status === "Requested") || advances.find((a) => a.status === "Released")
+    || [...advances].sort((a, b) => when(b).localeCompare(when(a)))[0] || null;
+}
+
 /** The advance in one of `statuses` that pays for an enrolment, the earlier statuses first. */
 export function advanceCovering<T extends CoverableAdvance>(advances: readonly T[] | null | undefined, enrolmentId: string, statuses: readonly string[]): T | null {
   const list = advancesCovering(advances, enrolmentId);

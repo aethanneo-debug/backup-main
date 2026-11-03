@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { apiCall } from '../utils';
-import { Upload, Loader2 } from 'lucide-react';
+import { History, Upload, Loader2 } from 'lucide-react';
+import { TrainingHistoryWindow } from './training/EmployeeTrainingHistory';
+import { recordCounts } from '../trainingRecord';
 
 // "MM/DD/YYYY" (the PDS parser) or "YYYY-MM-DD" (the system) as "YYYY-MM-DD"; anything else as typed.
 const isoDate = (value: any): string => {
@@ -19,6 +21,8 @@ const mergeTrainingRows = (pdsTrainings: any, ledger: any) => {
   const own = (Array.isArray(pdsTrainings) ? pdsTrainings : []).map((t: any) => ({ ...t, status: 'Completed' }));
   const listed = new Set(own.map((t: any) => `${titleKey(t.title)}|${isoDate(t.dateFrom)}`));
   const recorded = (Array.isArray(ledger) ? ledger : [])
+    // A record HR returned is wrong, so it isn't printed (the user's decision of 2026-11-03); the history still shows it.
+    .filter(recordCounts)
     .map((t: any) => ({
       title: t.title,
       dateFrom: t.dateConducted,
@@ -63,6 +67,8 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
   const [profileLoaded, setProfileLoaded] = useState(false);
   // Section V and the printed section VII both list these.
   const trainingRows = useMemo(() => mergeTrainingRows(formData.trainings, trainingsLedger), [formData.trainings, trainingsLedger]);
+  // The employee's training history in a window (the instructor's review, R11).
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
     if (!selectedEmployeeId) {
@@ -967,10 +973,31 @@ export const PersonalDataSheetForm = ({ user, employees, onSuccess }: any) => {
 
               {activeTab === 5 && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="border-b pb-2 mb-4">
-                    <h4 className="text-sm font-bold uppercase text-slate-700">Trainings & Seminars Ledger</h4>
-                    <p className="text-[10px] text-slate-500">Trainings from the uploaded PDS, plus each seminar once Finance validates its liquidation and each training HR records.</p>
+                  <div className="border-b pb-2 mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold uppercase text-slate-700">Trainings & Seminars Ledger</h4>
+                      <p className="text-[10px] text-slate-500">Trainings from the uploaded PDS, plus each seminar once Finance validates its liquidation and each training HR records.</p>
+                    </div>
+                    {/* Not at the sign-in gate, where the server allows only the PDS's own routes. */}
+                    {!user.requirePdsUpload && (
+                      <button
+                        type="button"
+                        data-history-open-pds
+                        onClick={() => setHistoryOpen(true)}
+                        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        <History size={13} aria-hidden="true" /> Training history
+                      </button>
+                    )}
                   </div>
+                  {historyOpen && (
+                    <TrainingHistoryWindow
+                      // By the internal id once known, as Trainings and Seminar does (7j).
+                      employeeKey={(employees ?? []).find((e: any) => e.employeeId === selectedEmployeeId)?.id ?? selectedEmployeeId}
+                      name={(employees ?? []).find((e: any) => e.employeeId === selectedEmployeeId)?.fullName}
+                      onClose={() => setHistoryOpen(false)}
+                    />
+                  )}
                   <table className="w-full text-left text-xs border-collapse bg-white border border-slate-200">
                     <thead>
                       <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold">

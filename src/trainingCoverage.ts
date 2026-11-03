@@ -20,6 +20,7 @@
 // listed. FY 2027 was opened in October 2026 only for testing (the user, 2026-10-23: "leave it
 // be"), so this matters only until years are opened on 1 January.
 import type { TrainingCoverage, TrainingCoverageEntry } from "./types";
+import { recordCounts } from "./trainingRecord";
 
 export interface CoverageEmployee {
   id: string;
@@ -69,7 +70,7 @@ export interface YearTrainings {
 }
 
 /** "YYYY-MM-DD" from a stored date: ISO, or the "MM/DD/YYYY" the PDS parser writes. */
-function isoDay(value: unknown): string | null {
+export function isoDay(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const v = value.trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
@@ -119,7 +120,7 @@ export function yearTrainingCounter(data: CoverageData, fy: CoverageFiscalYear, 
       // HR's own record of a seminar already counted above is the same training, listed once.
       const seen = new Set(seminars.map(titleKey));
       for (const r of data.records ?? []) {
-        if (!r || !forms.includes(r.employeeId) || r.status === "Rejected") continue;
+        if (!r || !forms.includes(r.employeeId) || !recordCounts(r)) continue;
         const day = isoDay(r.dateConducted);
         if (!day || day < span.start || day > span.end) continue;
         const title = String(r.title || "Training");

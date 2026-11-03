@@ -71,7 +71,9 @@ export interface Training {
   trainingHours: number;
   status?: "Pending Verification" | "Verified" | "Returned" | "Rejected";
   remarks?: string;
+  /** Who last reviewed it, and when: verified or returned (12r). */
   verifiedBy?: string;
+  verifiedAt?: string;
 }
 
 export interface Seminar {
@@ -1201,9 +1203,175 @@ export interface TrainingCandidate {
   trainingsThisYear: string[];
   eligible: boolean;
   ineligibleReason?: string;
+  /** Not eligible because they were already sent to this training: the seminar (its year, dates and attendance) or
+   * the training HR recorded. The picker lists them under "Already sent to this training" (the instructor's review, R10). */
+  alreadySent?: AlreadySent;
   /** The seminar's weekdays on which they are already at another seminar (YYYY-MM-DD). Someone
    * must stay to man each division (HSAC RAB 1), so the picker warns when a division would be empty. */
   awayOn?: string[];
+}
+
+/** Which seminar or HR record says someone already went to a training (R10). Dates are YYYY-MM-DD, or "". */
+export type AlreadySent =
+  | { source: "seminar"; title: string; fiscalYear: string; startDate: string; endDate: string; attendance: "Attended" | "Not recorded" }
+  | { source: "record"; title: string; recordedOn: string };
+
+// --- EMPLOYEE TRAINING HISTORY (the instructor's review, R11) ---
+// Every seminar seat and every training HR recorded, one row each, newest first. HR and the Administrator see
+// everyone's in full; an employee sees their own, without what others' records hold (12v decision 8, 12z Part B).
+
+/** A seat on a seminar. Amounts are pesos, rounded to centavos. */
+export interface TrainingHistorySeminar {
+  kind: "seminar";
+  participantId: string;
+  programId: string;
+  fiscalYear: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  venue: string;
+  hours: number;
+  facilitator: string;
+  /** "Attended", "Did not attend", or "" while not recorded. */
+  attendance: string;
+  /** On the roster, taken off it, or replaced by a representative (who went is shown to HR and the Administrator only). */
+  seat: "enrolled" | "cancelled" | "replaced";
+  replacedBy?: string;
+  /** Sent in lieu of someone (12z Part B): HR and the Administrator only. */
+  inLieuOf?: string;
+  /** The certificate of attendance on file (it opens through the seat's certificate route). */
+  certificate?: { name: string; uploadedAt: string };
+  /** The cash advance that funds this seat: its own, or a group's. `amount` is the advance's (a group's total), `share`
+   * this seat's part of a group's. A covered member's own copy has their share as `amount`, with no `members` or
+   * `refundOrNo` (12v decision 8). */
+  advance?: {
+    advanceNo: string;
+    status: string;
+    amount: number;
+    share?: number;
+    dvNo?: string;
+    dvDate?: string;
+    group?: { holder: string; members?: number; isHolder: boolean };
+    refundOrNo?: string;
+    refundedAt?: string;
+  };
+  /** The liquidation report that settles it: its own, or a group's. A covered member sees only its number and status. */
+  report?: {
+    submissionNo: string;
+    status: string;
+    claimType?: string;
+    totalSpent?: number;
+    refund?: { amount: number; orNo: string };
+    group: boolean;
+  };
+}
+
+/** A training HR recorded (Trainings and Seminar). */
+export interface TrainingHistoryRecord {
+  kind: "record";
+  id: string;
+  /** The fiscal year its date falls in, or "" (undated, or in no year on file). */
+  fiscalYear: string;
+  title: string;
+  organizer: string;
+  dateConducted: string;
+  hours: number;
+  status: string;
+  certificateFilename: string;
+  /** HR's remarks on it, such as why it was returned. */
+  remarks?: string;
+}
+
+export type TrainingHistoryRow = TrainingHistorySeminar | TrainingHistoryRecord;
+
+/** GET /api/employees/:employeeId/training-history */
+export interface EmployeeTrainingHistory {
+  employee: { id: string; employeeId: string; fullName: string; position: string; division: string };
+  /** The year asked for, or null for all years. */
+  fiscalYear: string | null;
+  /** The years that have anything in them, newest first (the filter's choices). */
+  fiscalYears: string[];
+  rows: TrainingHistoryRow[];
+  /** The Manila day it was drawn up (the route adds it). */
+  asOf?: string;
+}
+
+/** One seat on a seminar's report: who, and their seat's records as the history shows them to HR. */
+export type TrainingProgramReportRow = {
+  participantId: string;
+  employeeId: string;
+  fullName: string;
+  position: string;
+  division: string;
+} & Pick<TrainingHistorySeminar, "attendance" | "seat" | "replacedBy" | "inLieuOf" | "certificate" | "advance" | "report">;
+
+/** GET /api/training/reports/program/:id (the instructor's review, R11; HR and the Administrator): one seminar, who
+ * was on it and what each seat's records hold, with totals (src/trainingReports.ts). */
+export interface TrainingProgramReport {
+  program: {
+    id: string;
+    fiscalYear: string;
+    title: string;
+    startDate: string;
+    endDate: string;
+    startTime: string;
+    endTime: string;
+    venue: string;
+    facilitator: string;
+    hours: number;
+    seats: number;
+    /** By its dates, on Manila's calendar: still to come, under way (its last day included), or ended. */
+    when: "upcoming" | "ongoing" | "ended";
+    /** Archived once finished (12t): kept with every record. One archived before use has no report. */
+    archived: boolean;
+  };
+  /** The training budget's own figures (`seminarBudget`), as Programs & Budget counts them. `back`: what it has
+   * returned to the year's Unallocated. */
+  budget: { allocated: number; spent: number; outstanding: number; back: number };
+  /** The Manila day it was drawn up. */
+  asOf: string;
+  rows: TrainingProgramReportRow[];
+  totals: {
+    enrolled: number;
+    attended: number;
+    didNotAttend: number;
+    notRecorded: number;
+    /** Enrolled seats with a certificate of attendance on file. */
+    certificates: number;
+    replaced: number;
+    cancelled: number;
+    /** Every cash advance released for the seminar, each counted once (a group's too). */
+    advanced: number;
+    /** What came back: validated reports' leftovers and advances refunded in full. */
+    handedBack: number;
+    reports: number;
+    validated: number;
+  };
+}
+
+/** One finished seminar on GET /api/training/reports/completed. */
+export interface CompletedTrainingProgram {
+  id: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  venue: string;
+  hours: number;
+  enrolled: number;
+  attended: number;
+  allocated: number;
+  spent: number;
+  archived: boolean;
+}
+
+/** GET /api/training/reports/completed (R11; HR and the Administrator): a fiscal year's seminars that have ended
+ * (their last day before today, Manila), newest first, leaving out any archived before use. */
+export interface CompletedTrainingPrograms {
+  fiscalYear: string;
+  /** The Manila day the list was drawn up. */
+  asOf: string;
+  rows: CompletedTrainingProgram[];
+  totals: { programs: number; enrolled: number; attended: number; hours: number; allocated: number; spent: number };
 }
 
 /** One active employee with no training yet in the fiscal year (Programs & Budget's coverage). */
@@ -1222,6 +1390,8 @@ export interface TrainingCoverage {
   total: number;
   covered: number;
   withoutTraining: TrainingCoverageEntry[];
+  /** The Manila day it was drawn up (the route adds it). */
+  asOf?: string;
 }
 
 export interface TrainingBudgetSplit {

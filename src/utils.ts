@@ -37,31 +37,30 @@ export function csvCell(value: unknown): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-// Convert JSON arrays to CSV format and prompt browser download
-export function downloadCSV(data: any[], headers: string[], filename: string) {
-  const csvContent = [
-    headers.join(","),
-    ...data.map((row) =>
-      headers
-        .map((header) => {
-          const val = row[header] !== undefined ? row[header] : "";
-          const strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
-          // Escape quotes inside value
-          const escaped = strVal.replace(/"/g, '""');
-          return `"${escaped}"`;
-        })
-        .join(",")
-    ),
-  ].join("\r\n");
-
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
+/**
+ * A table as a CSV file: every cell through `csvCell`, so typed text can't start a formula, and a byte-order mark, without
+ * which Excel opens the file as ANSI and "Niño" arrives as "NiÃ±o". `filename` comes without its extension.
+ */
+export function downloadCsvTable(rows: unknown[][], filename: string) {
+  const text = rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([String.fromCharCode(0xfeff), text], { type: "text/csv;charset=utf-8;" }));
   const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `${filename}_${new Date().toISOString().split("T")[0]}.csv`);
+  link.href = url;
+  link.download = `${filename}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  // Revoking in the same tick can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Convert JSON arrays to CSV format and prompt browser download
+export function downloadCSV(data: any[], headers: string[], filename: string) {
+  const rows = data.map(row => headers.map(header => {
+    const value = row[header] !== undefined ? row[header] : "";
+    return typeof value === "object" ? JSON.stringify(value) : value;
+  }));
+  downloadCsvTable([headers, ...rows], `${filename}_${new Date().toISOString().split("T")[0]}`);
 }
 
 // What an uploaded file's stored content must look like: the base64 data URL the upload screens

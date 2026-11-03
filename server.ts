@@ -16,9 +16,9 @@ import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
 import { cleanFileName, documentHasFile, liquidationDocumentRows } from "./src/server/liquidationDocuments";
 import { readStoredFile, storeDataUrl } from "./src/server/fileStore";
 import { fileBytes, fileProblem, MIN_FILE_BYTES, reportFilesProblem } from "./src/fileRules";
-import { trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
+import { isoDay, trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
 import {
-  advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, isGroupAdvance, portionCentavos, releasedByEnrolment,
+  advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, currentAdvance, isGroupAdvance, portionCentavos, releasedByEnrolment,
   reportCovering, spendableCentavos
 } from "./src/advanceCoverage";
 import { enrolmentsForBudget } from "./src/server/budgetEnrolments";
@@ -111,9 +111,15 @@ import {
   SeminarTdpJustificationInput,
   TrainingProgramRow,
   TdpUpload,
-  TdpReplaceSummary
+  TdpReplaceSummary,
+  AlreadySent,
+  TrainingProgramReport,
+  CompletedTrainingPrograms
 } from "./src/types";
 import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsLeavingTdp, tdpCounts, type TdpNeedUse } from "./src/tdpUpload";
+import { employeeTrainingHistory } from "./src/trainingHistory";
+import { completedTrainingPrograms, trainingProgramReport } from "./src/trainingReports";
+import { readTrainingRecord, readTrainingReview, recordCounts } from "./src/trainingRecord";
 import {
   coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
   seminarNeedsJustification, seminarTdpStanding, tdpKindText, tdpStanding, type SeatCheck
@@ -136,6 +142,12 @@ const DATA_FILE_PATH = path.join(process.cwd(), "data_store.json");
 // The file as it was at the last start that could read it: git no longer keeps the live data (known-issues 4).
 const LAST_START_PATH = path.join(process.cwd(), "data_store.last-start.json");
 
+// API answers carry employees' records: none stays in a shared office PC's browser cache (known-issues 7m). Before the
+// body parser, so its own refusals (bad JSON, too large) carry it too.
+app.use("/api", (_req: any, res: any, next: any) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 app.use(express.json({ limit: "50mb" }));
 
 // Mock database type definitions
@@ -2154,27 +2166,57 @@ app.get("/api/employees/:employeeId/assigned_activities", authenticateToken, (re
 // enrolment's status now changes only through a real liquidation report.
 
 app.post("/api/employees/:employeeId/trainings", authenticateToken, (req: any, res) => {
-  const { employeeId } = req.params;
-  const data = req.body;
-
-  if ((req as any).user.role !== UserRole.SUPER_ADMIN && (req as any).user.role !== UserRole.HR_OFFICER) {
-    return res.status(403).json({ status: "error", message: "Unauthorized" });
+  const user = req.user;
+  if (!isTrainingRecordsRole(user.role)) {
+    return res.status(403).json({ status: "error", message: "Only HR or the Administrator can record a training." });
   }
-
-  const newTraining: Training = {
-    id: `t-${Date.now()}`,
-    employeeId,
-    title: data.title,
-    organizer: data.organizer,
-    dateConducted: data.dateConducted,
-    trainingHours: Number(data.trainingHours || data.hours || 8),
-    certificateFilename: data.certificateFilename || "certificate.pdf"
-  };
-
-  db.trainings.push(newTraining);
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Add Training", `Added training attendance for ${employeeId}: "${newTraining.title}" (${newTraining.trainingHours} hrs)`);
+  const emp = employeeByKey(String(req.params.employeeId));
+  if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
+  // The same checks as the form (src/trainingRecord.ts; the instructor's review, R11).
+  const fields = readTrainingRecord(req.body, manilaToday());
+  if ("problem" in fields) return res.status(400).json({ status: "error", message: fields.problem });
+  const name = cleanText(emp.fullName).slice(0, 200);
+  // The same training on the same day, unless that one no longer counts (returned): a double click saves one record.
+  const again = (db.trainings || []).find(t => t && [emp.id, emp.employeeId].includes(t.employeeId) && isoDay(t.dateConducted) === fields.dateConducted
+    && normalizeTitle(t.title) === normalizeTitle(fields.title) && recordCounts(t));
+  if (again) {
+    return res.status(409).json({ status: "error", message: `${JSON.stringify(fields.title)} on ${fields.dateConducted} is already on ${name}'s record.` });
+  }
+  const record: Training = { id: `t-${crypto.randomUUID()}`, employeeId: emp.employeeId || emp.id, ...fields, status: "Pending Verification" };
+  db.trainings.push(record);
+  logEvent(user.id, user.username, user.role, "Add Training",
+    `Recorded a training for ${JSON.stringify(name)}: ${JSON.stringify(record.title)} on ${record.dateConducted} (${record.trainingHours} hours).`);
+  if (accountEmployee(user)?.id === emp.id) flagSelfApproval(user, `recorded a training on their own record, ${JSON.stringify(record.title)}`);
   saveDB();
-  res.json({ status: "success", data: newTraining });
+  res.json({ status: "success", data: record });
+});
+
+// HR's review of a training record (known-issues 12r). It changes nothing about what counts toward the year's training
+// (12s): only a record marked Rejected stops counting, and a review doesn't reject. Who reviewed it is kept on the record
+// (`verifiedBy`, on a return too); the audit entry leaves out the remarks, which may mention someone's circumstances.
+app.put("/api/trainings/:id/status", authenticateToken, (req: any, res: any) => {
+  const user = req.user;
+  if (!isTrainingRecordsRole(user.role)) {
+    return res.status(403).json({ status: "error", message: "Only HR or the Administrator can review a training record." });
+  }
+  const record = (db.trainings || []).find(t => t && t.id === req.params.id);
+  if (!record) return res.status(404).json({ status: "error", message: "Training record not found." });
+  if (record.status === "Verified") {
+    return res.status(409).json({ status: "error", message: `${JSON.stringify(cleanText(record.title))} is already verified.` });
+  }
+  const review = readTrainingReview(req.body);
+  if ("problem" in review) return res.status(400).json({ status: "error", message: review.problem });
+  record.status = review.status;
+  record.remarks = review.remarks;
+  record.verifiedBy = user.fullName;
+  record.verifiedAt = new Date().toISOString();
+  const owner = accountEmployee({ employeeId: record.employeeId });
+  const title = JSON.stringify(cleanText(record.title));
+  logEvent(user.id, user.username, user.role, "Review Training Record",
+    `${review.status} ${JSON.stringify(cleanText(owner?.fullName ?? record.employeeId).slice(0, 200))}'s training record ${title}.`);
+  if (owner && accountEmployee(user)?.id === owner.id) flagSelfApproval(user, `reviewed their own training record ${title}`);
+  saveDB();
+  res.json({ status: "success", data: record });
 });
 
 app.get("/api/employees/:employeeId/history", authenticateToken, (req: any, res: any) => {
@@ -2186,7 +2228,42 @@ app.get("/api/employees/:employeeId/history", authenticateToken, (req: any, res:
     return res.status(403).json({ status: "error", message: "You can only view your own employment history." });
   }
   const history = db.employmentHistory.filter(h => forms.includes(h.employeeId));
+  res.set("Cache-Control", "no-store");
   res.json({ status: "success", data: history });
+});
+
+// One employee's training history (the instructor's review, R11): every seminar seat and every training HR recorded,
+// with the certificate, the cash advance and the liquidation report (src/trainingHistory.ts). HR and the Administrator
+// see anyone's in full (the advance's amount and DV too, the user's decision of 2026-11-03); any other account only its
+// own, by its own staff record (the strict match: a staff code set to another record's id, 7j, reaches nobody else's),
+// without other people's records in it. `?fiscalYear=` gives one year.
+app.get("/api/employees/:employeeId/training-history", authenticateToken, (req: any, res: any) => {
+  const emp = employeeByKey(String(req.params.employeeId));
+  const full = isTrainingRecordsRole(req.user.role);
+  // (Refused before "not found", so nobody else can tell which ids exist.)
+  if (!full && (!emp || accountEmployee(req.user)?.id !== emp.id)) {
+    return res.status(403).json({ status: "error", message: "You can only view your own training history." });
+  }
+  if (!emp) return res.status(404).json({ status: "error", message: "Employee not found." });
+  const asked = typeof req.query.fiscalYear === "string" && req.query.fiscalYear ? req.query.fiscalYear.slice(0, 20) : null;
+  const history = employeeTrainingHistory({
+    employee: { id: emp.id, employeeId: emp.employeeId, fullName: emp.fullName, position: emp.position, division: emp.division },
+    personOf: (key: string) => employeeByKey(key)?.id ?? key,
+    recordOwnerOf: (key: string) => accountEmployee({ employeeId: key })?.id ?? key,
+    nameOf: (key: string) => cleanText(employeeByKey(key)?.fullName || "").slice(0, 200),
+    seats: db.trainingParticipants,
+    programs: db.trainingPrograms,
+    certificates: db.attendanceCertificates,
+    advances: db.cashAdvances,
+    reports: db.liquidationSubmissions,
+    records: db.trainings,
+    fiscalYears: db.fiscalYears,
+    full,
+    fiscalYear: asked
+  });
+  res.set("Cache-Control", "no-store");
+  // `asOf`: the Manila day it was drawn up (Generated Reports prints it).
+  res.json({ status: "success", data: { ...history, asOf: manilaToday() } });
 });
 
 
@@ -6007,11 +6084,7 @@ function pendingRequestCovering(activityId: string): CashAdvance | null {
 // the advance released, or else the latest one (settled, refunded, declined), its own or a group's
 // covering it. At most one is ever Requested or Released at a time.
 function currentAdvanceFor(activityId: string): CashAdvance | null {
-  const list = advancesCovering(db.cashAdvances || [], activityId);
-  // Its latest event: a refund or settlement comes after the release.
-  const when = (a: any) => String(a.refundedAt || a.liquidatedAt || a.decidedAt || a.issuedAt || a.requestedAt || "");
-  return list.find((a: any) => a.status === "Requested") || list.find((a: any) => a.status === "Released")
-    || [...list].sort((a: any, b: any) => when(b).localeCompare(when(a)))[0] || null;
+  return currentAdvance(advancesCovering(db.cashAdvances || [], activityId));
 }
 
 // --- Group cash advances (HSAC RAB 1, 2026-10-26, .claude/context/hsac-answers.md) ---
@@ -7129,9 +7202,10 @@ function sameSeminar(a: SeminarRef, b: SeminarRef): boolean {
   return aTitle !== "" && aTitle === normalizeTitle(b.title);
 }
 
-// Reason the employee already took (or is already booked into) this seminar, or null.
-// Checks TDP enrolments and the HR-recorded training history.
-function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef): string | null {
+// Why the employee already took (or is already booked into) this seminar, and which seminar or record says so,
+// or null. Checks TDP enrolments and the HR-recorded training history. The picker lists who was already sent, and
+// when, from `sent` (the instructor's review, R10).
+function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef): { reason: string; sent: AlreadySent } | null {
   const forms = employeeIdForms(employeeId);
   for (const p of db.trainingParticipants || []) {
     // An enrolment archived with an unused seminar never happened either.
@@ -7141,16 +7215,32 @@ function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef):
     if (program.id && p.trainingProgramId === program.id) continue;
     const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
     if (prog && sameSeminar(prog, program)) {
-      return prog.fiscalYear === program.fiscalYear
-        ? `Already enrolled in this seminar (FY ${prog.fiscalYear})`
-        : `Attended this seminar in FY ${prog.fiscalYear}`;
+      return {
+        reason: prog.fiscalYear === program.fiscalYear
+          ? `Already enrolled in this seminar (FY ${prog.fiscalYear})`
+          : `Attended this seminar in FY ${prog.fiscalYear}`,
+        sent: {
+          source: "seminar",
+          title: cleanText(String(prog.title ?? "")).slice(0, 300),
+          fiscalYear: String(prog.fiscalYear ?? ""),
+          startDate: typeof prog.startDate === "string" ? prog.startDate : "",
+          endDate: typeof prog.endDate === "string" ? prog.endDate : "",
+          attendance: p.attendance === "Attended" ? "Attended" : "Not recorded"
+        }
+      };
     }
   }
   const title = normalizeTitle(program.title);
   if (title) {
     const record = (db.trainings || []).find(t =>
-      forms.includes(t.employeeId) && t.status !== "Rejected" && normalizeTitle(t.title) === title);
-    if (record) return `Attended this seminar (recorded ${record.dateConducted})`;
+      forms.includes(t.employeeId) && recordCounts(t) && normalizeTitle(t.title) === title);
+    if (record) {
+      const on = isCalendarDate(record.dateConducted) ? record.dateConducted : "";
+      return {
+        reason: on ? `Attended this seminar (recorded ${on})` : "Attended this seminar (an HR record)",
+        sent: { source: "record", title: cleanText(String(record.title ?? "")).slice(0, 300), recordedOn: on }
+      };
+    }
   }
   return null;
 }
@@ -7159,9 +7249,8 @@ function employeeAttendedSeminarBefore(employeeId: string, program: SeminarRef):
 // The recommender and every enrolment route share this, so the UI can never offer
 // someone the server would refuse. Only the same seminar twice is refused: since 2026-10-23
 // an employee may join several seminars in a fiscal year (at least one, no longer at most one).
-function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { reason: string } | null {
-  const attended = employeeAttendedSeminarBefore(employeeId, program);
-  return attended ? { reason: attended } : null;
+function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { reason: string; sent: AlreadySent } | null {
+  return employeeAttendedSeminarBefore(employeeId, program);
 }
 
 // --- Division coverage (HSAC RAB 1's answer 1: "someone must stay to man the division") ---
@@ -7531,7 +7620,9 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
         matchesTarget: matchesSeminarTarget(emp, program),
         trainingsThisYear,
         eligible: !block,
-        ineligibleReason: block?.reason
+        ineligibleReason: block?.reason,
+        // Who was already sent to this training, and when (R10's "Already sent to this training").
+        ...(block ? { alreadySent: block.sent } : {})
       };
     });
 
@@ -7668,7 +7759,7 @@ function needAccomplishment(need: TrainingNeed, asOf: string): TrainingNeedStatu
 
   // 3. HR's certificate-backed training ledger.
   for (const t of db.trainings || []) {
-    if (!forms.includes(t.employeeId) || t.status === "Rejected") continue;
+    if (!forms.includes(t.employeeId) || !recordCounts(t)) continue;
     if (!titlesMatch(need.title, t.title)) continue;
     const when = toIsoDateLoose(t.dateConducted);
     if (!inNeedPlanYear(need, when) || !onOrBeforeAsOf(when, asOf)) continue;
@@ -7958,12 +8049,16 @@ function runCertificateReminderSweep() {
   }
 }
 
-// Employees may read or act on their own training records; HR and Admin on anyone's.
 // HR and the Administrator may read anyone's training records; anyone else only their own
 // (an officer's login is linked to their own employee record too).
 function canAccessEmployeeTrainingRecords(user: any, employeeForms: string[]): boolean {
   if (isTrainingRecordsRole(user.role)) return true;
-  return !!user.employeeId && employeeForms.includes(user.employeeId);
+  // Their own: the record the key named (`employeeIdForms` puts its internal id first) must be the account's own staff
+  // record, so a key naming someone else's record is refused. The routes then read by both of that record's ids, so a
+  // staff code set to another record's internal id (7j) still reaches that person's records, until 7j's own fix makes
+  // such a code impossible.
+  const own = accountEmployee(user);
+  return !!own && employeeForms[0] === own.id;
 }
 
 // Seminars run within office hours (the user, 2026-10-25): each day starts at 8:00 AM or later and
@@ -8367,7 +8462,78 @@ app.get("/api/training/coverage", authenticateToken, (req: any, res: any) => {
   if (!(db.fiscalYears || []).some((f: any) => String(f.label) === String(label))) {
     return res.status(404).json({ status: "error", message: `There is no fiscal year ${label}.` });
   }
-  res.json({ status: "success", data: trainingCoverage(db.employees || [], trainingCoverageData(), coverageFiscalYear(label)) });
+  // `asOf`: the Manila day it was drawn up (Generated Reports prints it).
+  res.json({ status: "success", data: { ...trainingCoverage(db.employees || [], trainingCoverageData(), coverageFiscalYear(label)), asOf: manilaToday() } });
+});
+
+// The training reports in Generated Reports (the instructor's review, R11): HR and the Administrator only, as the plan.
+// (The report on one employee is the training history's route, and the one on who has no training yet the coverage route.)
+function requireTrainingReportRole(req: any, res: any): boolean {
+  if (!isTrainingRecordsRole(req.user.role)) {
+    res.status(403).json({ status: "error", message: "Training reports are restricted to HR and the Administrator." });
+    return false;
+  }
+  return true;
+}
+
+// One seminar: who was on it and what each seat's records hold, with the training budget's own figures.
+app.get("/api/training/reports/program/:id", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingReportRole(req, res)) return;
+  const program = (db.trainingPrograms || []).find((p: any) => p && p.id === req.params.id);
+  if (!program) return res.status(404).json({ status: "error", message: "Seminar not found." });
+  // It was never held, so its seats are gone from everyone's history too.
+  if (program.archivedBeforeUse) {
+    return res.status(409).json({ status: "error", message: `${JSON.stringify(cleanText(program.title))} was archived before it was held, so it has no report.` });
+  }
+  // Priced from this seminar's seats only: each seat's figures depend on its own records alone.
+  const seats = (db.trainingParticipants || []).filter((p: any) => p && p.trainingProgramId === program.id);
+  const enrolments = enrolmentsForBudget({
+    participants: seats,
+    advances: db.cashAdvances || [],
+    ledgerRows: db.trainingLiquidations || [],
+    reports: db.liquidationSubmissions || []
+  });
+  const data: TrainingProgramReport = trainingProgramReport({
+    program,
+    personOf: (key: string) => {
+      const e = employeeByKey(key);
+      return e ? {
+        id: e.id,
+        employeeId: e.employeeId,
+        fullName: cleanText(e.fullName).slice(0, 200),
+        position: cleanText(e.position).slice(0, 200),
+        division: cleanText(e.division).slice(0, 200)
+      } : null;
+    },
+    nameOf: (key: string) => cleanText(employeeByKey(key)?.fullName || "").slice(0, 200),
+    seats: db.trainingParticipants,
+    certificates: db.attendanceCertificates,
+    advances: db.cashAdvances,
+    reports: db.liquidationSubmissions,
+    budget: seminarBudget(program, enrolments),
+    today: manilaToday()
+  });
+  res.json({ status: "success", data });
+});
+
+// A fiscal year's seminars that have ended, newest first: the active year's unless ?fiscalYear= names another.
+app.get("/api/training/reports/completed", authenticateToken, (req: any, res: any) => {
+  if (!requireTrainingReportRole(req, res)) return;
+  const asked = typeof req.query.fiscalYear === "string" ? req.query.fiscalYear.trim().slice(0, 20) : "";
+  const label = asked || (db.fiscalYears || []).find((f: any) => f.status === "Active")?.label;
+  if (!label) return res.status(400).json({ status: "error", message: "No fiscal year is active." });
+  if (!(db.fiscalYears || []).some((f: any) => String(f.label) === String(label))) {
+    return res.status(404).json({ status: "error", message: `There is no fiscal year ${label}.` });
+  }
+  const enrolments = participantsForBudget();
+  const data: CompletedTrainingPrograms = completedTrainingPrograms({
+    fiscalYear: String(label),
+    programs: db.trainingPrograms,
+    seats: db.trainingParticipants,
+    budgetOf: (program: any) => seminarBudget(program, enrolments),
+    today: manilaToday()
+  });
+  res.json({ status: "success", data });
 });
 
 // --- OFFICIAL TDP PLAN A / PLAN D ---

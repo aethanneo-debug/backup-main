@@ -3,38 +3,19 @@ import { Employee, Asset, SupplyItem, AnyRequest, User, UserRole } from "../type
 import {
   FileSpreadsheet,
   Download,
-  FileText,
   Database,
   Briefcase,
   Package,
   FileCheck2,
-  ListCollapse,
   BadgeAlert
 } from "lucide-react";
-import { formatDate } from "../utils";
+import { downloadCsvTable, formatDate } from "../utils";
 import PlanDReportCard from "./training/planD/PlanDReportCard";
+import TrainingReports from "./reports/TrainingReports";
 
-// Fully self-contained compliant CSV exporter
+// (A blank value stays blank; a name or a title typed by someone can't start a formula, csvCell.)
 function exportCSV(headers: string[], rows: string[][], filename: string) {
-  const csvContent = [
-    headers.join(","),
-    ...rows.map(row => 
-      row.map(val => {
-        const strVal = String(val || "");
-        const escaped = strVal.replace(/"/g, '""');
-        return `"${escaped}"`;
-      }).join(",")
-    )
-  ].join("\r\n");
-
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `${filename.replace(".csv", "")}_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  downloadCsvTable([headers, ...rows.map(row => row.map(val => val || ""))], `${filename.replace(".csv", "")}_${new Date().toISOString().split("T")[0]}`);
 }
 
 interface ReportsViewProps {
@@ -164,7 +145,7 @@ export default function ReportsView({ user, employees, assets, supplies, request
   const reportsList = [
     {
       title: "HSAC Personnel Master Directory Roster",
-      desc: "Complete database of active personnel plantilla properties, contact vectors, emergency nodes, email indexes, and dates hired.",
+      desc: "Every staff record: plantilla details, contact and emergency details, email, and date hired.",
       icon: Briefcase,
       recordsCount: employees.length,
       downloader: exportEmployeesCSV
@@ -178,14 +159,14 @@ export default function ReportsView({ user, employees, assets, supplies, request
     },
     {
       title: "Stockroom Supplies Ledger Audit Roll",
-      desc: "Material cabinet stocks, total purchases, currently available reserves, units of measurements, and low-inventory warnings.",
+      desc: "Material cabinet stocks, total purchases, currently available reserves, and units of measurement.",
       icon: Package,
       recordsCount: supplies.length,
       downloader: exportSuppliesCSV
     },
     {
-      title: "Digital Requests Filing pipeline Transactions Journal",
-      desc: "Immutable logs tracking HR leaves, service documents, vehicle dispatches, Zoom slots, and supplies approvals with comments and supervisor name indicators.",
+      title: "Filed Requests Register",
+      desc: "Filed requests for leave, service documents, vehicle trips, Zoom slots and supplies, with comments and who approved them.",
       icon: FileCheck2,
       recordsCount: requests.length,
       downloader: exportRequestsCSV
@@ -193,23 +174,23 @@ export default function ReportsView({ user, employees, assets, supplies, request
   ];
 
   return (
-    <div id="reports-view-container" className="flex-1 overflow-y-auto p-6 bg-slate-50 space-y-6">
+    <div id="reports-view-container" className="flex-1 overflow-y-auto p-2 sm:p-6 bg-slate-50 space-y-6">
       
       {/* HEADER TITLE BRAND */}
       <div>
         <h1 className="text-md font-bold text-slate-800 flex items-center">
           <FileSpreadsheet className="text-blue-600 mr-2" size={18} />
-          Certified Compliance Reports Export Desk
+          Generated Reports
         </h1>
-        <p className="text-[11px] text-slate-500">Generate certified spreadsheet audits matching all active data tables. Exports directly in standard, comma-separated values (CSV).</p>
+        <p className="text-[11px] text-slate-500">Download the office's records as spreadsheets, in standard comma-separated values (CSV).</p>
       </div>
 
       {/* COMPLIANT WARNING SECTION */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
         <BadgeAlert size={16} className="text-blue-600 shrink-0 mt-0.5" />
         <div className="text-[11px] text-blue-900 leading-relaxed space-y-1">
-          <p className="font-bold">Government Integrity Act Compliance Warning (RA 10173 & RA 9470)</p>
-          <p>Spreadsheets generated through this terminal contain regional civil service credentials, personal data sheets (PDS), and financial disbursements. Under existing guidelines, unauthorized external distribution is strictly monitored. Immulatable audit trail records your operator name credentials <strong className="text-blue-900 font-extrabold">{user.fullName}</strong> upon every file download event.</p>
+          <p className="font-bold">These reports hold personal data (RA 10173)</p>
+          <p>They contain employees' records, and what was spent on their trainings. The system doesn't record who downloads or prints them, and a saved file is outside its access rules: keep it off shared folders and drives, and delete it when you're done.</p>
         </div>
       </div>
 
@@ -232,7 +213,7 @@ export default function ReportsView({ user, employees, assets, supplies, request
 
               <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between">
                 <span className="text-[10px] uppercase font-mono font-bold text-slate-400">
-                  {rep.recordsCount} Active Rows
+                  {rep.recordsCount} rows
                 </span>
                 
                 <button
@@ -247,6 +228,8 @@ export default function ReportsView({ user, employees, assets, supplies, request
           );
         })}
         {canExportPlanD && <PlanDReportCard />}
+        {/* The training reports (the instructor's review, R11): HR's and the Administrator's alone, like Plan D. */}
+        {canExportPlanD && <TrainingReports employees={employees} />}
       </div>
 
     </div>

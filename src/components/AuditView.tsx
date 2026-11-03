@@ -65,7 +65,7 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <ShieldCheck className="text-emerald-600 mr-2" size={18} />
             System Security Audit Log Chronicle
           </h1>
-          <p className="text-[11px] text-slate-500">Chronological, immutable recording of all database alterations, logins, and adjudicative remarks.</p>
+          <p className="text-[11px] text-slate-500">Sign-ins, and the changes and file openings the system records, newest first.</p>
         </div>
         <button
           onClick={loadAuditLogs}
@@ -120,6 +120,8 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Import Plan A Workbook">TDP uploads</option>
             <option value="Replace TDP">TDP replaced</option>
             <option value="Remove Training Need">Plan A needs removed</option>
+            <option value="Add Training">Training records added by HR</option>
+            <option value="Review Training Record">Training records verified or returned</option>
             <option value="Register Asset">Asset Register</option>
             <option value="Assign Accountability">Accountability (PAR)</option>
             <option value="Act on Request">Filing Actions</option>

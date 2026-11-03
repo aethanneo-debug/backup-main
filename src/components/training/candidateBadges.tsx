@@ -1,7 +1,8 @@
 // The participant picker's badges for a candidate: eligibility, trainings this fiscal year, the Plan A
 // columns that list the seminar, new hires, target matches and other seminars on the same days. Moved out
 // of ParticipantPickerModal.tsx when it grew (Part A of the TDP exceptions, 12z). The dropdown's option
-// labels that were here went with the dropdown (2026-10-30); the picker's checklist is ParticipantChecklist.tsx.
+// labels that were here went with the dropdown (2026-10-30); the picker's checklist is ParticipantChecklist.tsx,
+// and each row is PickRowItem.tsx.
 import type { ReactNode } from "react";
 import { Scale, Sparkles } from "lucide-react";
 import { TRAINING_NEED_COLUMN_LABELS, TrainingCandidate, type TrainingNeedCategory } from "../../types";
@@ -20,6 +21,8 @@ export const TONE = {
   needsThis: "bg-emerald-50 text-emerald-800 border-emerald-300",
   mandated: "bg-blue-50 text-blue-700 border-blue-200",
   newHire: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  // Someone already sent to this training who attended it (R10's "Already sent to this training").
+  attended: "bg-emerald-50 text-emerald-700 border-emerald-200",
   away: "bg-amber-50 text-amber-700 border-amber-200",
   // Someone outside the plan: ticking them asks why they are seated, unless the seminar's own
   // justification covers everyone on it (12z Part C).
@@ -57,13 +60,19 @@ const columnLabels = (c: TrainingCandidate) => (c.needCategories ?? []).map(k =>
 
 // `selected`: they are already on this seminar's list, and the server counts only their other
 // trainings, so this seminar would be their first of the year, or one more. `children`: more badges,
-// after these (the row's standing against the TDP).
-export function CandidateBadges({ c, selected = false, children }: { c: TrainingCandidate; selected?: boolean; children?: ReactNode }) {
+// after these (the row's standing against the TDP). `omitIneligible`: the row already says when and
+// where they were sent (R10), so the reason badge would repeat it.
+export function CandidateBadges({ c, selected = false, omitIneligible = false, children }: {
+  c: TrainingCandidate;
+  selected?: boolean;
+  omitIneligible?: boolean;
+  children?: ReactNode;
+}) {
   // Their other trainings this fiscal year: at least one each year, so none yet is worth seeing.
   const thisYear = c.trainingsThisYear ?? [];
   return (
     <span className="flex flex-wrap gap-1">
-      {!c.eligible && <span className={`${BADGE} ${TONE.ineligible}`}>{c.ineligibleReason}</span>}
+      {!c.eligible && !omitIneligible && <span className={`${BADGE} ${TONE.ineligible}`}>{c.ineligibleReason}</span>}
       {c.eligible && thisYear.length === 0 && (
         <span className={`${BADGE} ${TONE.firstTraining}`}>{selected ? "First training this FY" : "No training yet this FY"}</span>
       )}

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ListChecks, Loader2, X } from "lucide-react";
+import { AlertTriangle, Loader2, X } from "lucide-react";
 import { TrainingCandidate, type TdpJustification, type TdpJustificationInput, type TdpStanding } from "../../types";
 import { apiCall, getLocalTodayString } from "../../utils";
-import { datesText, divisionGaps, seminarWeekdays } from "../../divisionCoverage";
+import { divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 import { tdpBadgeText } from "../../tdpRules";
 import { searchTerms } from "../../tableView";
 import { TONE } from "./candidateBadges";
-import ParticipantChecklist, { rowMatches, type PickGroup, type PickRow } from "./ParticipantChecklist";
+import { TrainingHistoryWindow } from "./EmployeeTrainingHistory";
+import ParticipantChecklist, { type PickRow } from "./ParticipantChecklist";
 import PlanAViewSwitch from "./PlanAViewSwitch";
+import { PickerFooter, PickerIntro } from "./PickerParts";
+import { onScreenToChoose, pickGroups } from "./pickGroups";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.
 export interface PickerProgram {
@@ -69,6 +72,24 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     setShowAll(all);
     setKept(new Set());
   };
+  // Inside either view, the instructor's review's folds (R10): the rest of those already trained this fiscal year, who
+  // can still be ticked, and those already sent to this training, who can't. Unlike the Plan A view, opening or closing
+  // one lets nobody go: a row kept above it would move under HR's pointer.
+  const [showTrained, setShowTrained] = useState(false);
+  const [showSent, setShowSent] = useState(false);
+  // Whose training history is open over the picker (R10, R11).
+  const [historyFor, setHistoryFor] = useState<{ id: string; name: string } | null>(null);
+  const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
+  const toggleTrained = () => {
+    setShowTrained(!showTrained);
+    setStatus(showTrained
+      ? `Closed the list of those already trained in ${fyText}: those with a mandated need, and anyone ticked, stay shown.`
+      : `Opened the list of those already trained in ${fyText}: they can still be ticked.`);
+  };
+  const toggleSent = () => {
+    setShowSent(!showSent);
+    setStatus(showSent ? "Closed the list of those already sent to this training." : "Opened the list of those already sent to this training: they can't be selected.");
+  };
   const coversNeeds = (program.fulfillsNeedTitles ?? []).length > 0;
   const planOnly = coversNeeds && !showAll;
   const inScope = (c: TrainingCandidate) => !planOnly || c.needsThis;
@@ -127,8 +148,9 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     return divisionGaps((candidates ?? []).map(c => ({ id: c.employeeId, division: c.division })), days,
       selectedIds.filter(id => !notAway.has(id)), (id, day) => !!away.get(id)?.has(day));
   }, [candidates, selectedIds, program.startDate, program.endDate, (program.notAwayIds ?? []).join("|")]);
-  // "Recommended" (and "Select all recommended") follow the list in scope.
-  const available = (candidates ?? []).filter(c => c.eligible && !selectedIds.includes(c.employeeId) && inScope(c));
+  // "Recommended" (and "Select all recommended") count only the rows on screen: those in scope with no training yet,
+  // or a mandated need for this seminar, and the rest of those already trained once their list is open (R10).
+  const available = (candidates ?? []).filter(c => onScreenToChoose(c, showTrained) && !selectedIds.includes(c.employeeId) && inScope(c));
   const recommended = available.slice(0, freeSlots);
   const listers = (candidates ?? []).filter(c => c.needsThis).length;
   // What "All employees" adds: everyone off the plan not selected yet (whichever list is on), and, while
@@ -217,6 +239,9 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
       return {
         id, c, name, ticked: false, why: null,
         disabled: (!!c && !c.eligible) || freeSlots === 0,
+        // Already sent: when and where they went, with no box (R10). Someone just unticked keeps theirs, disabled,
+        // so the row doesn't change shape under HR's pointer.
+        readOnly: !!c && !c.eligible && !kept.has(id),
         recommended: recommendedIds.has(id),
         standing: !outside ? null : bySeminar(id)
           ? { text: tdpBadgeText("seminar") ?? "", tone: TONE.underSeminar }
@@ -255,29 +280,24 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
     .filter(id => !byId.has(id) && (selected.has(id) || kept.has(id)));
   // At least one training per year per employee: those with none yet in the seminar's fiscal year
   // come first. Each group keeps the server's order (Plan A listers, a mandated need first among them,
-  // then new hires, first), ticked people included. Each heading says why in one line.
-  const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
-  const groups: PickGroup[] = [
-    { key: "unlisted", label: error ? "Selected" : "Selected, not among the active staff",
-      reason: error ? "The list didn't load, so they are shown by record id. Untick to take them off."
-        : "On this seminar, but not among the active employees, so only their record id is known. Untick to take them off.",
-      rows: unlisted.map(id => toRow(id)) },
-    { key: "first", label: `No training yet in ${fyText}`, reason: "Everyone should have at least one training a year, so they come first.",
-      rows: listed.filter(c => c.eligible && (c.trainingsThisYear ?? []).length === 0).map(c => toRow(c.employeeId, c)) },
-    { key: "trained", label: `Already has a training in ${fyText}`, reason: "Already trained this fiscal year; they may still join another seminar.",
-      rows: listed.filter(c => c.eligible && (c.trainingsThisYear ?? []).length > 0).map(c => toRow(c.employeeId, c)) },
-    { key: "ineligible", label: "Not eligible", reason: "Already enrolled in this seminar, or attended it before: they can't be selected.",
-      rows: listed.filter(c => !c.eligible).map(c => toRow(c.employeeId, c)) }
-  ];
-  // The search filters every row, ticked ones included, but never the row whose form is open: what was
-  // typed in it would be lost.
-  const terms = searchTerms(query);
-  const shownGroups = groups
-    .map(g => ({ ...g, rows: terms.length === 0 ? g.rows : g.rows.filter(r => r.id === formFor || rowMatches(r, terms)) }))
-    .filter(g => g.rows.length > 0);
-  const total = groups.reduce((n, g) => n + g.rows.length, 0);
-  const shownIds = new Set(shownGroups.flatMap(g => g.rows.map(r => r.id)));
-  const pendingHidden = pending.filter(id => !shownIds.has(id)).length;
+  // then new hires, first), ticked people included. Each heading says why in one line. The search filters
+  // every row on screen, ticked ones included, but never the row whose form is open.
+  const view = pickGroups({
+    listed,
+    stays: id => selected.has(id) || kept.has(id),
+    unlisted,
+    toRow,
+    showTrained,
+    onToggleTrained: toggleTrained,
+    showSent,
+    onToggleSent: toggleSent,
+    sentOffPlan: hiddenCount - hiddenEligible,
+    terms: searchTerms(query),
+    formFor,
+    fyText,
+    failed: !!error
+  });
+  const pendingHidden = pending.filter(id => !view.shownIds.has(id)).length;
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="participant-picker-title">
@@ -295,22 +315,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
             through the gap above the toolbar. */}
         <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
           <div className="space-y-4 pt-4 sm:pt-6">
-            {/* The order itself is in "How this list is ordered"; this keeps only what is particular to the seminar. */}
-            <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-3 rounded-lg flex gap-2">
-              <ListChecks size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
-              <p>
-                Tick the employees who will attend.{" "}
-                {coversNeeds && (
-                  <>This seminar covers Plan A needs, so at first only the employees whose plan lists it are shown; their badge says in
-                  which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>
-                )}
-                {seminarCovers && (
-                  <>This seminar covers no Plan A need, so it is held <strong>outside the TDP</strong> with its own justification, which
-                  covers everyone on it.{" "}</>
-                )}
-                Employees may join more than one seminar a year; only those who attended this seminar before can&rsquo;t be selected.
-              </p>
-            </div>
+            <PickerIntro coversNeeds={coversNeeds} seminarCovers={seminarCovers} fyText={fyText} />
 
             {coversNeeds && !loading && !error && (
               <PlanAViewSwitch
@@ -322,6 +327,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                 seminarCovers={seminarCovers}
                 fyText={fyText}
                 onSwitch={switchView}
+                inClosedLists={view.everyone - view.total}
               />
             )}
 
@@ -348,30 +354,39 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                 )}
                 {/* Without the list, still the people already selected: they can be unticked, or given a
                     justification the server asked for. */}
-                {(!error || total > 0) && (
+                {(!error || view.everyone > 0) && (
                   <ParticipantChecklist
-                    groups={shownGroups}
-                    total={total}
-                    shown={shownIds.size}
-                    selectedHidden={selectedIds.filter(id => !shownIds.has(id)).length}
+                    groups={view.groups}
+                    everyone={view.everyone}
+                    total={view.total}
+                    shown={view.shown}
+                    hiddenMatches={view.hiddenMatches}
+                    selectedHidden={selectedIds.filter(id => !view.shownIds.has(id)).length}
                     query={query}
                     onQueryChange={setQuery}
                     choosable={freeSlots > 0 && !error ? available.length : null}
                     filled={selectedIds.length}
                     max={max}
                     seatNote={error ? null : freeSlots === 0
-                      ? `${max === 1 ? "The 1 seat is" : `All ${max} seats are`} filled. Untick someone to choose another.`
+                      ? `${max === 1 ? "The 1 seat is" : `All ${max} seats are`} filled. Untick someone to choose another, or close this and raise Max on the row.`
                       : recommended.length === 0
-                        ? hiddenEligible > 0
-                          ? <>Nobody else whose Plan A lists this training can be added. &ldquo;All employees&rdquo; above lists the others.</>
-                          : "No more eligible employees to recommend."
+                        ? view.trainedFolded > 0
+                          ? <>Nobody else with no training yet can be added. &ldquo;Already trained this FY&rdquo; below lists {view.trainedFolded} more.</>
+                          : hiddenEligible > 0
+                            ? <>Nobody else whose Plan A lists this training can be added. &ldquo;All employees&rdquo; above lists the others.</>
+                            : "No more eligible employees to recommend."
                         : null}
                     bulkCount={bulk.length}
                     bulkLabel={bulkIsRecommended ? "Select all recommended" : "Select the top Plan A listers"}
                     onSelectAll={selectAll}
                     onToggle={toggle}
+                    onHistory={r => setHistoryFor({ id: r.id, name: r.name })}
                     formFor={formFor}
-                    onOpenForm={setFormFor}
+                    onOpenForm={id => {
+                      // Only one form is open at a time, so opening another would lose what was typed in this one.
+                      if (formFor !== null && formFor !== id && !window.confirm("This closes the justification form that is open, and what you typed in it will be lost. Open this one anyway?")) return;
+                      setFormFor(id);
+                    }}
                     onKeep={keep}
                     onCancelForm={() => setFormFor(null)}
                     hiddenCount={hiddenCount}
@@ -386,41 +401,21 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
           </div>
         </div>
 
-        <div className="px-4 py-3 sm:px-6 sm:py-4 border-t border-slate-200 bg-slate-50 space-y-3 shrink-0">
-          {/* A division left with nobody at the office: a warning, since HR may go ahead knowingly. Under
-              the list, it stays in view while people are ticked, and coming or going it moves no row. */}
-          {divisionGapsNow.length > 0 && (
-            <div role="status" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-lg flex gap-2">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
-              <div className="space-y-1">
-                <p className="font-semibold">Someone must stay to man the division. With these participants, nobody would be left at the office:</p>
-                <ul className="list-disc pl-4">
-                  {divisionGapsNow.map(g => <li key={g.division}>{g.division}: on {datesText(g.dates)}</li>)}
-                </ul>
-                <p>You can still save it. Save asks you to confirm any day this change adds, and records it in the audit log.</p>
-              </div>
-            </div>
-          )}
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {pending.length > 0 && (
-              <p role="status" className="mr-auto text-xs text-amber-800">
-                {pending.length === 1 ? "1 person needs" : `${pending.length} people need`} a justification: record why, or untick them
-                {pendingHidden > 0 ? ` (${pendingHidden} hidden by the search)` : ""}.
-              </p>
-            )}
-            <button onClick={onClose} className="px-4 py-2 text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
-            <button
-              onClick={() => onConfirm(selectedIds, Object.fromEntries(selectedIds.filter(id => justifications[id]).map(id => [id, justifications[id]])))}
-              disabled={(loading && !error) || pending.length > 0}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Confirm Participants ({selectedIds.length})
-            </button>
-          </div>
-        </div>
+        <PickerFooter
+          gaps={divisionGapsNow}
+          pending={pending.length}
+          pendingHidden={pendingHidden}
+          canConfirm={!(loading && !error) && pending.length === 0}
+          selected={selectedIds.length}
+          onCancel={onClose}
+          onConfirm={() => onConfirm(selectedIds, Object.fromEntries(selectedIds.filter(id => justifications[id]).map(id => [id, justifications[id]])))}
+        />
         {/* Says what each tick did (always in the page, so the first change is read out too). */}
         <p id="participant-pick-status" role="status" className="sr-only">{status}</p>
       </div>
+      {/* The picker isn't on the dialog stack, so this window is the only layer: Esc closes just it, and nothing typed
+          in the picker is touched. */}
+      {historyFor && <TrainingHistoryWindow employeeKey={historyFor.id} name={historyFor.name} onClose={() => setHistoryFor(null)} />}
     </div>
   );
 }

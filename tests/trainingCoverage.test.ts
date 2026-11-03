@@ -47,7 +47,7 @@ test("the seminar being staffed can be left out, so the picker counts only their
   assert.deepEqual(yearTrainingCounter(d, FY2027, "p27b")(ana).seminars, ["Legal Writing"]);
 });
 
-test("an HR-recorded training counts when dated within the fiscal year and not rejected", () => {
+test("an HR-recorded training counts when dated within the fiscal year and not returned or rejected", () => {
   const count = yearTrainingCounter(data({
     records: [
       { employeeId: "EMP001", title: "Outside Course", dateConducted: "2027-03-15" },
@@ -60,7 +60,8 @@ test("an HR-recorded training counts when dated within the fiscal year and not r
       { employeeId: "emp-2", title: "Someone else", dateConducted: "2027-03-15" }
     ]
   }), FY2027);
-  assert.deepEqual(count(ana).records, ["Outside Course", "PDS-style date", "Returned one"]);
+  // A record HR returned doesn't count (the user's decision of 2026-11-03; it used to, as only Rejected stopped one).
+  assert.deepEqual(count(ana).records, ["Outside Course", "PDS-style date"]);
 });
 
 test("HR's record of a seminar already counted, or the same record twice, is listed once", () => {

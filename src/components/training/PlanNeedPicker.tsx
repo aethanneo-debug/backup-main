@@ -9,6 +9,7 @@ import {
   TRAINING_NEED_COLUMN_LABELS
 } from "../../types";
 import { apiCall } from "../../utils";
+import { onScreenToChoose } from "./pickGroups";
 
 /**
  * "Add a seminar from the plan": a search-as-you-type picker over one fiscal year's Plan A
@@ -306,7 +307,9 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
           </div>
 
           <p id={helpId} className="mt-1.5 text-[11px] text-slate-500">
-            Picking a training adds a seminar row with its title and the employees who listed it.
+            Picking a training adds a seminar row with its title, seating the employees who listed it and have no training yet
+            this fiscal year, and anyone whose need for it is mandated. Max is set to that number: to add others, raise Max on
+            the row, then open Participants.
           </p>
           <p className="sr-only" aria-live="polite">
             {open ? (visible.length === 0 ? noMatch : `${visible.length} training${visible.length === 1 ? "" : "s"} found.`) : ""}
@@ -321,10 +324,11 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
 export type PlanFill = "loading" | "done" | "nobody" | "failed";
 
 /**
- * The employees to seat in a seminar named `title` that covers these plan needs: everyone
- * whose Plan A lists any of them and whom the server would enrol. Same endpoint and ranking
- * as the participant picker (GET /api/training/recommendations). Ids are Employee.id, the
- * form participantIds stores.
+ * The employees to seat in a seminar named `title` that covers these plan needs: those whose
+ * Plan A lists any of them, whom the server would enrol, and who are on the participant picker's
+ * screen at first: no training yet this fiscal year, or a mandated need for it (the instructor's
+ * review, R10). Same endpoint and ranking as the picker (GET /api/training/recommendations). Ids
+ * are Employee.id, the form participantIds stores.
  */
 export async function eligibleListers(title: string, fiscalYear: string, needTitles: string[] = [title]): Promise<string[]> {
   const params = new URLSearchParams({ title, fiscalYear, maxParticipants: "999" });
@@ -332,7 +336,7 @@ export async function eligibleListers(title: string, fiscalYear: string, needTit
   const res = await apiCall(`/api/training/recommendations?${params.toString()}`);
   if (res?.status !== "success") throw new Error(res?.message || "Unable to load recommendations.");
   const candidates: TrainingCandidate[] = res.data?.candidates ?? [];
-  return candidates.filter(c => c.eligible && c.needsThis).map(c => c.employeeId);
+  return candidates.filter(c => c.needsThis && onScreenToChoose(c, false)).map(c => c.employeeId);
 }
 
 /**
@@ -348,7 +352,7 @@ export function PlanFillNote({ status, selected }: { status?: PlanFill; selected
           <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden="true" /> Finding who listed it…
         </span>
       ) : status === "done" ? (
-        <span className="sr-only">Selected the employees who listed it.</span>
+        <span className="sr-only">Selected the employees who listed it and have no training yet this fiscal year, and any with a mandated need for it.</span>
       ) : selected > 0 ? null : (
         <span className={`flex items-start gap-1 rounded border px-1.5 py-1 text-[10px] font-semibold leading-snug ${
           status === "failed" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-amber-200 bg-amber-50 text-amber-800"
@@ -356,7 +360,7 @@ export function PlanFillNote({ status, selected }: { status?: PlanFill; selected
           <AlertTriangle size={10} className="mt-0.5 shrink-0" aria-hidden="true" />
           {status === "failed"
             ? "Couldn't load who listed it. Pick participants manually."
-            : "Nobody eligible listed it. Pick participants manually."}
+            : "Nobody to seat automatically: whoever listed it already has a training this FY, or was sent to it before. Raise Max if more than one will go, then pick participants manually."}
         </span>
       )}
     </div>

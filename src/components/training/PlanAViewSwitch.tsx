@@ -20,9 +20,11 @@ interface Props {
   onSwitch: (all: boolean) => void;
   /** The line in the caller's own words (a representative needs no justification of their own); else the picker's. */
   line?: ReactNode;
+  /** The picker's: how many of those shown are folded away in its closed lists (R10). */
+  inClosedLists?: number;
 }
 
-export default function PlanAViewSwitch({ planOnly, listers, outsidePlan, everyone, hiddenCount, seminarCovers, fyText, onSwitch, line }: Props) {
+export default function PlanAViewSwitch({ planOnly, listers, outsidePlan, everyone, hiddenCount, seminarCovers, fyText, onSwitch, line, inClosedLists = 0 }: Props) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
       {/* Read out when it changes, so a screen reader hears what the switch did. Its basis puts the switch
@@ -38,6 +40,7 @@ export default function PlanAViewSwitch({ planOnly, listers, outsidePlan, everyo
                 Showing all employees: <strong className="text-slate-800">{outsidePlan} outside the plan</strong>{" "}
                 {outsidePlan === 1 ? "was" : "were"} added to the list below{seminarCovers ? "." : "; seating one needs a justification."}
               </>)}
+        {inClosedLists > 0 && ` ${inClosedLists} ${inClosedLists === 1 ? "is" : "are"} in the closed lists below.`}
       </p>
       {(!planOnly || hiddenCount > 0) && (
         <div role="group" aria-label="Who to choose from" className="inline-flex shrink-0 rounded-lg border border-blue-200 bg-white p-0.5">

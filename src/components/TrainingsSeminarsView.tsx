@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckCircle, XCircle } from 'lucide-react';
-import { apiCall } from '../utils';
+import { apiCall, getLocalTodayString } from '../utils';
+import type { TrainingHistoryRecord } from '../types';
+import { readTrainingRecord, readTrainingReview, TRAINING_EARLIEST_DATE } from '../trainingRecord';
+import EmployeeTrainingHistory from './training/EmployeeTrainingHistory';
 import LiquidationDueBadge from './training/LiquidationDueBadge';
+
+const BLANK_TRAINING = { title: '', organizer: '', dateConducted: '', trainingHours: '', certificateFilename: '' };
 
 export default function TrainingsSeminarsView({ user, employees, onOpenLiquidation }: {
   user: any;
@@ -14,26 +19,32 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
   // they get a link to the liquidation form: HR/Admin never open one for someone else.
   const isOwnView = !isHrOrAdmin;
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(isHrOrAdmin ? "" : user.employeeId);
-  const [trainings, setTrainings] = useState([]);
+  // Reloads the training history after HR adds or reviews a record.
+  const [historyReload, setHistoryReload] = useState(0);
   const [history, setHistory] = useState([]);
   const [assignedActivities, setAssignedActivities] = useState<any[]>([]);
   
+  // By the internal id once known: HR's dropdown holds staff codes, and a staff code set to another record's internal id
+  // (7j) would otherwise open that person's history, or add a record to it, under this one's name.
+  const employeeKey = employees?.find((e: any) => e.employeeId === selectedEmployeeId)?.id ?? selectedEmployeeId;
+
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newTraining, setNewTraining] = useState({
-    title: '', organizer: '', dateConducted: '', trainingHours: 0, certificateFilename: ''
-  });
+  // The boxes' text: the hours stay as typed until they are checked, so a cleared box isn't NaN.
+  const [newTraining, setNewTraining] = useState(BLANK_TRAINING);
+  const [addProblem, setAddProblem] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [selectedTraining, setSelectedTraining] = useState(null);
   const [verifyRemarks, setVerifyRemarks] = useState("");
+  const [reviewProblem, setReviewProblem] = useState("");
+  const [reviewing, setReviewing] = useState(false);
 
   useEffect(() => {
     if (selectedEmployeeId) {
-      fetchTrainings();
       fetchHistory();
       fetchAssignedActivities();
     } else {
-      setTrainings([]);
       setHistory([]);
       setAssignedActivities([]);
     }
@@ -51,28 +62,6 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
     }
   };
 
-
-  const fetchTrainings = async () => {
-    try {
-      const res = await apiCall(`/api/employees/${selectedEmployeeId}/trainings`);
-      const data = res.data || res; // Handle wrapped or unwrapped array
-      if (Array.isArray(data)) {
-        const mapped = data.map((t: any) => ({
-          id: t.id,
-          title: t.title,
-          organizer: t.organizer,
-          dateConducted: t.date_conducted || t.dateConducted,
-          trainingHours: t.training_hours || t.trainingHours,
-          certificateFilename: t.certificate_file_name || t.certificateFilename,
-          status: t.status,
-          remarks: t.remarks
-        }));
-        setTrainings(mapped);
-      }
-    } catch (err) {
-      console.error("Failed to load trainings", err);
-    }
-  };
 
   const fetchHistory = async () => {
     try {
@@ -93,48 +82,84 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
     }
   };
 
+  const openAddModal = () => {
+    setAddProblem("");
+    setIsModalOpen(true);
+  };
+
   const handleAddEntry = async () => {
+    if (adding) return;
+    // The same checks as the server (src/trainingRecord.ts), which has the last word.
+    const fields = readTrainingRecord(newTraining, getLocalTodayString());
+    if ("problem" in fields) {
+      setAddProblem(fields.problem);
+      return;
+    }
+    setAdding(true);
+    setAddProblem("");
     try {
-      const payload = {
-        title: newTraining.title,
-        organizer: newTraining.organizer,
-        date_conducted: newTraining.dateConducted,
-        training_hours: newTraining.trainingHours,
-        certificate_file_name: newTraining.certificateFilename,
-        employee_id: selectedEmployeeId
-      };
-      await apiCall(`/api/employees/${selectedEmployeeId}/trainings`, {
+      await apiCall(`/api/employees/${encodeURIComponent(employeeKey)}/trainings`, {
         method: "POST",
-        body: JSON.stringify(payload)
+        body: JSON.stringify(fields)
       });
       setIsModalOpen(false);
-      setNewTraining({ title: '', organizer: '', dateConducted: '', trainingHours: 0, certificateFilename: '' });
-      fetchTrainings();
+      setNewTraining(BLANK_TRAINING);
+      setHistoryReload(n => n + 1);
     } catch (err) {
-      alert("Error adding training: " + err.message);
+      setAddProblem(err?.message || "The record couldn't be saved.");
+    } finally {
+      setAdding(false);
     }
   };
 
   const handleUpdateStatus = async (status) => {
-    if (!selectedTraining) return;
+    if (!selectedTraining || reviewing) return;
+    const review = readTrainingReview({ status, remarks: verifyRemarks });
+    if ("problem" in review) {
+      setReviewProblem(review.problem);
+      return;
+    }
+    setReviewing(true);
+    setReviewProblem("");
     try {
-      await apiCall(`/api/trainings/${selectedTraining.id}/status`, {
+      await apiCall(`/api/trainings/${encodeURIComponent(selectedTraining.id)}/status`, {
         method: "PUT",
-        body: JSON.stringify({ status, remarks: verifyRemarks })
+        body: JSON.stringify(review)
       });
       setVerifyModalOpen(false);
       setSelectedTraining(null);
       setVerifyRemarks("");
-      fetchTrainings();
+      setHistoryReload(n => n + 1);
     } catch (err) {
-      alert("Error updating status: " + err.message);
+      setReviewProblem(err?.message || "The review couldn't be saved.");
+    } finally {
+      setReviewing(false);
     }
   };
 
+  // The box starts empty: a verified record mustn't keep the reason it was returned for. That reason shows above it.
   const openVerifyModal = (training) => {
     setSelectedTraining(training);
-    setVerifyRemarks(training.remarks || "");
+    setVerifyRemarks("");
+    setReviewProblem("");
     setVerifyModalOpen(true);
+  };
+
+  // What an HR record's card adds here, from the table it replaced: HR's and the Administrator's Review.
+  const recordExtra = (row: TrainingHistoryRecord) => {
+    if (!isHrOrAdmin || row.status === 'Verified') return null;
+    return (
+      <div className="flex justify-end border-t border-slate-100 pt-2">
+        <button
+          type="button"
+          data-history-review
+          onClick={() => openVerifyModal({ id: row.id, title: row.title, organizer: row.organizer, dateConducted: row.dateConducted, trainingHours: row.hours, remarks: row.remarks })}
+          className="cursor-pointer rounded bg-slate-800 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow hover:bg-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          Review<span className="sr-only"> {row.title}</span>
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -303,68 +328,27 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
 
 
               <div className="space-y-4 pt-4 border-t border-slate-100">
-                <div className="flex justify-between items-center mb-4 border-b pb-2">
-                  <div>
-                    <h2 className="text-sm font-bold text-slate-700 uppercase">Completed Trainings History</h2>
-                    <p className="text-[10px] text-slate-500">Includes all submitted seminars. Official learning interventions requiring HR verification.</p>
+                <div className="flex flex-wrap justify-between items-center gap-3 mb-4 border-b pb-2">
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-bold text-slate-700 uppercase">Training History</h2>
+                    <p className="text-[10px] text-slate-500">
+                      {isOwnView ? "Every seminar you were seated in and every training HR recorded for you" : "Every seminar this employee was seated in and every training HR recorded for them"}, newest first: attendance, the certificate, the cash advance and the liquidation report.
+                    </p>
                   </div>
-                  <button 
-                    onClick={() => setIsModalOpen(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold uppercase shadow transition"
-                  >
-                    + Add Training Record
-                  </button>
+                  {/* HR and the Administrator: the server refuses anyone else. */}
+                  {isHrOrAdmin && (
+                    <button
+                      onClick={openAddModal}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold uppercase shadow transition"
+                    >
+                      + Add Training Record
+                    </button>
+                  )}
                 </div>
 
-                <table className="w-full text-left text-xs border-collapse bg-white border border-slate-200">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold">
-                      <th className="p-2">Training Title</th>
-                      <th className="p-2">Organizer</th>
-                      <th className="p-2 text-center">Date Conducted</th>
-                      <th className="p-2 text-center">Hours</th>
-                      <th className="p-2 text-center">Verification Status</th>
-                      <th className="p-2 text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trainings.map((training) => (
-                      <tr key={training.id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="p-2">
-                          <div className="font-semibold text-slate-700">{training.title}</div>
-                          {training.certificateFilename && (
-                            <div className="text-[10px] text-slate-500 mt-1">Cert: {training.certificateFilename}</div>
-                          )}
-                          {training.remarks && (
-                            <div className="text-[10px] text-rose-600 mt-1">Remarks: {training.remarks}</div>
-                          )}
-                        </td>
-                        <td className="p-2 text-slate-600">{training.organizer}</td>
-                        <td className="p-2 text-center text-slate-600">{training.dateConducted}</td>
-                        <td className="p-2 text-center text-slate-600">{training.trainingHours}</td>
-                        <td className="p-2 text-center">
-                          <span className={`px-2 py-0.5 rounded font-bold text-[10px] uppercase tracking-wider ${training.status === 'Verified' ? 'bg-emerald-100 text-emerald-800' : training.status === 'Returned' || training.status === 'Rejected' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>
-                            {training.status || 'Pending Verification'}
-                          </span>
-                        </td>
-                        <td className="p-2 text-center">
-                          {isHrOrAdmin && training.status !== 'Verified' && (
-                            <button onClick={() => openVerifyModal(training)} className="bg-slate-800 hover:bg-slate-900 text-white text-[10px] px-3 py-1.5 rounded font-bold shadow uppercase tracking-wider">
-                              Review
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {trainings.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="p-8 text-center text-slate-400 text-sm italic">
-                          No training records submitted for this employee.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                {/* In place of the "Completed Trainings History" table, which listed only liquidated seminars
+                    (the instructor's review, R11). HR's records are here too, with their remarks and Review. */}
+                <EmployeeTrainingHistory employeeKey={employeeKey} reloadKey={historyReload} recordExtra={recordExtra} />
               </div>
 
               <div className="space-y-4">
@@ -409,8 +393,9 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden">
             <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
-              <h3 className="font-bold text-sm tracking-wide">SUBMIT TRAINING / SEMINAR</h3>
-              <button onClick={() => setIsModalOpen(false)} className="hover:text-slate-300"><X size={18} /></button>
+              <h3 className="font-bold text-sm tracking-wide">RECORD A TRAINING / SEMINAR</h3>
+              {/* Not while the record is being saved: its answer belongs to this form. */}
+              <button onClick={() => setIsModalOpen(false)} disabled={adding} aria-label="Close" className="hover:text-slate-300 disabled:opacity-50"><X size={18} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div className="bg-blue-50 p-3 rounded text-xs text-blue-800 border border-blue-100 font-medium">
@@ -433,22 +418,25 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase">Date Conducted *</label>
-                    <input type="date" className="w-full border border-slate-300 p-2 text-xs rounded focus:border-blue-500 outline-none" value={newTraining.dateConducted} onChange={(e) => setNewTraining({...newTraining, dateConducted: e.target.value})}/>
+                    <input type="date" min={TRAINING_EARLIEST_DATE} max={getLocalTodayString()} className="w-full border border-slate-300 p-2 text-xs rounded focus:border-blue-500 outline-none" value={newTraining.dateConducted} onChange={(e) => setNewTraining({...newTraining, dateConducted: e.target.value})}/>
                 </div>
                 <div className="space-y-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase">Credit Hours *</label>
-                    <input type="number" className="w-full border border-slate-300 p-2 text-xs rounded focus:border-blue-500 outline-none" value={newTraining.trainingHours} onChange={(e) => setNewTraining({...newTraining, trainingHours: parseInt(e.target.value)})}/>
+                    <input type="number" min="0" step="0.5" className="w-full border border-slate-300 p-2 text-xs rounded focus:border-blue-500 outline-none" value={newTraining.trainingHours} onChange={(e) => setNewTraining({...newTraining, trainingHours: e.target.value})}/>
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Digital Certificate Filename</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Certificate File Name (optional)</label>
                 <input type="text" placeholder="certificate_2023.pdf" className="w-full border border-slate-300 p-2 text-xs rounded focus:border-blue-500 outline-none" value={newTraining.certificateFilename} onChange={(e) => setNewTraining({...newTraining, certificateFilename: e.target.value})}/>
+                <p className="text-[10px] text-slate-500">Only the name is kept with this record, no file.</p>
               </div>
 
+              {addProblem && <p role="alert" data-training-form="problem" className="rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">{addProblem}</p>}
+
               <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
-                <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 bg-slate-100 rounded text-xs font-bold text-slate-600 hover:bg-slate-200 transition">Cancel</button>
-                <button onClick={handleAddEntry} className="px-4 py-2 bg-blue-600 rounded text-xs font-bold text-white hover:bg-blue-700 transition shadow">Submit Record</button>
+                <button onClick={() => setIsModalOpen(false)} disabled={adding} className="px-4 py-2 bg-slate-100 rounded text-xs font-bold text-slate-600 hover:bg-slate-200 transition disabled:opacity-50">Cancel</button>
+                <button onClick={handleAddEntry} disabled={adding} className="px-4 py-2 bg-blue-600 rounded text-xs font-bold text-white hover:bg-blue-700 transition shadow disabled:opacity-50">{adding ? "Saving…" : "Save Record"}</button>
               </div>
             </div>
           </div>
@@ -461,31 +449,43 @@ export default function TrainingsSeminarsView({ user, employees, onOpenLiquidati
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
             <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-sm tracking-wide">HR VERIFICATION</h3>
-              <button onClick={() => setVerifyModalOpen(false)} className="hover:text-slate-300"><X size={18} /></button>
+              {/* Not while the review is being saved: its answer would land on whichever record is open next. */}
+              <button onClick={() => setVerifyModalOpen(false)} disabled={reviewing} aria-label="Close" className="hover:text-slate-300 disabled:opacity-50"><X size={18} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div className="bg-slate-50 border border-slate-200 p-3 rounded text-xs space-y-1">
                 <p><strong>Title:</strong> {selectedTraining.title}</p>
                 <p><strong>Organizer:</strong> {selectedTraining.organizer}</p>
                 <p><strong>Hours:</strong> {selectedTraining.trainingHours} | <strong>Date:</strong> {selectedTraining.dateConducted}</p>
+                {selectedTraining.remarks && <p data-training-review="earlier"><strong>Returned before:</strong> {selectedTraining.remarks}</p>}
               </div>
 
+              {/* What each button does to the record (the user's decision of 2026-11-03). */}
+              <p className="text-[11px] text-slate-600">
+                Verify confirms the record. Return marks it as wrong: it stops counting toward the year&rsquo;s training, Plan D
+                and who was already sent to a training, and the printed PDS leaves it out, but it stays in the history with your
+                reason. To correct it, record the training again.
+              </p>
+
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">HR Remarks / Return Reason</label>
-                <textarea 
-                  className="w-full border border-slate-300 p-2 text-xs rounded h-24 focus:border-blue-500 outline-none" 
-                  placeholder="Optional for verification. Required if returning."
+                <label htmlFor="training-review-remarks" className="text-[10px] font-bold text-slate-500 uppercase">Remarks (the employee can read these)</label>
+                <textarea
+                  id="training-review-remarks"
+                  className="w-full border border-slate-300 p-2 text-xs rounded h-24 focus:border-blue-500 outline-none"
+                  placeholder="Optional to verify. Required to return: say what is wrong."
                   value={verifyRemarks}
                   onChange={(e) => setVerifyRemarks(e.target.value)}
                 />
               </div>
 
+              {reviewProblem && <p role="alert" data-training-review="problem" className="rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">{reviewProblem}</p>}
+
               <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                <button onClick={() => handleUpdateStatus("Verified")} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow">
+                <button onClick={() => handleUpdateStatus("Verified")} disabled={reviewing} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow disabled:opacity-50">
                   <CheckCircle size={16} /> Verify & Approve
                 </button>
-                <button onClick={() => handleUpdateStatus("Returned")} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow">
-                  <XCircle size={16} /> Return to Employee
+                <button onClick={() => handleUpdateStatus("Returned")} disabled={reviewing} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow disabled:opacity-50">
+                  <XCircle size={16} /> Return
                 </button>
               </div>
             </div>

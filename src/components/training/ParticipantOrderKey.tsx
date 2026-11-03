@@ -3,7 +3,8 @@ import { ChevronRight, Scale } from "lucide-react";
 import { BADGE, RecommendedBadge, TONE } from "./candidateBadges";
 
 // "How this list is ordered" in the participant picker: the server's ranking (rankTrainingCandidates in
-// server.ts) in plain words, with a sample of each badge in the rows' own colours.
+// server.ts) in plain words, with a sample of each badge in the rows' own colours, then what is on screen at
+// first and what the two lists below it open (the instructor's review, R10; the rows are pickGroups.ts).
 
 const B = ({ children }: { children: ReactNode }) => <strong className="font-semibold text-slate-800">{children}</strong>;
 const Sample = ({ tone, children }: { tone: string; children: ReactNode }) => (
@@ -22,8 +23,8 @@ export default function ParticipantOrderKey({ fyText, anyTarget }: { fyText: str
         <p>Who comes first, in order of importance:</p>
         <ol className="list-decimal space-y-1 pl-5 marker:font-semibold marker:text-slate-500">
           <li>
-            <B>Those who can be enrolled.</B> The <B>Not eligible</B> come last: already enrolled in this seminar, attended it
-            in an earlier year, or HR recorded a training with the same title.
+            <B>Those who can be enrolled.</B> Anyone already enrolled in another run of this training, sent to it in an
+            earlier year, or with an HR record of the same title is listed apart, and can&rsquo;t be ticked.
           </li>
           <li>
             <B>No training yet in {fyText}</B> <Sample tone={TONE.firstTraining}>No training yet this FY</Sample>: everyone
@@ -46,8 +47,23 @@ export default function ParticipantOrderKey({ fyText, anyTarget }: { fyText: str
             <B>the most recently hired</B>, then <B>by name</B>, A to Z.
           </li>
         </ol>
+        <div className="space-y-1 border-t border-slate-200 pt-2 text-slate-600">
+          <p>
+            <B>What you see at first:</B> those with no training yet in {fyText}, and anyone already trained whose need for
+            this training is mandated.
+          </p>
+          <p>
+            <B>Already trained this FY</B> opens the rest of those already trained. They aren&rsquo;t the priority, but
+            they can still be ticked.
+          </p>
+          <p>
+            <B>Already sent to this training</B> opens who went before, with when and where. It is read-only.
+          </p>
+          <p>Anyone ticked stays on screen, whatever is open or closed. The History button on a row opens that person&rsquo;s trainings.</p>
+        </div>
         <p className="border-t border-slate-200 pt-2 text-slate-600">
-          The <RecommendedBadge className="align-middle" /> badge marks the top of this order, one for each free seat.
+          The <RecommendedBadge className="align-middle" /> badge marks the top of this order among the rows on screen, one
+          for each free seat. With &ldquo;Already trained this FY&rdquo; open, those rows count too.
         </p>
       </div>
     </details>

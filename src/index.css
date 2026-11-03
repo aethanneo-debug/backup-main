@@ -209,3 +209,40 @@ tr[data-highlight="true"] > td {
     page-break-inside: avoid;
   }
 }
+
+/* --- Training reports printing (Generated Reports, the instructor's review, R11) ---
+   The same mechanism again: ReportPreview renders through a React portal into <body> as
+   #trr-print-portal and adds `.trr-printing` to <body> while it is open. The sheets are wide,
+   so they print landscape through a named page of their own, as Plan D does. */
+@page trr {
+  size: landscape;
+  margin: 10mm;
+}
+
+@media print {
+  body.trr-printing {
+    background: #fff;
+  }
+
+  body.trr-printing > *:not(#trr-print-portal) {
+    display: none !important;
+  }
+
+  body.trr-printing #trr-print-portal {
+    display: block !important;
+    position: static !important;
+    page: trr;
+  }
+
+  /* Keep the sheet's rules, shaded headings and status colours on paper. */
+  body.trr-printing #trr-print-root {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* A row never splits across pages; the heading row repeats on each page by itself. */
+  body.trr-printing #trr-print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

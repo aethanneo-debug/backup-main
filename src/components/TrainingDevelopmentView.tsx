@@ -325,8 +325,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     setNewRows(prev => [...prev, blankDraftRow(newDraftId())]);
   };
 
-  // Seats a draft row with the eligible employees who listed any of `needs` in Plan A, and sets
-  // Max to their number. It patches the row by id with a functional update, so rows added in
+  // Seats a draft row with the eligible employees who listed any of `needs` in Plan A and have no
+  // training yet this fiscal year, or a mandated need for it (R10, eligibleListers), and sets Max
+  // to their number. It patches the row by id with a functional update, so rows added in
   // quick succession, or edited while it runs, keep each other's changes; a row discarded
   // meanwhile is simply not found. The result applies only while the row still covers exactly
   // those needs, so a need changed in between is never seated with the old need's employees.
@@ -359,7 +360,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   };
 
   // "Add a seminar from the plan" (PlanNeedPicker): a draft row named after the training and
-  // linked to it, seated with the eligible employees who listed it.
+  // linked to it, seated as fillFromPlan says.
   const handleAddFromPlan = (item: TrainingNeedCatalogItem) => {
     const id = newDraftId();
     setNewRows(prev => [...prev, {
@@ -692,8 +693,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     if (isNew) {
       const before = newRows.find(r => r.id === rowId);
       setNewRows(prev => prev.map(r => (r.id === rowId ? patchRow(r) : r)));
-      // A row added from the plan follows its needs: it is seated again with whoever listed
-      // any of them, unless HR has picked the participants by hand since (that choice stays).
+      // A row added from the plan follows its needs: it is seated again by the same rule
+      // (fillFromPlan), unless HR has picked the participants by hand since (that choice stays).
       if (before?.planFill && titles.length > 0 && needsKey(titles) !== needsKey(before.fulfillsNeedTitles || [])
           && sameIds(before.participantIds, before.planFillIds)) {
         fillFromPlan(rowId, titles, canAutofill(before) ? titles[0] : before.title.trim());
@@ -1262,8 +1263,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           </span>
         </div>
         {/* The quickest start: a training from this year's plan becomes a seminar row with
-            its title, its plan link and the employees who listed it. HR and the Administrator
-            only: they alone may read the plan and save seminars (server-side). */}
+            its title, its plan link and the employees who listed it and are due (fillFromPlan).
+            HR and the Administrator only: they alone may read the plan and save seminars
+            (server-side). */}
         {canPlan && (
           <PlanNeedPicker
             fiscalYear={fyLabel}
