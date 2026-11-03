@@ -28,8 +28,9 @@ export interface PickerProgram {
   endDate?: string;
   // On its roster but marked "Did not attend", so at the office: left out of the division warning.
   notAwayIds?: string[];
-  // A saved seminar's enrolments, by Employee.id: where each stands against the TDP (12z).
-  roster?: Record<string, { tdp?: TdpStanding; tdpException?: TdpJustification }>;
+  // A saved seminar's enrolments, by Employee.id: where each stands against the TDP (12z), and their name, for anyone
+  // seated who isn't among the candidates (no longer with the office).
+  roster?: Record<string, { tdp?: TdpStanding; tdpException?: TdpJustification; fullName?: string }>;
   // The seminar is held outside the TDP with its own justification (now, or asked at Save): it covers
   // everyone on it, so nobody needs one of their own (Part C). The row's guess until the server answers.
   seminarCovers?: boolean;
@@ -231,7 +232,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   const selected = new Set(selectedIds);
   const recommendedIds = new Set(recommended.map(c => c.employeeId));
   const toRow = (id: string, c?: TrainingCandidate): PickRow => {
-    const name = c ? c.fullName : id;
+    const name = c ? c.fullName : program.roster?.[id]?.fullName || id;
     if (!selected.has(id)) {
       // Off the plan: ticking them asks why they are seated, unless the seminar's own justification
       // covers everyone on it (Part C). Word for word what their row says once ticked.

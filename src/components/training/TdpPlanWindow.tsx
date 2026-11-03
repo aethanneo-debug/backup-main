@@ -179,6 +179,8 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
                 </p>
               )}
               {unlisted > 0 && <p>{count(unlisted, "employee")} with nothing in the plan {unlisted === 1 ? "is" : "are"} not listed.</p>}
+              {/* The bar above counts the TDP as uploaded, so it can name more employees than this lists. */}
+              <p>Employees whose accounts are all archived aren&rsquo;t listed; their needs stay in the TDP, and restoring an account brings them back.</p>
             </div>
           </div>
 

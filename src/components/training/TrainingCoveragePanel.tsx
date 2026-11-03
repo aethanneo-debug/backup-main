@@ -57,6 +57,7 @@ export default function TrainingCoveragePanel({ fiscalYear, reloadToken }: Props
           <h3 id="training-coverage" className="text-sm font-extrabold uppercase tracking-wider text-slate-800">Training Coverage ({fy})</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Every employee should have at least one training each fiscal year: a seminar here, or a training HR recorded in Trainings and Seminar.
+            Employees whose accounts are all archived aren&rsquo;t counted.
           </p>
         </div>
         <UserCheck size={18} className="text-blue-600 shrink-0" aria-hidden="true" />
@@ -107,6 +108,8 @@ export default function TrainingCoveragePanel({ fiscalYear, reloadToken }: Props
               </h4>
               <p className="text-[11px] text-slate-500 mt-0.5">
                 The participant picker offers them first. A seminar counts once they are enrolled, unless HR marks them &ldquo;Did not attend&rdquo;.
+                Someone the TDP doesn&rsquo;t list for a seminar, such as an employee hired after it was approved, is under
+                {" "}<strong className="font-semibold text-slate-700">All employees</strong> in its participant picker, seated with a justification.
               </p>
               <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                 {shown.map(e => (

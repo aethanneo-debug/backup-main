@@ -120,9 +120,10 @@ import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsLe
 import { employeeTrainingHistory } from "./src/trainingHistory";
 import { completedTrainingPrograms, trainingProgramReport } from "./src/trainingReports";
 import { readTrainingRecord, readTrainingReview, recordCounts } from "./src/trainingRecord";
+import { loginClosed, stillWithOffice } from "./src/staffStatus";
 import {
   coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
-  seminarNeedsJustification, seminarTdpStanding, tdpKindText, tdpStanding, type SeatCheck
+  seminarNeedsJustification, seminarTdpStanding, TDP_KIND_CHOICE, tdpKindText, tdpStanding, type SeatCheck
 } from "./src/tdpRules";
 import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
@@ -1386,7 +1387,10 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
       for (const need of oldNeeds) {
         if (needAccomplishment(need, asOf).accomplished) continue;
 
-        // Someone who has left should not reappear in next year's plan.
+        // Someone who has left should not reappear in next year's plan. Only a staff record marked inactive is
+        // skipped here: the needs of someone whose accounts are all archived are carried, and stay hidden with them
+        // (src/staffStatus.ts), so restoring an account brings them back with their needs. Plan A can't be edited by
+        // hand (Phase 6), so needs skipped here could only come back through an amended TDP.
         const emp = (db.employees || []).find((e: any) => e.id === need.employeeId || e.employeeId === need.employeeId);
         if (!emp || emp.isActive === false) continue;
 
@@ -4790,8 +4794,8 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
       return res.status(409).json({ status: "error", message: eligibility.reason });
     }
     // Money isn't paid out to someone who has left, as with a cash advance: a reimbursement is
-    // claimed with an active staff record and login (a stale token can't file one, 7a).
-    if (withinAllowance && !payeeIsActive(seminarEnrolment.employeeId)) {
+    // claimed only while they are still with the office (a stale token can't file one, 7a).
+    if (withinAllowance && !staffStillWithOffice(employeeByKey(String(seminarEnrolment.employeeId || "")))) {
       return res.status(409).json({ status: "error", message: "Your staff record is no longer active, so no reimbursement can be claimed here. Ask HR." });
     }
   } else if ((req as any).user.role !== UserRole.SUPER_ADMIN
@@ -6030,15 +6034,6 @@ function flagSelfApproval(user: any, what: string) {
     `${user.fullName} (${user.role}) ${what}. Allowed, and flagged for review: they acted on their own record.`);
 }
 
-// Whether the person an advance is for still works here: their staff record is active and
-// their login (if any) isn't archived. Money isn't released to someone who has left.
-function payeeIsActive(employeeKey: string): boolean {
-  const emp = (db.employees || []).find((e: any) => employeeIdForms(employeeKey).includes(e.id));
-  if (!emp || emp.isActive === false) return false;
-  const login = (db.users || []).find((u: any) => u.employeeId && employeeIdForms(u.employeeId).includes(emp.id));
-  return !(login && (login.status === "Archived" || login.status === "Deactivated"));
-}
-
 // An OR number already on another report or refund: each official receipt records one payment.
 // The report or advance it is on, or null. Compared without case.
 function orNumberInUse(orNo: string, exceptReportId?: string): string | null {
@@ -6137,8 +6132,7 @@ function groupCoverProblem(member: any, holder: any, exceptAdvanceId?: string): 
   const open = advancesCovering(db.cashAdvances || [], member.id)
     .find((a: any) => a.id !== exceptAdvanceId && (a.status === "Requested" || a.status === "Released"));
   if (open) return open.status === "Requested" ? "already has a cash advance request waiting" : "already has a cash advance for this seminar";
-  const emp = enrolmentEmployee(member);
-  if (!emp || !payeeIsActive(emp.employeeId || emp.id)) return "is no longer active";
+  if (!staffStillWithOffice(enrolmentEmployee(member))) return "is no longer active";
   if (!(round2(Number(member.allowanceAllocated || 0)) > 0)) return "has no allowance from HR yet";
   return null;
 }
@@ -6255,7 +6249,7 @@ function createdAtFromId(id: unknown): string {
 // Why no request can come yet for an unfunded seat, said to Finance: an advance is released only on the
 // employee's request, made from their seminar card in the portal (Personnel only). Null while one can.
 function noRequestReason(p: any, emp: any): string | null {
-  if (!payeeIsActive(emp.employeeId || emp.id)) return "No longer active, so no cash advance can be asked for.";
+  if (!staffStillWithOffice(emp)) return "No longer active, so no cash advance can be asked for.";
   if (!personnelLoginFor(emp)) return "No Personnel login, so they can't ask from the portal. The Administrator can create one, or a colleague's group request can include them.";
   if (!(round2(Number(p.allowanceAllocated || 0)) > 0)) return "HR has set no allowance for them on this seminar, so there is nothing to ask for yet.";
   const elsewhere = openAdvanceElsewhere(p.employeeId, p.id);
@@ -6426,7 +6420,7 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
   if (!facts || !emp) return res.status(404).json({ status: "error", message: "Your staff record or the seminar was not found." });
   // Money isn't released to someone who has left, so their request (and a group's) would only block
   // the others: refused here, as at release.
-  if (!payeeIsActive(emp.employeeId || emp.id)) {
+  if (!staffStillWithOffice(emp)) {
     return res.status(409).json({ status: "error", message: "Your staff record is no longer active, so no cash advance can be requested." });
   }
 
@@ -6461,7 +6455,7 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
   // can release or decline it; otherwise it would wait for good, blocking everyone it covers.
   if (covers) {
     const prospective = { employeeId: emp.employeeId, covers } as CashAdvance;
-    const deciders = (db.users || []).filter((u: any) => u && isCashAdvanceRole(u.role) && u.status !== "Archived" && u.status !== "Deactivated");
+    const deciders = (db.users || []).filter((u: any) => u && isCashAdvanceRole(u.role) && !loginClosed(u.status));
     if (!deciders.some((u: any) => !advanceInvolves(u, prospective))) {
       return res.status(409).json({
         status: "error",
@@ -6618,9 +6612,10 @@ app.get("/api/cash-advances/group-options", authenticateToken, (req: any, res: a
   if (!eligibility.canRequest) {
     return res.json({ status: "success", data: { canRequest: false, reason: eligibility.reason || null, ownAllowance: 0, options: [] } });
   }
+  const logins = loginsByStaff();
   const options = (db.trainingParticipants || [])
     .filter((p: any) => p && p.trainingProgramId === enrolment.trainingProgramId && p.id !== enrolment.id && p.status !== "Cancelled" && p.status !== "Archived")
-    .filter((p: any) => { const e = enrolmentEmployee(p); return !!e && payeeIsActive(e.employeeId || e.id); })
+    .filter((p: any) => staffStillWithOffice(enrolmentEmployee(p), logins))
     .map((p: any) => {
       const name = enrolmentEmployee(p)?.fullName || "A participant";
       const why = groupCoverProblem(p, enrolment);
@@ -6699,7 +6694,8 @@ function requestReleaseProblem(request: CashAdvance): string | null {
   if (filed) return `${filed.submissionNo} has already been filed for this seminar, so no advance can be released for it. Decline the request.`;
   const open = releasedAdvanceForAssignment(request.activityId);
   if (open) return `${open.advanceNo} (DV ${open.dvNo}) is already out for this seminar. Decline the request.`;
-  if (!payeeIsActive(request.employeeId)) return `${request.employeeName} is no longer active, so nothing can be released. Decline the request.`;
+  // (A request stores the payee's staff code, which accountEmployee matches first.)
+  if (!staffStillWithOffice(accountEmployee({ employeeId: request.employeeId }))) return `${request.employeeName} is no longer active, so nothing can be released. Decline the request.`;
   // The request can wait: it can be released once the other advance is settled.
   const elsewhere = openAdvanceElsewhere(request.employeeId, request.activityId);
   if (elsewhere) {
@@ -7062,6 +7058,25 @@ function accountEmployee(user: { employeeId?: string } | null | undefined): Empl
   return all.find(e => e.employeeId === key) ?? all.find(e => e.id === key);
 }
 
+// The accounts linked to each staff record, matched as accountEmployee matches them. Keyed by the record itself, not
+// its id, so two records sharing an internal id (7j) don't share their accounts (the security review, 2026-11-03).
+function loginsByStaff(): Map<Employee, User[]> {
+  const byStaff = new Map<Employee, User[]>();
+  for (const u of db.users || []) {
+    const emp = u ? accountEmployee(u) : undefined;
+    if (emp) byStaff.set(emp, [...(byStaff.get(emp) ?? []), u]);
+  }
+  return byStaff;
+}
+
+// Whether a staff record's person is still with the office (src/staffStatus.ts): its record isn't marked inactive,
+// and not every account linked to it is archived. User Accounts archives the account, never the staff record. `emp`
+// is the record as stored in db.employees. A list passes `logins` once (loginsByStaff) instead of gathering them per
+// person. Money isn't released to, requested or claimed for someone who isn't (the payee checks use it too).
+function staffStillWithOffice(emp: Employee | undefined, logins: Map<Employee, User[]> = loginsByStaff()): boolean {
+  return !!emp && stillWithOffice(emp, logins.get(emp) ?? []);
+}
+
 // Whether an enrolment is the signed-in person's own (their certificate of attendance, R4).
 function isOwnSeat(user: any, seat: any): boolean {
   const mine = accountEmployee(user);
@@ -7070,7 +7085,7 @@ function isOwnSeat(user: any, seat: any): boolean {
 
 // A staff record's Personnel logins that still work.
 function personnelLoginsOf(emp: Employee | undefined): any[] {
-  return emp ? (db.users || []).filter((u: any) => u && u.role === UserRole.EMPLOYEE && u.status !== "Archived" && u.status !== "Deactivated"
+  return emp ? (db.users || []).filter((u: any) => u && u.role === UserRole.EMPLOYEE && !loginClosed(u.status)
     && accountEmployee(u)?.id === emp.id) : [];
 }
 
@@ -7257,10 +7272,12 @@ function trainingEnrollmentBlock(employeeId: string, program: SeminarRef): { rea
 // The rule is in src/divisionCoverage.ts; these read it off the data. Days already past aren't
 // checked: nobody can be kept at the office on them any more.
 
-// Active staff with a division, as the rule counts them.
+// Staff still with the office (src/staffStatus.ts) who have a division, as the rule counts them: someone whose
+// account was archived can't man their division.
 function coverageStaff(): CoverageStaff[] {
+  const logins = loginsByStaff();
   return (db.employees || [])
-    .filter(e => e && e.isActive !== false && String(e.division || "").trim())
+    .filter(e => e && staffStillWithOffice(e, logins) && String(e.division || "").trim())
     .map(e => ({ id: e.id, division: String(e.division).trim() }));
 }
 
@@ -7477,7 +7494,7 @@ function refuseOutsideTdp(res: any, program: TrainingProgram, missing: TrainingP
     status: "error",
     message: `The TDP doesn't identify ${namesText(people.map(x => x.fullName))} for "${String(program.title || "").trim()}": `
       + `${people.length === 1 ? "their" : "each one's"} Plan A for FY ${program.fiscalYear} lists none of its needs. `
-      + `Record why ${people.length === 1 ? "they are" : "each is"} seated: designated to do the tasks, identified by the Chief, or another reason.`,
+      + `Record why ${people.length === 1 ? "they are" : "each is"} seated: ${TDP_KIND_CHOICE}.`,
     data: { code: "OUTSIDE_TDP", people }
   });
   return true;
@@ -7511,7 +7528,10 @@ function recordTdpException(user: TdpActor, p: TrainingParticipant, program: Tra
   const who = employeeByKey(p.employeeId)?.fullName || p.employeeId;
   // The title quoted too, so one typed to look like the fields that follow can't pass for them.
   const title = JSON.stringify(String(program.title || "").trim());
-  const kind = j.kind === "Designated" && j.committee === "Other" ? `Designated (${JSON.stringify(j.committeeOther ?? "")})` : tdpKindText(j);
+  // "Hired after the TDP" is HR's word, as every kind is: the entry and the Administrator's notice give the facts it can
+  // be checked against (the reviews of 2026-11-03).
+  const kind = (j.kind === "Designated" && j.committee === "Other" ? `Designated (${JSON.stringify(j.committeeOther ?? "")})` : tdpKindText(j))
+    + (j.kind === "Hired after the TDP" ? ` (${hiredAfterTdpFacts(p.employeeId, program.fiscalYear)})` : "");
   const what = newSeat ? `seated ${who} in` : before ? `changed why ${who} is seated in` : `recorded why ${who} is seated in`;
   logEvent(user.id, user.username, user.role, "TDP Exception",
     `${user.fullName} ${what} ${title} (FY ${program.fiscalYear}) outside the TDP. Kind: ${kind}. `
@@ -7530,6 +7550,14 @@ function recordTdpException(user: TdpActor, p: TrainingParticipant, program: Tra
     });
   }
   return true;
+}
+
+// What "Hired after the TDP" can be checked against: the hire date on the staff record, and the day the year's TDP in
+// force was uploaded (the system doesn't record the day it was approved).
+function hiredAfterTdpFacts(employeeKey: string, fiscalYear: string): string {
+  const hired = String(employeeByKey(employeeKey)?.dateHired || "");
+  const uploaded = manilaDateOf(currentTdp(db.tdpUploads, fiscalYear)?.uploadedAt);
+  return `hired ${isCalendarDate(hired) ? hired : "on a date not on record"}; the FY ${fiscalYear} TDP in force was uploaded ${uploaded || "on a date not recorded"}`;
 }
 
 // A seminar's dates as they will be saved: real dates, the end on or after the start.
@@ -7588,8 +7616,11 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
   // Their other trainings in the seminar's fiscal year (this seminar left out).
   const yearTrainings = yearTrainingCounter(trainingCoverageData(), coverageFiscalYear(program.fiscalYear), program.id);
   const mandates = trainingMandateIndex();
+  // Only staff still with the office (src/staffStatus.ts): the picker, "Add a seminar from the plan" and the
+  // representative's list all start here.
+  const logins = loginsByStaff();
   const candidates: TrainingCandidate[] = (db.employees || [])
-    .filter(emp => emp.isActive !== false)
+    .filter(emp => staffStillWithOffice(emp, logins))
     .map(emp => {
       const block = trainingEnrollmentBlock(emp.id, program);
       const months = monthsSinceHire(emp, today);
@@ -7807,7 +7838,10 @@ function buildTrainingPlan(fiscalYear: string, asOf: string): TrainingPlanOffice
   // Each need says whether the law requires it (12z Part D); Plan D lists the unmet ones first.
   const mandates = trainingMandateIndex();
 
-  for (const emp of (db.employees || []).filter(e => e.isActive !== false)) {
+  // Only staff still with the office (src/staffStatus.ts): an employee whose account the Administrator archived
+  // leaves Monitoring, Plan A and Plan D, and comes back if it is restored. Their needs stay stored.
+  const logins = loginsByStaff();
+  for (const emp of (db.employees || []).filter(e => staffStillWithOffice(e, logins))) {
     const forms = [emp.id, emp.employeeId].filter(Boolean);
     const needs = { "Function": [], "Additional Function": [], "Career Advancement": [] } as Record<TrainingNeedCategory, TrainingNeedRow[]>;
     for (const n of db.trainingNeeds || []) {
@@ -7910,6 +7944,7 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
   const created: TrainingParticipant[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
+  const logins = loginsByStaff();
   let enrolled = alreadyEnrolled;
 
   for (const rawId of employeeIds) {
@@ -7925,6 +7960,13 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
 
     if (onSeminarRoster(program.id, emp)) {
       skipped.push(`${emp.fullName} skipped: already enrolled in this seminar.`);
+      continue;
+    }
+    // A new seat only for someone still with the office (src/staffStatus.ts): the picker doesn't offer anyone else,
+    // but one opened before an account was archived, or a direct call, could still send them. A seat already held
+    // stays (above).
+    if (!staffStillWithOffice(emp, logins)) {
+      skipped.push(`${emp.fullName} skipped: no longer with the office.`);
       continue;
     }
     if (enrolled >= (program.maxParticipants || Infinity)) {
@@ -8143,8 +8185,8 @@ function autoAssignEmployeeToTraining(employee: Employee) {
   try {
     const activeFy = db.fiscalYears.find(f => f.status === "Active");
     if (!activeFy) return null;
-    // Only active staff, as the picker and the coverage panel count them.
-    if (employee.isActive === false) return null;
+    // Only staff still with the office, as the picker and the coverage panel count them.
+    if (!staffStillWithOffice(employee)) return null;
 
     // At least one training per year: auto-enrolment gives a first one to someone who has none
     // this fiscal year (a seminar, or a training HR recorded). Someone who has one needs nothing
@@ -8463,7 +8505,10 @@ app.get("/api/training/coverage", authenticateToken, (req: any, res: any) => {
     return res.status(404).json({ status: "error", message: `There is no fiscal year ${label}.` });
   }
   // `asOf`: the Manila day it was drawn up (Generated Reports prints it).
-  res.json({ status: "success", data: { ...trainingCoverage(db.employees || [], trainingCoverageData(), coverageFiscalYear(label)), asOf: manilaToday() } });
+  // Staff still with the office (src/staffStatus.ts), as the picker and Monitoring list them.
+  const logins = loginsByStaff();
+  const staff = (db.employees || []).filter(e => staffStillWithOffice(e, logins));
+  res.json({ status: "success", data: { ...trainingCoverage(staff, trainingCoverageData(), coverageFiscalYear(label)), asOf: manilaToday() } });
 });
 
 // The training reports in Generated Reports (the instructor's review, R11): HR and the Administrator only, as the plan.
@@ -9223,14 +9268,18 @@ app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) =
   const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();
 
   const byTitle = new Map<string, { title: string; employees: Set<string>; categories: Set<TrainingNeedCategory> }>();
+  const logins = loginsByStaff();
   for (const need of db.trainingNeeds || []) {
     if (need.fiscalYear !== fiscalYear) continue;
     const key = normalizeTitle(need.title);
     if (!key) continue;
     if (!byTitle.has(key)) byTitle.set(key, { title: need.title, employees: new Set(), categories: new Set() });
     const entry = byTitle.get(key)!;
-    entry.employees.add(employeeIdForms(need.employeeId)[0]);
     entry.categories.add(need.category);
+    // Counted only while they are still with the office (src/staffStatus.ts), as the picker lists them. The title stays
+    // either way: it is still in the TDP, and "Plan needs covered" must still be able to untick it.
+    const emp = employeeByKey(String(need.employeeId || ""));
+    if (emp && staffStillWithOffice(emp, logins)) entry.employees.add(emp.id);
   }
 
   // Mandated trainings first (12z Part D), then by how many people list them.
@@ -9984,10 +10033,11 @@ app.post("/api/training/programs/:id/restore", authenticateToken, transactional(
   const archivedWith = (db.trainingParticipants || []).filter((p: any) =>
     p.trainingProgramId === prog.id && p.status === "Archived" && p.archivedWithSeminarAt);
   const leftOff: string[] = [];
+  const logins = loginsByStaff();
   const back = archivedWith.filter((p: any) => {
     const emp = (db.employees || []).find((e: any) => employeeIdForms(p.employeeId).includes(e.id));
     const reason = !emp ? "no staff record"
-      : emp.isActive === false ? "no longer active"
+      : !staffStillWithOffice(emp, logins) ? "no longer active"
       : trainingEnrollmentBlock(p.employeeId, prog)?.reason;
     if (reason) leftOff.push(`${emp?.fullName || p.employeeId} (${reason})`);
     return !reason;
@@ -10159,8 +10209,8 @@ app.post("/api/training/participants/:id/replace", authenticateToken, transactio
   const repEmp = typeof req.body?.employeeId === "string" ? employeeByKey(req.body.employeeId) : undefined;
   if (!repEmp) return res.status(400).json({ status: "error", message: "Choose the employee to send." });
   if (originalEmp && repEmp.id === originalEmp.id) return res.status(400).json({ status: "error", message: "Choose someone else to send in their place." });
-  // Their staff record, or their login archived: the same test as for paying an advance.
-  if (repEmp.isActive === false || !payeeIsActive(repEmp.id)) return res.status(409).json({ status: "error", message: `${repEmp.fullName} is no longer active.` });
+  // Their staff record inactive, or every login archived: the same test as for paying an advance.
+  if (!staffStillWithOffice(repEmp)) return res.status(409).json({ status: "error", message: `${repEmp.fullName} is no longer active.` });
   if (onSeminarRoster(prog.id, repEmp)) return res.status(409).json({ status: "error", message: `${repEmp.fullName} is already on this seminar.` });
   const read = readTdpJustification(req.body, manilaToday(), { inLieu: true });
   if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });

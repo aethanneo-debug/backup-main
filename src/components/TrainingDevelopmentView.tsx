@@ -647,10 +647,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       endDate: row.endDate,
       // Those HR marked "Did not attend" are at the office: the warning leaves them out, as the server does.
       notAwayIds: participants.filter(part => part.trainingProgramId === rowId && onRoster(part) && part.attendance === "Did not attend").map(part => staffIdOf(part.employeeId)),
-      // A saved seminar's enrolments and where each stands against the TDP (12z).
+      // A saved seminar's enrolments and where each stands against the TDP (12z), with their names: someone no longer
+      // with the office isn't among the picker's candidates, so it names them from here.
       roster: isNew ? undefined : Object.fromEntries(participants
         .filter(part => part.trainingProgramId === rowId && onRoster(part))
-        .map(part => [staffIdOf(part.employeeId), { tdp: part.tdp, tdpException: part.tdpException }])),
+        .map(part => {
+          const id = staffIdOf(part.employeeId);
+          return [id, { tdp: part.tdp, tdpException: part.tdpException, fullName: employees.find(e => e.id === id)?.fullName }];
+        })),
       // A row covering no need is held outside the TDP with its own justification, which covers everyone
       // on it (Part C): Save asks for it when the seminar is new or was in the TDP, or it has one.
       seminarCovers: (row.fulfillsNeedTitles || []).length === 0 && (isNew || !!row.seminarTdpException
@@ -1131,10 +1135,17 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         {/* Seminars start from the TDP (R9); "Add Training Program" stays for the exception (the team's decision),
             held outside the TDP with its justification (HSAC answer 8, 12z Part C). Its own line, under the buttons. */}
         {activeTab === "programs" && canPlan && (
-          <p id="add-seminar-help" data-tdp="add-help" className="ml-auto mt-1.5 max-w-xl text-right text-[11px] leading-snug text-slate-500">
-            A training in the TDP: <strong className="font-semibold text-slate-700">Add a seminar from the plan</strong>, below.
-            One the TDP doesn't list: <strong className="font-semibold text-slate-700">Add Training Program</strong> (Save asks why it is held outside the TDP).
-          </p>
+          <>
+            <p id="add-seminar-help" data-tdp="add-help" className="ml-auto mt-1.5 max-w-xl text-right text-[11px] leading-snug text-slate-500">
+              A training in the TDP: <strong className="font-semibold text-slate-700">Add a seminar from the plan</strong>, below.
+              One the TDP doesn't list: <strong className="font-semibold text-slate-700">Add Training Program</strong> (Save asks why it is held outside the TDP).
+            </p>
+            {/* A person the TDP doesn't list (the user's report, 2026-11-03: a new hire after the upload) needs no new TDP. */}
+            <p data-tdp="seat-help" className="ml-auto mt-0.5 max-w-xl text-right text-[11px] leading-snug text-slate-500">
+              Someone the TDP doesn't list, such as an employee hired after it was approved: in the seminar's participant picker, choose{" "}
+              <strong className="font-semibold text-slate-700">All employees</strong>, tick them and record why they are seated.
+            </p>
+          </>
         )}
       </div>
 

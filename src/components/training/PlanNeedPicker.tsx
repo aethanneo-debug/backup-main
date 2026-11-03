@@ -360,7 +360,7 @@ export function PlanFillNote({ status, selected }: { status?: PlanFill; selected
           <AlertTriangle size={10} className="mt-0.5 shrink-0" aria-hidden="true" />
           {status === "failed"
             ? "Couldn't load who listed it. Pick participants manually."
-            : "Nobody to seat automatically: whoever listed it already has a training this FY, or was sent to it before. Raise Max if more than one will go, then pick participants manually."}
+            : "Nobody to seat automatically: whoever listed it already has a training this FY, was sent to it before, or is no longer with the office. Raise Max if more than one will go, then pick participants manually."}
         </span>
       )}
     </div>

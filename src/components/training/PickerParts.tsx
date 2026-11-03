@@ -13,7 +13,12 @@ export function PickerIntro({ coversNeeds, seminarCovers, fyText }: { coversNeed
         Tick the employees who will attend.{" "}
         {coversNeeds && (
           <>This seminar covers Plan A needs, so at first only the employees whose plan lists it are shown; their badge says in
-          which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}</>
+          which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}
+          {/* (Not when the seminar's own justification covers everyone: then nobody is asked why.) */}
+          {!seminarCovers && (
+            <>Someone the TDP doesn&rsquo;t list, such as an employee hired after it was approved, is under <strong>All employees</strong>:
+            tick them and record why they are seated.{" "}</>
+          )}</>
         )}
         {seminarCovers && (
           <>This seminar covers no Plan A need, so it is held <strong>outside the TDP</strong> with its own justification, which

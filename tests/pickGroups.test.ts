@@ -91,7 +91,8 @@ test("the search filters what is on screen, says how many closed rows match, and
 test("someone selected who isn't among the candidates has a group of their own; its words say why the list is short", () => {
   const listedOnly = view([candidate("a")], { unlisted: ["emp-x"] });
   assert.deepEqual(rows(listedOnly, "unlisted"), ["emp-x"]);
-  assert.match(listedOnly.groups.find(g => g.key === "unlisted")!.reason, /not among the active employees/);
+  assert.equal(listedOnly.groups.find(g => g.key === "unlisted")!.label, "Selected, no longer with the office");
+  assert.match(listedOnly.groups.find(g => g.key === "unlisted")!.reason, /no longer with the office \(every account archived\)/);
   assert.equal(listedOnly.everyone, 2);
   const failed = view([], { unlisted: ["emp-x"], failed: true });
   assert.equal(failed.groups.find(g => g.key === "unlisted")!.label, "Selected");

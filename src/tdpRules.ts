@@ -89,6 +89,8 @@ export function seatsNeedingJustification(seats: SeatCheck[]): string[] {
 }
 
 export const TDP_REASON_MAX = 500;
+/** The kinds HR can choose, as every refusal names them (the server's OUTSIDE_TDP too, so the two can't drift). */
+export const TDP_KIND_CHOICE = "designated to do the tasks, identified by the Chief, hired after the TDP was approved, or another reason";
 export const TDP_NAME_MAX = 100;       // a name, a position, or a committee named by hand
 export const TDP_REFERENCE_MAX = 50;
 
@@ -98,12 +100,11 @@ export const TDP_REFERENCE_MAX = 50;
 export function readTdpJustification(raw: unknown, today: string, opts: { inLieu?: boolean } = {}): { value: TdpJustificationInput } | { problem: string } {
   const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
   const kind = opts.inLieu ? "In lieu of" : r.kind;
-  if (kind !== "Designated" && kind !== "Identified by the Chief" && kind !== "Other" && kind !== "In lieu of") {
-    return { problem: "Choose why they are seated: designated to do the tasks, identified by the Chief, or another reason." };
+  const choose = `Choose why they are seated: ${TDP_KIND_CHOICE}.`;
+  if (kind !== "Designated" && kind !== "Identified by the Chief" && kind !== "Hired after the TDP" && kind !== "Other" && kind !== "In lieu of") {
+    return { problem: choose };
   }
-  if (kind === "In lieu of" && !opts.inLieu) {
-    return { problem: "Choose why they are seated: designated to do the tasks, identified by the Chief, or another reason." };
-  }
+  if (kind === "In lieu of" && !opts.inLieu) return { problem: choose };
   let committee: TdpCommittee | undefined;
   let committeeOther: string | undefined;
   if (kind === "Designated") {
@@ -179,6 +180,7 @@ type KindOnly = Pick<TdpJustificationInput, "kind" | "committee" | "committeeOth
 export function tdpKindText(j: KindOnly): string {
   if (j.kind === "Designated") return `Designated (${j.committee === "Other" ? j.committeeOther || "another committee" : j.committee})`;
   if (j.kind === "Identified by the Chief") return "Identified by the Chief";
+  if (j.kind === "Hired after the TDP") return "Hired after the TDP was approved";
   if (j.kind === "In lieu of") return `In lieu of ${j.inLieuOf?.fullName || "another participant"}`;
   return "Other reason";
 }
@@ -191,6 +193,7 @@ export function tdpBadgeText(standing: TdpStanding | undefined, j?: KindOnly): s
   if (standing === "missing" || !j) return "Outside the TDP: no justification";
   if (j.kind === "Designated") return `Designated: ${j.committee === "Other" ? j.committeeOther || "other committee" : j.committee}`;
   if (j.kind === "Identified by the Chief") return "Identified by the Chief";
+  if (j.kind === "Hired after the TDP") return "Hired after the TDP";
   if (j.kind === "In lieu of") return `In lieu of ${j.inLieuOf?.fullName || "another participant"}`;
   return "Outside the TDP: other reason";
 }

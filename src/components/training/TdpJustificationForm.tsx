@@ -22,6 +22,7 @@ interface Props {
 const KINDS: { kind: TdpExceptionKind; label: string; hint: string }[] = [
   { kind: "Designated", label: "Designated to do the tasks", hint: "a Special Order or committee designation" },
   { kind: "Identified by the Chief", label: "Identified by the Chief", hint: "the Chief or head of agency chose them, e.g. in lieu of someone on leave" },
+  { kind: "Hired after the TDP", label: "Hired after the TDP was approved", hint: "a new employee the approved TDP couldn't list" },
   { kind: "Other", label: "Another reason", hint: "explain it below" }
 ];
 const INPUT = "w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500";

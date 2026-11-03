@@ -146,7 +146,8 @@ export default function TrainingMonitoringPlanD() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <p className="text-xs text-slate-500">
           Checked off automatically from seminars attended, recorded trainings and PDS learning &amp; development.
-          Use <strong>Auto</strong> unless HR needs to decide differently.
+          Use <strong>Auto</strong> unless HR needs to decide differently. Employees whose accounts are all archived
+          aren&rsquo;t listed; restoring an account brings them back.
         </p>
         <div className="flex items-center gap-3">
           <span className="text-[11px] font-semibold text-slate-600">

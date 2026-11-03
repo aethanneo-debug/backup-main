@@ -69,10 +69,11 @@ export default function PickRowItem({ r, boxId, formOpen, onToggle, onHistory, o
   const where = [r.c?.position, r.c?.division].filter(Boolean).join(" · ");
   const standing = r.standing && <span className={`${BADGE} ${r.standing.tone}`}>{r.standing.text}</span>;
   const sent = !!r.c && !r.c.eligible;
+  // A record id in monospace, only when no name is known.
   const name = (
     <span
       id={nameId}
-      className={`min-w-0 break-words font-medium ${r.c ? "text-sm" : "font-mono text-xs"} ${
+      className={`min-w-0 break-words font-medium ${r.c || r.name !== r.id ? "text-sm" : "font-mono text-xs"} ${
         r.c && !r.c.eligible && !r.ticked ? "text-slate-600" : "text-slate-800"
       }`}
     >

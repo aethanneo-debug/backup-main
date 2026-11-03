@@ -119,6 +119,25 @@ test("Part B: \"In lieu of\" is read only for a representative, who still needs 
   assert.equal(tdpKindText(j), "In lieu of Test Officer");
 });
 
+test("someone hired after the TDP was approved is seated with a kind of their own (the user's report, 2026-11-03)", () => {
+  const raw = { kind: "Hired after the TDP", reason: "Joined in November, after the TDP was approved; no training yet this year", identifiedBy: { name: "Test Officer", position: "HR Officer" } };
+  const read = readTdpJustification(raw, today);
+  assert.ok("value" in read);
+  assert.deepEqual(read.value, raw);
+  // The reason and who identified them are still required, as for every kind.
+  assert.ok("problem" in readTdpJustification({ ...raw, reason: " " }, today));
+  assert.ok("problem" in readTdpJustification({ kind: "Hired after the TDP" }, today));
+  // A representative's stays "In lieu of" whatever kind is sent.
+  const rep = readTdpJustification(raw, today, { inLieu: true });
+  assert.equal("value" in rep && rep.value.kind, "In lieu of");
+  const j = { kind: "Hired after the TDP" as const };
+  assert.equal(tdpKindText(j), "Hired after the TDP was approved");
+  assert.equal(tdpBadgeText("justified", j), "Hired after the TDP");
+  // The refusal names every kind HR can choose.
+  const refused = readTdpJustification({ ...raw, kind: "Because" }, today);
+  assert.ok("problem" in refused && refused.problem.includes("hired after the TDP was approved"));
+});
+
 test("Part C: a save gives the seminar's justification only when it takes it outside the TDP", () => {
   const s = (o: object) => ({ isNew: false, inTdpBefore: false, inTdpAfter: false, justified: false, ...o });
   assert.equal(seminarNeedsJustification(s({ isNew: true })), true, "a new seminar outside the TDP");

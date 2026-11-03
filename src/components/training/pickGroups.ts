@@ -93,9 +93,9 @@ export function pickGroups(input: Input): PickView {
   const candidates: (Omit<PickGroup, "rows"> & { visible: PickRow[]; draw: (rows: PickRow[]) => boolean })[] = [
     {
       key: "unlisted",
-      label: input.failed ? "Selected" : "Selected, not among the active staff",
+      label: input.failed ? "Selected" : "Selected, no longer with the office",
       reason: input.failed ? "The list didn't load, so they are shown by record id. Untick to take them off."
-        : "On this seminar, but not among the active employees, so only their record id is known. Untick to take them off.",
+        : "On this seminar, but no longer with the office (every account archived), so they aren't offered for new seats. Untick to take them off, or send a representative from the attendance list.",
       visible: unlisted,
       draw: rows => rows.length > 0
     },

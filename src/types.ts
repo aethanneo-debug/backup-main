@@ -1442,8 +1442,9 @@ export const TDP_COMMITTEES = [
   "Discipline, Grievance or Fact-Finding Committee", "Other"
 ] as const;
 export type TdpCommittee = (typeof TDP_COMMITTEES)[number];
-// "In lieu of" is set only when HR sends a representative (Part B), never chosen on its own.
-export type TdpExceptionKind = "Designated" | "Identified by the Chief" | "Other" | "In lieu of";
+// "In lieu of" is set only when HR sends a representative (Part B), never chosen on its own. "Hired after the TDP":
+// someone the approved TDP couldn't list because they joined after it (the user's report, 2026-11-03).
+export type TdpExceptionKind = "Designated" | "Identified by the Chief" | "Hired after the TDP" | "Other" | "In lieu of";
 export interface TdpPerson { name: string; position: string }
 // What HR fills in; the server adds who recorded it and when.
 export interface TdpJustificationInput {
