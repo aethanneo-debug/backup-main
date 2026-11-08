@@ -8685,7 +8685,7 @@ app.get("/api/training/evaluations", authenticateToken, (req: any, res: any) => 
   }
 
   const today = manilaToday();
-  const rows: any[] = [];
+  const entries: { row: any; at: number; seatedAt: number }[] = [];
 
   for (const p of (db.trainingParticipants || [])) {
     if (p.status === "Cancelled" || p.status === "Archived") continue;
@@ -8700,27 +8700,32 @@ app.get("/api/training/evaluations", authenticateToken, (req: any, res: any) => 
     const emp = (db.employees || []).find((e: any) => e.id === p.employeeId || e.employeeId === p.employeeId);
     const evaluation = (db.trainingEvaluations || []).find((e: any) => e.trainingParticipantId === p.id) || null;
 
-    rows.push({
-      trainingParticipantId: p.id,
-      trainingProgramId: prog.id,
-      employeeId: p.employeeId,
-      employeeName: emp ? emp.fullName : p.employeeId,
-      // Printed on the report; read here so HR never retypes them.
-      position: emp ? emp.position : "",
-      division: emp ? emp.division : "",
-      trainingTitle: String(prog.title || "").trim(),
-      dateConducted: prog.startDate,
-      dateEnded: prog.endDate,
-      organizer: prog.facilitator || "",
-      participantStatus: p.status,
-      evaluation
+    // Newest first (LIFO, the user's request of 2026-11-08), each row by the event that put it in its group on the
+    // desk: awaiting since the seminar ended, a draft since it was last saved, a finalised report since it was
+    // finalised (it can't change after that). Ties go to the newest seat, then the name.
+    entries.push({
+      at: evaluation ? firstTimestamp(evaluation.evaluatedAt, evaluation.dateOfEvaluation) : firstTimestamp(ended),
+      seatedAt: firstTimestamp(p.assignedAt, createdAtFromId(p.id)),
+      row: {
+        trainingParticipantId: p.id,
+        trainingProgramId: prog.id,
+        employeeId: p.employeeId,
+        employeeName: emp ? emp.fullName : p.employeeId,
+        // Printed on the report; read here so HR never retypes them.
+        position: emp ? emp.position : "",
+        division: emp ? emp.division : "",
+        trainingTitle: String(prog.title || "").trim(),
+        dateConducted: prog.startDate,
+        dateEnded: prog.endDate,
+        organizer: prog.facilitator || "",
+        participantStatus: p.status,
+        evaluation
+      }
     });
   }
 
-  rows.sort((a, b) =>
-    Number(!!a.evaluation) - Number(!!b.evaluation) ||
-    String(a.employeeName).localeCompare(String(b.employeeName)));
-  res.json({ status: "success", data: rows });
+  entries.sort((a, b) => b.at - a.at || b.seatedAt - a.seatedAt || String(a.row.employeeName).localeCompare(String(b.row.employeeName)));
+  res.json({ status: "success", data: entries.map(e => e.row) });
 });
 
 /** Create or update the evaluation for one participant. One per person per seminar. */

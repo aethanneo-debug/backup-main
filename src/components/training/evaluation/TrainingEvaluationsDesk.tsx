@@ -24,9 +24,10 @@ const CSV_HEADERS = [
  * Step 4 of the Training and Development Plan: the post-training evaluation work queue.
  *
  * A participant appears the moment their seminar has ended, and stays until the report is
- * finalised — so this list is the answer to "who still owes an evaluation?". Unevaluated
- * rows come first from the server; opening one reveals the official form inline, the same
- * shape as the Cash Advance Desk in Finance.
+ * finalised — so this list is the answer to "who still owes an evaluation?". The server sends
+ * rows newest first (LIFO), each by its own event: the seminar's end, the last save, or the
+ * finalising; opening one reveals the official form inline, the same shape as the Cash Advance
+ * Desk in Finance.
  */
 export default function TrainingEvaluationsDesk() {
   const [rows, setRows] = useState<TrainingEvaluationQueueRow[]>([]);
@@ -241,9 +242,9 @@ export default function TrainingEvaluationsDesk() {
               Every finished seminar in this list has been evaluated and finalised.
             </p>
           )}
-          {group("Awaiting evaluation", pending, "seminar has ended, no report started")}
-          {group("Drafts", drafts, "saved but not yet finalised")}
-          {group("Finalised", finalised, "locked — print for signature")}
+          {group("Awaiting evaluation", pending, "seminar has ended, no report started · latest ended first")}
+          {group("Drafts", drafts, "saved but not yet finalised · last saved first")}
+          {group("Finalised", finalised, "locked — print for signature · latest finalised first")}
         </div>
       )}
 
