@@ -22,6 +22,11 @@ export interface User {
   createdAt: string;
 }
 
+// The office's divisions, as the account form offers them. "Adjudication Division" was the Office of the Chief Regional
+// Adjudicator under another name (the user, 2026-11-08); a load migration in server.ts moved stored names to this one.
+export const OFFICE_OF_THE_CRA = "Office of the Chief Regional Adjudicator";
+export const DIVISIONS = [OFFICE_OF_THE_CRA, "Legal Division", "Administrative and Finance Division"] as const;
+
 export interface Employee {
   id: string;
   employeeId: string; // for compatibility with legacy endpoints

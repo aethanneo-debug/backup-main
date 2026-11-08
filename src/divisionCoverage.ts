@@ -107,7 +107,7 @@ export function datesText(dates: string[]): string {
   return years.size > 1 ? joined : `${joined}, ${sorted[0].slice(0, 4)}`;
 }
 
-/** "Legal Division on Nov 5–6, 2026; Adjudication Division on Nov 9, 2026". */
+/** "Legal Division on Nov 5–6, 2026; Office of the Chief Regional Adjudicator on Nov 9, 2026". */
 export function gapText(gaps: DivisionGap[]): string {
   return (gaps ?? []).map(g => `${g.division} on ${datesText(g.dates)}`).join("; ");
 }

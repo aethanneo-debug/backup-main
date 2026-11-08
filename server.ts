@@ -41,6 +41,7 @@ const transporter = nodemailer.createTransport({
 import { createServer as createViteServer } from "vite";
 import { 
   UserRole, 
+  OFFICE_OF_THE_CRA,
   User, 
   Employee, 
   EmploymentHistory, 
@@ -230,7 +231,7 @@ function getInitialData(): DBStructure {
             liquidationNo: "LIQ-2026-001",
             requestRef: "REQ-VHL-091",
             employee: "Andres B. Bonifacio",
-            department: "Adjudication Division",
+            department: "Office of the Chief Regional Adjudicator",
             amountReleased: 5000.00,
             amountLiquidated: 4800.00,
             remainingBalance: 200.00,
@@ -288,8 +289,8 @@ function getInitialData(): DBStructure {
       }
       if (!loaded.budgetAllocations) {
         loaded.budgetAllocations = [
-          { id: "b-1", fiscalYearId: "fy-1", department: "Adjudication Division", budgetAllocation: 1200000.00, carryOver: 300000.00, budgetUtilized: 0, remainingBudget: 1500000.00, budgetPercentageUsed: 0 , allocatedPS: 600000, utilizedPS: 0, remainingPS: 600000, allocatedMOOE: 360000, utilizedMOOE: 0, remainingMOOE: 360000, allocatedCO: 240000, utilizedCO: 0, remainingCO: 240000 },
-          { id: "b-1-old", fiscalYearId: "fy-2", department: "Adjudication Division", budgetAllocation: 2400000.00, carryOver: 0, budgetUtilized: 1500000.00, remainingBudget: 900000.00, budgetPercentageUsed: 0 , allocatedPS: 1200000, utilizedPS: 750000, remainingPS: 450000, allocatedMOOE: 720000, utilizedMOOE: 450000, remainingMOOE: 270000, allocatedCO: 480000, utilizedCO: 300000, remainingCO: 180000 },
+          { id: "b-1", fiscalYearId: "fy-1", department: "Office of the Chief Regional Adjudicator", budgetAllocation: 1200000.00, carryOver: 300000.00, budgetUtilized: 0, remainingBudget: 1500000.00, budgetPercentageUsed: 0 , allocatedPS: 600000, utilizedPS: 0, remainingPS: 600000, allocatedMOOE: 360000, utilizedMOOE: 0, remainingMOOE: 360000, allocatedCO: 240000, utilizedCO: 0, remainingCO: 240000 },
+          { id: "b-1-old", fiscalYearId: "fy-2", department: "Office of the Chief Regional Adjudicator", budgetAllocation: 2400000.00, carryOver: 0, budgetUtilized: 1500000.00, remainingBudget: 900000.00, budgetPercentageUsed: 0 , allocatedPS: 1200000, utilizedPS: 750000, remainingPS: 450000, allocatedMOOE: 720000, utilizedMOOE: 450000, remainingMOOE: 270000, allocatedCO: 480000, utilizedCO: 300000, remainingCO: 180000 },
           { id: "b-2", fiscalYearId: "fy-1", department: "Administrative and Finance Division", budgetAllocation: 2400000.00, carryOver: 100000.00, budgetUtilized: 0, remainingBudget: 2500000.00, budgetPercentageUsed: 0 , allocatedPS: 1200000, utilizedPS: 0, remainingPS: 1200000, allocatedMOOE: 720000, utilizedMOOE: 0, remainingMOOE: 720000, allocatedCO: 480000, utilizedCO: 0, remainingCO: 480000 },
           { id: "b-2-old", fiscalYearId: "fy-2", department: "Administrative and Finance Division", budgetAllocation: 800000.00, carryOver: 0, budgetUtilized: 700000.00, remainingBudget: 100000.00, budgetPercentageUsed: 0 , allocatedPS: 400000, utilizedPS: 350000, remainingPS: 50000, allocatedMOOE: 240000, utilizedMOOE: 210000, remainingMOOE: 30000, allocatedCO: 160000, utilizedCO: 140000, remainingCO: 20000 },
           { id: "b-3", fiscalYearId: "fy-1", department: "Legal Division", budgetAllocation: 800000.00, carryOver: 200000.00, budgetUtilized: 0, remainingBudget: 1000000.00, budgetPercentageUsed: 0 , allocatedPS: 400000, utilizedPS: 0, remainingPS: 400000, allocatedMOOE: 240000, utilizedMOOE: 0, remainingMOOE: 240000, allocatedCO: 160000, utilizedCO: 0, remainingCO: 160000 },
@@ -306,7 +307,7 @@ function getInitialData(): DBStructure {
       }
       if (!loaded.budgetRequests) {
         loaded.budgetRequests = [
-          { id: "br-1", department: "Adjudication Division", amountRequested: 150000.00, requestType: "Augmentation", purpose: "Additional travel allocations for provincial hearings", status: "Pending", createdAt: "2026-06-15T09:00:00Z" },
+          { id: "br-1", department: "Office of the Chief Regional Adjudicator", amountRequested: 150000.00, requestType: "Augmentation", purpose: "Additional travel allocations for provincial hearings", status: "Pending", createdAt: "2026-06-15T09:00:00Z" },
           { id: "br-2", department: "Legal Division", amountRequested: 50000.00, requestType: "Emergency", purpose: "Urgent purchase of legal research library subscriptions", status: "Approved", remarks: "Approved for FY2026 Q3", createdAt: "2026-06-12T14:30:00Z" }
         ];
         changed = true;
@@ -486,7 +487,7 @@ function getInitialData(): DBStructure {
 
       if (!loaded.activityBudgetLinks) {
         loaded.activityBudgetLinks = [
-          { id: "bl-1", liquidationNo: "LIQ-2026-001", employee: "Andres B. Bonifacio", department: "Adjudication Division", amount: 12000.00, budgetId: "b-1", timestamp: "2026-06-14T10:00:00Z" },
+          { id: "bl-1", liquidationNo: "LIQ-2026-001", employee: "Andres B. Bonifacio", department: "Office of the Chief Regional Adjudicator", amount: 12000.00, budgetId: "b-1", timestamp: "2026-06-14T10:00:00Z" },
           { id: "bl-2", liquidationNo: "LIQ-2026-002", employee: "Apolinario M. Mabini", department: "Legal Division", amount: 25000.00, budgetId: "b-3", timestamp: "2026-06-15T11:30:00Z" }
         ];
         changed = true;
@@ -718,6 +719,45 @@ function getInitialData(): DBStructure {
 
       if (changed) {
         writeDataFile(loaded);
+      // "Adjudication Division" is the Office of the Chief Regional Adjudicator (the user, 2026-11-08), and the data
+      // held both names, so one office counted as two wherever names are compared (Monitoring's groups, division
+      // coverage, the division budgets). Every stored division or department name is moved to the office's name, once.
+      // Free text (audit entries, notices) is history and stays as written.
+      {
+        const OLD_DIVISION = "Adjudication Division";
+        const renamed: Record<string, number> = {};
+        const rename = (rows: unknown, field: string, label: string) => {
+          for (const r of Array.isArray(rows) ? rows : []) {
+            if (r && typeof r === "object" && typeof r[field] === "string" && r[field].trim() === OLD_DIVISION) {
+              r[field] = OFFICE_OF_THE_CRA;
+              renamed[label] = (renamed[label] || 0) + 1;
+            }
+          }
+        };
+        rename(loaded.employees, "division", "staff records");
+        rename(loaded.trainingPrograms, "targetDivision", "seminar targets");
+        rename(loaded.budgetAllocations, "department", "division budgets");
+        rename(loaded.budgetRequests, "department", "budget requests");
+        rename(loaded.activityBudgetLinks, "department", "budget links");
+        rename(loaded.liquidations, "department", "older liquidations");
+        rename(loaded.financialTransactions, "department", "ledger transactions");
+        const what = Object.entries(renamed).map(([label, n]) => `${n} ${label}`).join(", ");
+        if (what) {
+          if (!Array.isArray(loaded.auditLogs)) loaded.auditLogs = [];
+          loaded.auditLogs.unshift({
+            id: `log-${Date.now()}-rename-division`,
+            timestamp: new Date().toISOString(),
+            userId: "system",
+            username: "system",
+            role: "System",
+            action: "Rename Division",
+            details: `"${OLD_DIVISION}" renamed to "${OFFICE_OF_THE_CRA}", the same office: ${what}.`
+          });
+          console.log(`[load] "${OLD_DIVISION}" renamed to "${OFFICE_OF_THE_CRA}": ${what}.`);
+          changed = true;
+        }
+      }
+
       }
       return loaded;
     } catch (e) {
@@ -743,7 +783,7 @@ function getInitialData(): DBStructure {
         employeeId: "EMP001",
         fullName: "Hon. Romeo M. Alcantara",
         position: "Regional Executive Adjudicator",
-        division: "Adjudication Division",
+        division: "Office of the Chief Regional Adjudicator",
         employmentStatus: "Permanent",
         email: "admin@hsac.gov.ph",
         address: "La Union, Philippines",
@@ -823,7 +863,7 @@ function getInitialData(): DBStructure {
         employeeId: "EMP006",
         fullName: "Jolly Joy A. Almoite",
         position: "Adjudication Assistant",
-        division: "Adjudication Division",
+        division: "Office of the Chief Regional Adjudicator",
         employmentStatus: "Contractual",
         email: "jolly.almoite@hsac.gov.ph",
         address: "Agoo, La Union",
@@ -1048,7 +1088,7 @@ function getInitialData(): DBStructure {
         liquidationNo: "LIQ-2026-001",
         requestRef: "REQ-VHL-091",
         employee: "Andres B. Bonifacio",
-        department: "Adjudication Division",
+        department: "Office of the Chief Regional Adjudicator",
         amountReleased: 5000.00,
         amountLiquidated: 4800.00,
         remainingBalance: 200.00,
@@ -1103,8 +1143,8 @@ function getInitialData(): DBStructure {
       }
     ],
         budgetAllocations: [
-      { id: "b-1", fiscalYearId: "fy-1", department: "Adjudication Division", budgetAllocation: 1200000.00, carryOver: 300000.00, budgetUtilized: 0, remainingBudget: 1500000.00, budgetPercentageUsed: 0 , allocatedPS: 600000, utilizedPS: 0, remainingPS: 600000, allocatedMOOE: 360000, utilizedMOOE: 0, remainingMOOE: 360000, allocatedCO: 240000, utilizedCO: 0, remainingCO: 240000 },
-      { id: "b-1-old", fiscalYearId: "fy-2", department: "Adjudication Division", budgetAllocation: 2400000.00, carryOver: 100000.00, budgetUtilized: 1500000.00, remainingBudget: 1000000.00, budgetPercentageUsed: 0 , allocatedPS: 1200000, utilizedPS: 750000, remainingPS: 450000, allocatedMOOE: 720000, utilizedMOOE: 450000, remainingMOOE: 270000, allocatedCO: 480000, utilizedCO: 300000, remainingCO: 180000 },
+      { id: "b-1", fiscalYearId: "fy-1", department: "Office of the Chief Regional Adjudicator", budgetAllocation: 1200000.00, carryOver: 300000.00, budgetUtilized: 0, remainingBudget: 1500000.00, budgetPercentageUsed: 0 , allocatedPS: 600000, utilizedPS: 0, remainingPS: 600000, allocatedMOOE: 360000, utilizedMOOE: 0, remainingMOOE: 360000, allocatedCO: 240000, utilizedCO: 0, remainingCO: 240000 },
+      { id: "b-1-old", fiscalYearId: "fy-2", department: "Office of the Chief Regional Adjudicator", budgetAllocation: 2400000.00, carryOver: 100000.00, budgetUtilized: 1500000.00, remainingBudget: 1000000.00, budgetPercentageUsed: 0 , allocatedPS: 1200000, utilizedPS: 750000, remainingPS: 450000, allocatedMOOE: 720000, utilizedMOOE: 450000, remainingMOOE: 270000, allocatedCO: 480000, utilizedCO: 300000, remainingCO: 180000 },
       { id: "b-2", fiscalYearId: "fy-1", department: "Administrative and Finance Division", budgetAllocation: 2400000.00, carryOver: 100000.00, budgetUtilized: 0, remainingBudget: 2500000.00, budgetPercentageUsed: 0 , allocatedPS: 1200000, utilizedPS: 0, remainingPS: 1200000, allocatedMOOE: 720000, utilizedMOOE: 0, remainingMOOE: 720000, allocatedCO: 480000, utilizedCO: 0, remainingCO: 480000 },
       { id: "b-2-old", fiscalYearId: "fy-2", department: "Administrative and Finance Division", budgetAllocation: 800000.00, carryOver: 200000.00, budgetUtilized: 700000.00, remainingBudget: 300000.00, budgetPercentageUsed: 0 , allocatedPS: 400000, utilizedPS: 350000, remainingPS: 50000, allocatedMOOE: 240000, utilizedMOOE: 210000, remainingMOOE: 30000, allocatedCO: 160000, utilizedCO: 140000, remainingCO: 20000 },
       { id: "b-3", fiscalYearId: "fy-1", department: "Legal Division", budgetAllocation: 800000.00, carryOver: 200000.00, budgetUtilized: 0, remainingBudget: 1000000.00, budgetPercentageUsed: 0 , allocatedPS: 400000, utilizedPS: 0, remainingPS: 400000, allocatedMOOE: 240000, utilizedMOOE: 0, remainingMOOE: 240000, allocatedCO: 160000, utilizedCO: 0, remainingCO: 160000 },
@@ -1115,7 +1155,7 @@ function getInitialData(): DBStructure {
       { id: "fl-2", user: "Juan dela Cruz", action: "Complete Liquidation", module: "Liquidation Monitoring", timestamp: "2026-06-03T17:00:00Z", previousValue: "Under Review", newValue: "Completed" }
     ],
     budgetRequests: [
-      { id: "br-1", department: "Adjudication Division", amountRequested: 150000.00, requestType: "Augmentation", purpose: "Additional travel allocations for provincial hearings", status: "Pending", createdAt: "2026-06-15T09:00:00Z" },
+      { id: "br-1", department: "Office of the Chief Regional Adjudicator", amountRequested: 150000.00, requestType: "Augmentation", purpose: "Additional travel allocations for provincial hearings", status: "Pending", createdAt: "2026-06-15T09:00:00Z" },
       { id: "br-2", department: "Legal Division", amountRequested: 50000.00, requestType: "Emergency", purpose: "Urgent purchase of legal research library subscriptions", status: "Approved", remarks: "Approved for FY2026 Q3", createdAt: "2026-06-12T14:30:00Z" }
     ],
     notifications: [
@@ -1179,7 +1219,7 @@ function getInitialData(): DBStructure {
     cashAdvances: [],
     trainingEvaluations: [],
     activityBudgetLinks: [
-      { id: "bl-1", liquidationNo: "LIQ-2026-001", employee: "Andres B. Bonifacio", department: "Adjudication Division", amount: 12000.00, budgetId: "b-1", timestamp: "2026-06-14T10:00:00Z" },
+      { id: "bl-1", liquidationNo: "LIQ-2026-001", employee: "Andres B. Bonifacio", department: "Office of the Chief Regional Adjudicator", amount: 12000.00, budgetId: "b-1", timestamp: "2026-06-14T10:00:00Z" },
       { id: "bl-2", liquidationNo: "LIQ-2026-002", employee: "Apolinario M. Mabini", department: "Legal Division", amount: 25000.00, budgetId: "b-3", timestamp: "2026-06-15T11:30:00Z" }
     ],
     pds: [],

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, UserRole } from "../types";
+import { DIVISIONS, OFFICE_OF_THE_CRA, User, UserRole } from "../types";
 import { apiCall, firstDateString, firstTimestamp, formatDate } from "../utils";
 import { Plus, Edit2, Archive, Key, ShieldCheck, Mail, UserCheck, Search, X, CheckCircle } from "lucide-react";
 
@@ -72,7 +72,7 @@ export default function UserAccountsView({ currentUser }: UserAccountsViewProps)
     setSelectedRole(UserRole.EMPLOYEE);
     setAccountStatus("Active");
     setPosition("");
-    setDivision("Adjudication Division");
+    setDivision(OFFICE_OF_THE_CRA);
     setEmploymentStatus("Regular");
     setError("");
     setSuccess("");
@@ -456,9 +456,7 @@ export default function UserAccountsView({ currentUser }: UserAccountsViewProps)
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-600">Division / Department</label>
                     <select value={division} onChange={e => setDivision(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" required>
-                      <option value="Adjudication Division">Adjudication Division</option>
-                      <option value="Legal Division">Legal Division</option>
-                      <option value="Administrative and Finance Division">Administrative and Finance Division</option>
+                      {DIVISIONS.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1">
