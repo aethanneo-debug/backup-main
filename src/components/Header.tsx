@@ -170,12 +170,6 @@ export default function Header({ user, onOpenHelp, onOpenLink }: HeaderProps) {
           <span className="text-slate-500 text-[11px]">{formattedDate}</span>
         </div>
 
-        {/* DATA PRIVACY SECURITY FLAGGER */}
-        <div className="flex items-center text-[10px] text-emerald-700 font-mono bg-emerald-50 border border-emerald-100 px-2 py-1 rounded">
-          <Server size={11} className="mr-1 text-emerald-500 animate-pulse" />
-          <span>RA 10173 SECURE</span>
-        </div>
-
         {/* UTILITY NOTIFIER */}
         <div className="flex items-center space-x-2 border-l border-slate-200 pl-4 relative" ref={dropdownRef}>
           <button 
