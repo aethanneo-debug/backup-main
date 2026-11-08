@@ -108,8 +108,9 @@ export default function TrainingCoveragePanel({ fiscalYear, reloadToken }: Props
               </h4>
               <p className="text-[11px] text-slate-500 mt-0.5">
                 The participant picker offers them first. A seminar counts once they are enrolled, unless HR marks them &ldquo;Did not attend&rdquo;.
-                Someone the TDP doesn&rsquo;t list for a seminar, such as an employee hired after it was approved, is under
-                {" "}<strong className="font-semibold text-slate-700">All employees</strong> in its participant picker, seated with a justification.
+                For someone the TDP doesn&rsquo;t list, such as an employee hired after it was approved, plan a training with
+                {" "}<strong className="font-semibold text-slate-700">Add Training Need</strong> on Training Needs; to seat them just once, choose
+                {" "}<strong className="font-semibold text-slate-700">All employees</strong> in the seminar&rsquo;s participant picker and record why.
               </p>
               <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                 {shown.map(e => (

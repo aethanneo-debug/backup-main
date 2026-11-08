@@ -550,14 +550,19 @@ export interface TdpUpload {
   uploadedAt: string;      // ISO; "" when not known
   uploadedBy: string;      // the username; "" when not known
   uploadedByName: string;
-  /** The year's TDP needs right after it, and how many employees they are for (needs carried from an earlier year
-   * aren't part of a TDP, so they aren't counted). */
+  /** The year's TDP needs right after it, and how many employees they are for (needs carried from an earlier year, and
+   * needs HR added after the TDP (12ad), aren't part of a TDP, so they aren't counted). */
   needs: number;
   employees: number;
-  /** A replacement: what it changed. */
-  changes?: { added: number; removed: number; kept: number; moved: number };
+  /** A replacement: what it changed. `addedKept` and `adopted` count needs HR added after the TDP (12ad): kept though
+   * the amended TDP leaves them out, or now listed by it. */
+  changes?: { added: number; removed: number; kept: number; moved: number; addedKept?: number; adopted?: number };
   /** A replacement: the needs it kept though the amended TDP leaves them out (still in use), so Plan A can mark them. */
   keptNeedIds?: string[];
+  /** The TDP's own trainings, per column, from every row of the sheet (rows assigned to nobody, and rows skipped as
+   * already in the plan, included), in its spelling: what "Add Training Need" offers (12ad). Absent on a record from
+   * before 2026-11-08; kept on the server (the screens get the choices instead). */
+  trainings?: { title: string; category: TrainingNeedCategory }[];
 }
 
 /** One need named in a replacement's summary. */
@@ -589,6 +594,11 @@ export interface TdpReplaceSummary {
   seminarsOutside: { id: string; title: string }[];
   /** Carried from an earlier year: not part of any TDP, always kept. */
   carried: number;
+  /** Added by HR after the TDP (12ad) and not in the amended TDP: always kept, as carried ones are. */
+  addedKept: TdpReplaceNeed[];
+  /** Added by HR after the TDP and now listed by the amended TDP for the same person (in place, or moved to its
+   * column): ordinary TDP needs from then on. */
+  adopted: TdpReplaceNeed[];
 }
 
 // --- POST-TRAINING PERFORMANCE EVALUATION REPORT ---
@@ -1537,8 +1547,30 @@ export interface TrainingNeed {
   // a need that has rolled twice still reads "carried from 2025" and its true age stays
   // visible in Plan A.
   carriedFromFiscalYear?: string;
+  // Set when HR added this need after the TDP was uploaded ("Add Training Need", 12ad): one of the TDP's own
+  // trainings, under a column where the TDP lists it, for someone it couldn't list. Absent: from the TDP, or carried.
+  addedAfterTdp?: TrainingNeedAddition;
   createdAt: string;
   createdBy: string;
+}
+
+// Why HR added a need after the TDP (the user's request of 2026-11-08, known-issues 12ad).
+export type NeedAdditionBasis = "Hired after the TDP" | "Designated after the TDP" | "Other";
+export interface TrainingNeedAddition {
+  basis: NeedAdditionBasis;
+  note?: string;           // required for "Other"; an SO or Office Order number can go here
+  addedBy: { id: string; name: string; role: UserRole };
+  addedAt: string;         // ISO
+}
+
+// One of the uploaded TDP's own trainings, as "Add Training Need" offers it (12ad): the columns the TDP lists it
+// under, and its spelling in each (the one stored, since titles are matched as written).
+export interface TdpTrainingChoice {
+  key: string;             // normalizeTitle
+  title: string;           // the first spelling
+  categories: TrainingNeedCategory[];
+  spellings: Partial<Record<TrainingNeedCategory, string>>;
+  mandate?: { basis: string };
 }
 
 // How a need was judged accomplished for Plan D.

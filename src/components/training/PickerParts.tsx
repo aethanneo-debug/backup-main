@@ -16,8 +16,8 @@ export function PickerIntro({ coversNeeds, seminarCovers, fyText }: { coversNeed
           which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}
           {/* (Not when the seminar's own justification covers everyone: then nobody is asked why.) */}
           {!seminarCovers && (
-            <>Someone the TDP doesn&rsquo;t list, such as an employee hired after it was approved, is under <strong>All employees</strong>:
-            tick them and record why they are seated.{" "}</>
+            <>Someone the TDP doesn&rsquo;t list is under <strong>All employees</strong>: tick them and record why they are seated, for
+            this seminar only. To plan their training, use <strong>Add Training Need</strong> on Training Needs.{" "}</>
           )}</>
         )}
         {seminarCovers && (

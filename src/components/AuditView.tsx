@@ -119,6 +119,7 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Mandated Training">Mandated trainings</option>
             <option value="Import Plan A Workbook">TDP uploads</option>
             <option value="Replace TDP">TDP replaced</option>
+            <option value="Add Training Need (after the TDP)">Plan A needs added after the TDP</option>
             <option value="Remove Training Need">Plan A needs removed</option>
             <option value="Add Training">Training records added by HR</option>
             <option value="Review Training Record">Training records verified or returned</option>

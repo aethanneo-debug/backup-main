@@ -194,7 +194,8 @@ export default function PlanAImportPreviewTable({
             <strong className="font-mono text-slate-800">{mappedRows}</strong> of {preview.totals.blocks} row
             {preview.totals.blocks === 1 ? "" : "s"} mapped to an employee.{" "}
             <span className="text-slate-500">
-              Anyone in the plan no row is mapped to is left out of the amended TDP: their needs are removed, unless still in use.
+              Anyone in the plan no row is mapped to is left out of the amended TDP: their TDP needs are removed, unless still in
+              use. Needs carried from an earlier year, or added after the TDP, stay.
             </span>
           </p>
         ) : (

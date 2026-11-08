@@ -5,7 +5,8 @@ import { count } from "../tdpText";
 
 // What replacing the TDP does, as the server's dry run worked it out (nothing is saved by it), and the step that
 // replaces it. Removing a need takes it off Plan A and Monitoring, so the needs it removes and the ones it keeps are
-// named, and the final button stays off while the check is out of date (the mapping changed since).
+// named, and the final button stays off while the check is out of date (the mapping changed since). Needs HR added
+// after the TDP (12ad) are never removed: those the amended TDP leaves out stay, those it lists become its own.
 interface Props {
   summary: Summary;
   /** The mapping or sheet changed after this check: it may not be what Replace would do. */
@@ -78,6 +79,11 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
   const keptRows = (summary.kept ?? []).map(row => ({ ...row, why: kept(row) }));
   // Seminars that would cover no training left in the plan: they would need their own justification (12z Part C).
   const outside = summary.seminarsOutside ?? [];
+  // Needs HR added after the TDP: every one is kept (not in the amended TDP) or adopted (listed by it, in place or
+  // moved, so also counted there). With none, their tiles would only ever read 0.
+  const addedKept = summary.addedKept ?? [];
+  const adopted = summary.adopted ?? [];
+  const anyAdded = addedKept.length + adopted.length > 0;
   const nothingChanges = summary.added === 0 && movedRows.length === 0 && removed.length === 0 && keptRows.length === 0;
 
   return (
@@ -108,19 +114,29 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
         )}
 
         <div className={stale ? "opacity-60" : ""}>
-          <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <dl className={`mt-3 grid grid-cols-2 gap-2 ${anyAdded ? "sm:grid-cols-4" : "sm:grid-cols-3 lg:grid-cols-6"}`}>
             <Stat label="Added" value={summary.added} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
             <Stat label="Unchanged" value={summary.unchanged} tone={NEUTRAL} />
             <Stat label="Moved: other column" value={movedRows.length} tone="border-blue-200 bg-blue-50 text-blue-800" />
             <Stat label="Removed" value={removed.length} tone="border-rose-200 bg-rose-50 text-rose-800" />
             <Stat label="Kept: still in use" value={keptRows.length} tone="border-amber-200 bg-amber-50 text-amber-800" />
             <Stat label="Carried: always kept" value={summary.carried} tone={NEUTRAL} />
+            {anyAdded && (
+              <>
+                <Stat label="Added after TDP: kept" value={addedKept.length} tone={NEUTRAL} />
+                <Stat label="Added after TDP: now listed" value={adopted.length} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
+              </>
+            )}
           </dl>
           <p className="mt-2 text-[11px] text-slate-600">
             {nothingChanges
-              ? "The amended TDP lists the same needs as the plan: no need is added or removed."
+              ? anyAdded
+                ? "The amended TDP adds, moves and removes no need."
+                : "The amended TDP lists the same needs as the plan: no need is added or removed."
               : "Unchanged needs stay as they are, with Monitoring's marks and remarks."}
             {summary.carried > 0 && ` ${count(summary.carried, "need")} carried from an earlier year ${summary.carried === 1 ? "isn't" : "aren't"} part of any TDP, so ${summary.carried === 1 ? "it stays" : "they stay"}.`}
+            {addedKept.length > 0 && ` ${count(addedKept.length, "need")} added after the TDP ${addedKept.length === 1 ? "isn't" : "aren't"} in it, so ${addedKept.length === 1 ? "it stays" : "they stay"}.`}
+            {adopted.length > 0 && ` ${count(adopted.length, "need")} added after the TDP ${adopted.length === 1 ? "is" : "are"} listed by it for the same person, so ${adopted.length === 1 ? "it becomes a TDP need" : "they become TDP needs"}.`}
           </p>
 
           {added.length > 0 && (
@@ -145,6 +161,18 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
             <div className="mt-3 space-y-1">
               <h5 className="text-[11px] font-bold text-amber-800">Kept because still in use ({keptRows.length}): not in the amended TDP, but their person is seated for them on a seminar, or they were accomplished</h5>
               <NeedList caption={`Needs kept because still in use (${keptRows.length})`} rows={keptRows} why="Why it stays" />
+            </div>
+          )}
+          {addedKept.length > 0 && (
+            <div className="mt-3 space-y-1">
+              <h5 className="text-[11px] font-bold text-slate-700">Added after the TDP, kept ({addedKept.length}): not in the amended TDP; a need HR added stays, as a carried one does</h5>
+              <NeedList caption={`Needs added after the TDP, kept (${addedKept.length})`} rows={addedKept} />
+            </div>
+          )}
+          {adopted.length > 0 && (
+            <div className="mt-3 space-y-1">
+              <h5 className="text-[11px] font-bold text-emerald-800">Added after the TDP, now in the amended TDP ({adopted.length}): it lists them for the same person, so they become TDP needs</h5>
+              <NeedList caption={`Needs added after the TDP, now in the amended TDP (${adopted.length})`} rows={adopted} />
             </div>
           )}
           {outside.length > 0 && (
@@ -178,6 +206,8 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
           {count(summary.added, "need")} added{movedRows.length > 0 ? `, ${movedRows.length} moved to another column` : ""} and {removed.length} removed
           {keptRows.length > 0 ? `; ${keptRows.length} it leaves out ${keptRows.length === 1 ? "stays" : "stay"} because still in use` : ""}.
           {removed.length > 0 && " Removed needs leave Plan A and Monitoring."}
+          {addedKept.length > 0 && ` ${count(addedKept.length, "need")} added after the TDP ${addedKept.length === 1 ? "stays" : "stay"}.`}
+          {adopted.length > 0 && ` ${count(adopted.length, "need")} added after the TDP ${adopted.length === 1 ? "becomes" : "become"} the TDP's own.`}
           {outside.length > 0 && ` ${outside.length === 1 ? "1 seminar" : `${outside.length} seminars`} would then need ${outside.length === 1 ? "its" : "their"} own justification.`}{" "}
           The replacement is recorded in the audit log, and HR and the
           Administrator are notified. To change it later, upload another amended TDP.

@@ -1,20 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, History, Loader2 } from "lucide-react";
-import { PlanAImportResult, TdpUpload, TrainingNeedRow, TrainingPlanOffice } from "../../types";
+import { PlanAImportResult, TdpTrainingChoice, TdpUpload, TrainingNeedRow, TrainingPlanOffice } from "../../types";
 import { apiCall } from "../../utils";
 import PlanAImportPanel from "./import/PlanAImportPanel";
 import MandatedTrainingsPanel from "./MandatedTrainingsPanel";
 import TdpStatusBar from "./TdpStatusBar";
 import TdpPlanWindow from "./TdpPlanWindow";
-import { count } from "./tdpText";
+import AddTrainingNeedDialog from "./AddTrainingNeedDialog";
+import { addedChangesText, count } from "./tdpText";
 
 // Training Needs (step 1): the year's TDP. HR uploads the RAB-1 workbook once a year (the instructor's review, R9),
 // and Plan A, what each employee still needs, comes from it. Until then the upload panel shows; once it is in, a bar
 // says which file, when and by whom, with Plan A behind "View uploaded TDP" (read-only) and "Replace with an amended
-// TDP", the only way its needs change (the server refuses adding, renaming or removing one). Needs carried in unmet
-// from an earlier year are in the plan either way, apart from the TDP.
+// TDP", the only way the TDP's own needs change (the server refuses renaming or removing one). "Add Training Need"
+// gives someone the TDP doesn't list one of its trainings (12ad: a new hire, a new designation). Needs carried in unmet
+// from an earlier year are in the plan either way, apart from the TDP, and so are those added after it.
 type Message = { tone: "success" | "warning"; text: string; detail?: string };
-type FocusTarget = "bar" | "replace" | "panel" | "upload";
+type FocusTarget = "bar" | "replace" | "panel" | "upload" | "add";
 
 const REPLACE_PANEL = "tdp-replace-panel";
 
@@ -49,18 +51,33 @@ function replacedMessage(result: PlanAImportResult, fiscalYear: string): Message
   };
   const file = result.tdp?.filename ? ` with “${result.tdp.filename}”` : "";
   const moved = changes.moved > 0 ? `${changes.moved} moved to another column, ` : "";
+  // What it did to the needs HR had added after the TDP (12ad), when there were any.
+  const addedNote = addedChangesText(result.tdp?.changes ?? {
+    addedKept: (result.replace?.addedKept ?? []).length,
+    adopted: (result.replace?.adopted ?? []).length
+  });
+  const now = result.tdp ? `It now lists ${count(result.tdp.needs, "need")} for ${count(result.tdp.employees, "employee")}.` : "";
   return {
     tone: "success",
     text: `The FY ${result.fiscalYear || fiscalYear} TDP is replaced${file}: ${count(changes.added, "need")} added, ${moved}${changes.removed} removed, ${changes.kept} kept because still in use.`,
-    detail: result.tdp ? `It now lists ${count(result.tdp.needs, "need")} for ${count(result.tdp.employees, "employee")}.` : undefined
+    detail: [now, addedNote].filter(Boolean).join(" ") || undefined
   };
 }
 
-export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => void }) {
+/** HR and the Administrator plan trainings (`canPlan`, the server checks again): "Add Training Need" is theirs. */
+export default function TrainingNeedsPlanA({ onChanged, canPlan = false }: { onChanged?: () => void; canPlan?: boolean }) {
   const [offices, setOffices] = useState<TrainingPlanOffice[]>([]);
   const [fiscalYear, setFiscalYear] = useState("");
   const [tdp, setTdp] = useState<TdpUpload | null>(null);
   const [carried, setCarried] = useState(0);
+  // Needs added after the TDP this year, and the TDP's own trainings "Add Training Need" offers (12ad).
+  const [added, setAdded] = useState(0);
+  const [choices, setChoices] = useState<TdpTrainingChoice[]>([]);
+  // The TDP's own list, or the year's plan for a TDP uploaded before its list was kept: the dialog says which.
+  const [choicesFrom, setChoicesFrom] = useState<"tdp" | "plan" | null>(null);
+  // The fiscal year the dialog opened on, or null while it is closed. A reload that brings another year (a new fiscal
+  // year opened meanwhile) closes it and says nothing was added, so it can never send to a year HR didn't see.
+  const [adding, setAdding] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // A quiet reload that failed: the screen stays as it was, with Retry.
@@ -72,8 +89,11 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
   const loads = useRef(0);
   const barHeading = useRef<HTMLHeadingElement>(null);
   const replaceButton = useRef<HTMLButtonElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
   const panelHeading = useRef<HTMLHeadingElement>(null);
   const uploadHeading = useRef<HTMLHeadingElement>(null);
+  // Everyone still with the office, needs or not, in the plan's order: who a need can be added for.
+  const employees = useMemo(() => (offices ?? []).flatMap(o => o.employees ?? []), [offices]);
 
   // `quiet`: refresh in place, without the spinner, so the panels stay mounted and keep their messages (the mandated
   // trainings' "… is marked as mandated.", a replacement's refusal). The newest load answers for the screen.
@@ -88,6 +108,9 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
       setFiscalYear(res.data?.fiscalYear ?? "");
       setTdp(res.data?.tdp ?? null);
       setCarried(Number(res.data?.carried) || 0);
+      setAdded(Number(res.data?.added) || 0);
+      setChoices(Array.isArray(res.data?.choices) ? res.data.choices : []);
+      setChoicesFrom(res.data?.choicesFrom === "plan" || res.data?.choicesFrom === "tdp" ? res.data.choicesFrom : null);
       setError("");
       setReloadError("");
     } catch (err: any) {
@@ -101,12 +124,26 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
 
   useEffect(() => { load(); }, []);
 
+  // The dialog belongs to the year it opened on: once a reload brings another one, or no TDP, it closes and the page says
+  // nothing was added (a refusal's reload is what brings it: "The 2028 plan is closed …").
+  useEffect(() => {
+    if (adding === null || (adding === fiscalYear && tdp)) return;
+    setAdding(null);
+    setMessage({
+      tone: "warning",
+      text: adding !== fiscalYear
+        ? `The active fiscal year is now FY ${fiscalYear}: nothing was added to the FY ${adding} plan.`
+        : `The FY ${adding} TDP is no longer in force: nothing was added.`
+    });
+    setFocusTo(tdp ? "add" : "upload");
+  }, [adding, fiscalYear, tdp]);
+
   // A control that only exists after the next render (the bar after an upload, the panel once opened) takes the focus
   // when it arrives.
   useEffect(() => {
     if (!focusTo) return;
     const el = focusTo === "bar" ? barHeading.current : focusTo === "replace" ? replaceButton.current
-      : focusTo === "upload" ? uploadHeading.current : panelHeading.current;
+      : focusTo === "add" ? addButton.current : focusTo === "upload" ? uploadHeading.current : panelHeading.current;
     if (!el) return;
     el.focus();
     setFocusTo(null);
@@ -128,9 +165,10 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
     load(true);
   }
 
-  // A need carried in from an earlier year is no TDP's, so it is the one thing Plan A lets HR take out (the user's
-  // decision of 2026-11-02; the server refuses any other). The window shows what came of it.
-  async function removeCarried(need: TrainingNeedRow): Promise<{ problem: string } | { outside: string[] }> {
+  // A need carried in from an earlier year, or one HR added after the TDP, is no TDP's, so these are what Plan A lets HR
+  // take out while they aren't in use (the user's decisions of 2026-11-02 and 2026-11-08; the server refuses any
+  // other). The window shows what came of it.
+  async function removeNeed(need: TrainingNeedRow): Promise<{ problem: string } | { outside: string[] }> {
     try {
       const res = await apiCall(`/api/training/needs/${encodeURIComponent(need.id)}`, { method: "DELETE" });
       if (res.status !== "success") return { problem: res.message || "That need couldn't be removed." };
@@ -149,6 +187,16 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
     setMessage(null);
     setReplacing(true);
     setFocusTo("panel");
+  }
+
+  // Added (12ad): the dialog closes on the server's own words, and the plan reloads in place, so the bar's count and the
+  // window follow without a page refresh.
+  function handleAdded(text: string) {
+    setAdding(null);
+    setMessage({ tone: "success", text });
+    setFocusTo("add");
+    load(true);
+    onChanged?.();
   }
 
   function closeReplace() {
@@ -178,8 +226,9 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
       <div>
         <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800">Training and Development Plan, FY {fiscalYear}</h3>
         <p className="mt-0.5 text-xs text-slate-500">
-          HR uploads the year's TDP once, from the RAB-1 workbook. Plan A, what each employee still needs, comes from it and
-          changes only through an amended TDP. Seminars they attend are checked off in <strong>Monitoring</strong>.
+          HR uploads the year's TDP once, from the RAB-1 workbook. Plan A, what each employee still needs, comes from it; its
+          needs change only through an amended TDP, and <strong>Add Training Need</strong> gives someone it doesn&rsquo;t list (a new
+          hire, a new designation) one of its trainings. Seminars they attend are checked off in <strong>Monitoring</strong>.
         </p>
       </div>
 
@@ -187,12 +236,16 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
         <TdpStatusBar
           tdp={tdp}
           carried={carried}
+          added={added}
           replacing={replacing}
           replacePanelId={REPLACE_PANEL}
           onView={() => setViewing(true)}
           onReplace={() => (replacing ? panelHeading.current?.focus() : openReplace())}
+          canPlan={canPlan}
+          onAdd={() => { setMessage(null); setAdding(fiscalYear); }}
           headingRef={barHeading}
           replaceRef={replaceButton}
+          addRef={addButton}
         />
       ) : (
         <>
@@ -265,7 +318,22 @@ export default function TrainingNeedsPlanA({ onChanged }: { onChanged?: () => vo
             // The last carried need removed takes "View them" with it: the focus goes to the upload instead.
             if (!tdp && carried === 0) setFocusTo("upload");
           }}
-          onRemoveCarried={removeCarried}
+          onRemoveNeed={removeNeed}
+        />
+      )}
+
+      {/* One of the TDP's own trainings for someone it doesn't list (12ad). A refusal reloads the plan, so the dialog's
+          lists show it as the server has it now (e.g. another officer added the same need meanwhile). Only on the year it
+          opened on (see the effect above). */}
+      {adding !== null && adding === fiscalYear && tdp && canPlan && (
+        <AddTrainingNeedDialog
+          fiscalYear={adding}
+          employees={employees}
+          choices={choices}
+          choicesFrom={choicesFrom}
+          onClose={() => setAdding(null)}
+          onSaved={handleAdded}
+          onRefused={() => load(true)}
         />
       )}
     </div>

@@ -1,7 +1,8 @@
 // The TDP, uploaded once a year (the instructor's review, R9). Plan A comes from the RAB-1 workbook HR uploads for a
-// fiscal year, and changes only when an amended one replaces it. This works out what a replacement does to the plan,
-// which upload is in force, and the record of a year imported before uploads were recorded. Used by the server; tested.
-import type { TdpUpload } from "./types";
+// fiscal year; its TDP needs change only when an amended one replaces it, and HR can add one of its trainings to someone
+// it doesn't list (12ad). This works out what a replacement does to the plan, which upload is in force, the TDP's own
+// list of trainings, and the record of a year imported before uploads were recorded. Used by the server; tested.
+import { TRAINING_NEED_CATEGORIES, type TdpUpload, type TrainingNeedCategory } from "./types";
 import { normalizeTitle } from "./tdpRules";
 import { cleanText } from "./inputText";
 
@@ -12,9 +13,10 @@ export interface TdpNeedFields {
   title: string;
 }
 
-/** A need of the year's plan, as a replacement sees it. */
+/** A need of the year's plan, as a replacement sees it. `addedAfterTdp` marks one HR added after the TDP (12ad). */
 export interface TdpPlanNeed extends TdpNeedFields {
   carriedFromFiscalYear?: string;
+  addedAfterTdp?: unknown;
 }
 
 export const tdpNeedKey = (need: TdpNeedFields) => `${need.employeeId}|${need.category}|${normalizeTitle(need.title)}`;
@@ -95,6 +97,12 @@ export interface TdpReplacePlan<N> {
   kept: { need: N; use: TdpNeedUse }[];
   /** Carried from an earlier year by the rollover: not part of any TDP, so always kept. */
   carried: N[];
+  /** Added by HR after the TDP (12ad) and not in the amended TDP: always kept, as carried ones are (the user's
+   * decision of 2026-11-08). */
+  addedKept: N[];
+  /** Added by HR after the TDP and listed by the amended TDP for the same person, in place (in `unchanged`) or under
+   * another column (in `moved`): the TDP's from then on, so the caller clears their mark. */
+  adopted: N[];
 }
 
 /**
@@ -102,13 +110,15 @@ export interface TdpReplacePlan<N> {
  * already mapped to an employee (the same ids `current` uses). `inUse` says whether a need the amended TDP leaves out is
  * still in use, and why. A need listed twice in the file is counted once, and one already carried isn't added again.
  * A need the amended TDP lists for the same person under another column is moved there, whether in use or not.
+ * One HR added after the TDP is compared like the TDP's own (kept in place, or moved), and adopted when listed; only
+ * where the TDP's own would be removed is it kept instead.
  */
 export function planTdpReplace<N extends TdpPlanNeed>(
   current: N[],
   incoming: TdpNeedFields[],
   inUse: (need: N) => TdpNeedUse | null
 ): TdpReplacePlan<N> {
-  const plan: TdpReplacePlan<N> = { unchanged: [], added: [], moved: [], removed: [], kept: [], carried: [] };
+  const plan: TdpReplacePlan<N> = { unchanged: [], added: [], moved: [], removed: [], kept: [], carried: [], addedKept: [], adopted: [] };
   const inPlan = new Set<string>();
   for (const need of current) {
     if (need.carriedFromFiscalYear) plan.carried.push(need);
@@ -129,21 +139,31 @@ export function planTdpReplace<N extends TdpPlanNeed>(
     if (list) list.push(need);
     else addedFor.set(personTitle(need), [need]);
   }
-  // The trainings each person still has after it, in some column: the amended TDP's, and those carried in. A copy left
-  // out of its own column isn't kept for a seat while its person keeps the training elsewhere: they stay identified for
-  // it (12z) without it, and keeping it would list the training twice. One accomplished still stays (Monitoring's record).
-  const keepsTraining = new Set<string>([...incoming.map(personTitle), ...current.filter(n => n.carriedFromFiscalYear).map(personTitle)]);
+  // The trainings each person still has after it, in some column: the amended TDP's, those carried in, and those HR
+  // added (all stay). A copy left out of its own column isn't kept for a seat while its person keeps the training
+  // elsewhere: they stay identified for it (12z) without it, and keeping it would list the training twice. One
+  // accomplished still stays (Monitoring's record).
+  const keepsTraining = new Set<string>([
+    ...incoming.map(personTitle),
+    ...current.filter(n => n.carriedFromFiscalYear || n.addedAfterTdp).map(personTitle)
+  ]);
   const movedTo = new Set<TdpNeedFields>();
   for (const need of current) {
     if (need.carriedFromFiscalYear) continue;
     if (wanted.has(tdpNeedKey(need))) {
       plan.unchanged.push(need);
+      if (need.addedAfterTdp) plan.adopted.push(need);
       continue;
     }
     const target = addedFor.get(personTitle(need))?.find(n => !movedTo.has(n));
     if (target) {
       movedTo.add(target);
       plan.moved.push({ need, category: target.category });
+      if (need.addedAfterTdp) plan.adopted.push(need);
+      continue;
+    }
+    if (need.addedAfterTdp) {
+      plan.addedKept.push(need);
       continue;
     }
     const use = inUse(need);
@@ -156,6 +176,31 @@ export function planTdpReplace<N extends TdpPlanNeed>(
 
 const text = (v: unknown) => (typeof v === "string" ? v : "");
 const whole = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+const isCategory = (v: unknown): v is TrainingNeedCategory => (TRAINING_NEED_CATEGORIES as readonly unknown[]).includes(v);
+
+/** At most this many trainings on a record (the commit takes at most 5,000 needs), so a damaged list stays bounded. */
+const MAX_RECORDED_TRAININGS = 5000;
+
+/**
+ * The TDP's own trainings for its upload record (12ad): one per title and column, in the sheet's order and its first
+ * spelling (trimmed, as needs are stored), from every row of the sheet: rows assigned to nobody (a vacant post, someone
+ * not on file) and rows the import skipped as already in the plan included, since a post left vacant is often the one a
+ * new hire fills.
+ */
+export function tdpTrainings(rows: { title: unknown; category: unknown }[]): { title: string; category: TrainingNeedCategory }[] {
+  const seen = new Set<string>();
+  const out: { title: string; category: TrainingNeedCategory }[] = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row.title !== "string" || !isCategory(row.category)) continue;
+    const title = row.title.trim();
+    const key = normalizeTitle(title);
+    if (!key || title.length > 300 || seen.has(`${row.category}|${key}`)) continue;
+    seen.add(`${row.category}|${key}`);
+    out.push({ title, category: row.category });
+    if (out.length >= MAX_RECORDED_TRAININGS) break;
+  }
+  return out;
+}
 
 /**
  * The TDP in force for a year: the latest record for it, uploads being kept in the order they came. Returned as a
@@ -180,28 +225,41 @@ export function currentTdp(records: unknown, fiscalYear: string): TdpUpload | nu
       uploadedByName: text(r.uploadedByName),
       needs: whole(r.needs),
       employees: whole(r.employees),
-      ...(c ? { changes: { added: whole(c.added), removed: whole(c.removed), kept: whole(c.kept), moved: whole(c.moved) } } : {}),
-      ...(Array.isArray(r.keptNeedIds) ? { keptNeedIds: r.keptNeedIds.filter((id: unknown): id is string => typeof id === "string") } : {})
+      ...(c ? {
+        changes: {
+          added: whole(c.added), removed: whole(c.removed), kept: whole(c.kept), moved: whole(c.moved),
+          ...(whole(c.addedKept) ? { addedKept: whole(c.addedKept) } : {}),
+          ...(whole(c.adopted) ? { adopted: whole(c.adopted) } : {})
+        }
+      } : {}),
+      ...(Array.isArray(r.keptNeedIds) ? { keptNeedIds: r.keptNeedIds.filter((id: unknown): id is string => typeof id === "string") } : {}),
+      ...(Array.isArray(r.trainings) ? { trainings: tdpTrainings(r.trainings) } : {})
     };
   }
   return null;
 }
 
-/** How many of a year's needs are its TDP's, and for how many employees; and how many were carried in. */
+/** How many of a year's needs are its TDP's, and for how many employees; and how many were carried in, or added by HR
+ * after the TDP (12ad; neither is part of it). */
 export function tdpCounts(needs: Array<Partial<TdpPlanNeed> & { fiscalYear?: string }> | null | undefined, fiscalYear: string) {
   const people = new Set<string>();
   let tdp = 0;
   let carried = 0;
+  let added = 0;
   for (const need of Array.isArray(needs) ? needs : []) {
     if (!need || need.fiscalYear !== fiscalYear) continue;
     if (need.carriedFromFiscalYear) {
       carried++;
       continue;
     }
+    if (need.addedAfterTdp) {
+      added++;
+      continue;
+    }
     tdp++;
     if (typeof need.employeeId === "string") people.add(need.employeeId);
   }
-  return { needs: tdp, employees: people.size, carried };
+  return { needs: tdp, employees: people.size, carried, added };
 }
 
 // The import's audit entry, as server.ts writes it:
@@ -232,7 +290,8 @@ export function recordsBeforeUploads(input: {
   const needs = (Array.isArray(input.needs) ? input.needs : []).filter((n): n is TdpPlanNeed & { fiscalYear: string } =>
     !!n && typeof n === "object" && typeof (n as any).fiscalYear === "string");
   const recorded = new Set((Array.isArray(input.records) ? input.records : []).filter(Boolean).map((r: any) => r.fiscalYear));
-  const years = [...new Set(needs.filter(n => !n.carriedFromFiscalYear).map(n => n.fiscalYear))].filter(fy => !recorded.has(fy));
+  // (Needs HR added after the TDP aren't an upload either.)
+  const years = [...new Set(needs.filter(n => !n.carriedFromFiscalYear && !n.addedAfterTdp).map(n => n.fiscalYear))].filter(fy => !recorded.has(fy));
   // Every start reads this, and the audit log is never trimmed: nothing to do, nothing read.
   if (years.length === 0) return [];
   // The entries the import wrote are short. A long one (a raw sheet name from before the names were cleaned) is passed
@@ -264,4 +323,33 @@ export function recordsBeforeUploads(input: {
       employees: counts.employees
     };
   });
+}
+
+/** The seminars a change brings into the TDP (12ad): one of the needs they cover is in the plan after it, none before.
+ * The other side of `seminarsLeavingTdp`. One held with its own justification (12z Part C) is named too, since it no
+ * longer needs it. */
+export function seminarsEnteringTdp(seminars: TdpSeminar[], before: Set<string>, after: Set<string>): { id: string; title: string }[] {
+  return (Array.isArray(seminars) ? seminars : [])
+    .filter(s => s && typeof s === "object" && !s.archivedAt)
+    .filter(s => {
+      const titles = (Array.isArray(s.fulfillsNeedTitles) ? s.fulfillsNeedTitles : []).map(normalizeTitle).filter(Boolean);
+      return titles.some(t => after.has(t)) && !titles.some(t => before.has(t));
+    })
+    .map(s => ({ id: String(s.id), title: typeof s.title === "string" ? s.title : "" }));
+}
+
+export type TdpTraining = { title: string; category: TrainingNeedCategory };
+
+/** What a new upload record changes in the trainings "Add Training Need" offers (12ad): those it lists that the record
+ * before it didn't, and those it no longer lists, each by column (a training moved to another column is offered under
+ * the new one and withdrawn from the old). `null` when the record before kept no list (uploaded before lists were
+ * kept), so there is nothing to compare it with. */
+export function trainingListChanges(before: unknown, after: unknown): { offered: TdpTraining[]; withdrawn: TdpTraining[] } | null {
+  const prior = tdpTrainings(before as { title: unknown; category: unknown }[]);
+  if (prior.length === 0) return null;
+  const next = tdpTrainings(after as { title: unknown; category: unknown }[]);
+  const key = (t: TdpTraining) => `${t.category}|${normalizeTitle(t.title)}`;
+  const priorKeys = new Set(prior.map(key));
+  const nextKeys = new Set(next.map(key));
+  return { offered: next.filter(t => !priorKeys.has(key(t))), withdrawn: prior.filter(t => !nextKeys.has(key(t))) };
 }

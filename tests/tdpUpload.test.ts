@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TdpUpload } from "../src/types";
-import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsLeavingTdp, tdpCounts, tdpNeedKey, type TdpPlanNeed } from "../src/tdpUpload";
+import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsEnteringTdp, seminarsLeavingTdp, tdpCounts, tdpNeedKey, tdpTrainings, trainingListChanges, type TdpPlanNeed } from "../src/tdpUpload";
 
 const need = (employeeId: string, title: string, extra: Partial<TdpPlanNeed> = {}): TdpPlanNeed & { id: string } =>
   ({ id: `${employeeId}-${title}`, employeeId, category: "Function", title, ...extra });
@@ -134,8 +134,53 @@ test("a year's counts leave carried needs out of the TDP", () => {
     { ...need("e1", "A"), fiscalYear: "2027" }, { ...need("e1", "B"), fiscalYear: "2027" }, { ...need("e2", "A"), fiscalYear: "2027" },
     { ...need("e3", "C", { carriedFromFiscalYear: "2026" }), fiscalYear: "2027" }, { ...need("e4", "D"), fiscalYear: "2026" }
   ];
-  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 3, employees: 2, carried: 1 });
-  assert.deepEqual(tdpCounts(undefined, "2027"), { needs: 0, employees: 0, carried: 0 });
+  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 3, employees: 2, carried: 1, added: 0 });
+  assert.deepEqual(tdpCounts(undefined, "2027"), { needs: 0, employees: 0, carried: 0, added: 0 });
+});
+
+// Needs HR added after the TDP ("Add Training Need", 12ad).
+const addedMark = { basis: "Hired after the TDP", addedBy: { id: "u1", name: "HR", role: "HR Officer" }, addedAt: "2026-11-08T00:00:00.000Z" };
+
+test("an added need the amended TDP leaves out is always kept, without asking whether it is in use", () => {
+  const current = [need("e1", "Records", { addedAfterTdp: addedMark }), need("e1", "Ethics")];
+  let asked = 0;
+  const plan = planTdpReplace(current, [], () => { asked++; return null; });
+  assert.deepEqual([plan.addedKept.map(n => n.id), plan.removed.map(n => n.id), plan.adopted], [["e1-Records"], ["e1-Ethics"], []]);
+  assert.equal(asked, 1, "only the TDP's own need is checked for use");
+});
+
+test("an added need the amended TDP lists for its person is adopted: in place, or moved to the TDP's column", () => {
+  const inPlace = planTdpReplace([need("e1", "Records", { addedAfterTdp: addedMark })], [need("e1", "records")], () => null);
+  assert.deepEqual([inPlace.unchanged.map(n => n.id), inPlace.adopted.map(n => n.id), inPlace.added, inPlace.addedKept], [["e1-Records"], ["e1-Records"], [], []]);
+  const moved = planTdpReplace([need("e1", "Records", { addedAfterTdp: addedMark })], [need("e1", "Records", { category: "Career Advancement" })], () => null);
+  assert.deepEqual([moved.moved.map(m => [m.need.id, m.category]), moved.adopted.map(n => n.id), moved.added, moved.addedKept],
+    [[["e1-Records", "Career Advancement"]], ["e1-Records"], [], []], "moved, not added beside it (its id, mark and remarks stay)");
+});
+
+test("an added need keeps its person's training, so a left-out copy in another column isn't kept for a seat", () => {
+  const current = [need("e1", "X"), need("e1", "X", { category: "Additional Function", addedAfterTdp: addedMark, id: "e1-X-added" } as never)];
+  const plan = planTdpReplace(current, [], () => ({ reason: "seminar", detail: "S" }));
+  assert.deepEqual([plan.removed.map(n => n.id), plan.addedKept.map(n => n.id), plan.kept], [["e1-X"], ["e1-X-added"], []]);
+});
+
+test("added needs aren't the TDP's: counted apart, and no year gets an upload record from them alone", () => {
+  const needs = [{ ...need("e1", "A"), fiscalYear: "2027" }, { ...need("e2", "B", { addedAfterTdp: addedMark }), fiscalYear: "2027" }];
+  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 1, employees: 1, carried: 0, added: 1 });
+  const onlyAdded = [{ ...need("e2", "B", { addedAfterTdp: addedMark }), fiscalYear: "2029" }];
+  assert.deepEqual(recordsBeforeUploads({ needs: onlyAdded, records: [], auditLogs: [], fullNameOf: () => "" }), []);
+});
+
+test("the record keeps the TDP's trainings once per title and column, in the sheet's spelling, and a damaged list comes back clean", () => {
+  assert.deepEqual(tdpTrainings([
+    { title: " Records Management ", category: "Function" }, { title: "records  management", category: "Function" },
+    { title: "Records Management", category: "Career Advancement" }, { title: { x: 1 }, category: "Function" },
+    { title: "No Column", category: "Elsewhere" }, { title: "   ", category: "Function" }
+  ]), [{ title: "Records Management", category: "Function" }, { title: "Records Management", category: "Career Advancement" }]);
+  const r = currentTdp([{ fiscalYear: "2027", trainings: [{ title: "A", category: "Function" }, { title: 5, category: "Function" }, "x"] }], "2027");
+  assert.deepEqual(r?.trainings, [{ title: "A", category: "Function" }]);
+  assert.equal("trainings" in (currentTdp([{ fiscalYear: "2027" }], "2027") ?? {}), false, "a record from before has none");
+  assert.deepEqual(currentTdp([{ fiscalYear: "2027", changes: { added: 1, addedKept: 2, adopted: 3 } }], "2027")?.changes,
+    { added: 1, removed: 0, kept: 0, moved: 0, addedKept: 2, adopted: 3 });
 });
 
 const importEntry = (timestamp: string, fiscalYear: string, file: string, username = "hr") => ({
@@ -187,4 +232,34 @@ test("an old entry's names are cleaned, and one too long to be the import's own 
 test("damaged data can't stop the server loading", () => {
   assert.deepEqual(recordsBeforeUploads({ needs: "x", records: { a: 1 }, auditLogs: 5, fullNameOf: () => "" }), []);
   assert.deepEqual(recordsBeforeUploads({ needs: [null, 3, { fiscalYear: 2027 }], records: null, auditLogs: [], fullNameOf: () => "" }), []);
+});
+
+test("an addition names the seminars it brings into the TDP (12ad)", () => {
+  const seminars = [
+    { id: "s1", title: "Records Seminar", fulfillsNeedTitles: ["Records Management"] },
+    { id: "s2", title: "Already in", fulfillsNeedTitles: ["Leadership", "Records Management"] },
+    { id: "s3", title: "Archived", fulfillsNeedTitles: ["Records Management"], archivedAt: "2026-11-01" },
+    { id: "s4", title: "Held outside, justified", fulfillsNeedTitles: ["records management"], tdpException: { kind: "Other" } },
+    { id: "s5", title: "Unrelated", fulfillsNeedTitles: ["Other"] }
+  ];
+  const before = new Set(["leadership"]);
+  const after = new Set(["leadership", "records management"]);
+  assert.deepEqual(seminarsEnteringTdp(seminars, before, after).map(s => s.id), ["s1", "s4"]);
+  assert.deepEqual(seminarsEnteringTdp(seminars, after, after), []);
+  assert.deepEqual(seminarsEnteringTdp(null as never, before, after), []);
+});
+
+test("a new record says which trainings it offers and withdraws, by column (12ad)", () => {
+  const before = [{ title: "Records Management", category: "Function" }, { title: "Leadership", category: "Career Advancement" }];
+  const after = [
+    { title: "records management", category: "Function" },
+    { title: "Leadership", category: "Function" },
+    { title: "Ethics", category: "Additional Function" }
+  ];
+  const change = trainingListChanges(before, after)!;
+  assert.deepEqual(change.offered.map(t => [t.category, t.title]), [["Function", "Leadership"], ["Additional Function", "Ethics"]]);
+  assert.deepEqual(change.withdrawn.map(t => [t.category, t.title]), [["Career Advancement", "Leadership"]]);
+  assert.equal(trainingListChanges(undefined, after), null, "a record from before lists were kept: nothing to compare");
+  assert.equal(trainingListChanges([], after), null);
+  assert.deepEqual(trainingListChanges(before, before), { offered: [], withdrawn: [] });
 });

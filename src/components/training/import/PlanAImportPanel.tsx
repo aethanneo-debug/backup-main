@@ -27,10 +27,16 @@ interface Props {
 
 type Stage = "idle" | "reading" | "previewing" | "committing";
 
-/** "2 added, 3 removed, 0 kept because still in use, 461 unchanged." (and how many moved to another column, if any) */
-const countsText = (s: Summary) =>
-  `${s.added} added, ${(s.moved ?? []).length > 0 ? `${(s.moved ?? []).length} moved to another column, ` : ""}${(s.removed ?? []).length} removed, ` +
-  `${(s.kept ?? []).length} kept because still in use, ${s.unchanged} unchanged.`;
+/** "2 added, 3 removed, 0 kept because still in use, 461 unchanged." (and how many moved to another column, and what
+ * happens to needs HR added after the TDP, if any: 12ad) */
+const countsText = (s: Summary) => {
+  const addedKept = (s.addedKept ?? []).length;
+  const adopted = (s.adopted ?? []).length;
+  return `${s.added} added, ${(s.moved ?? []).length > 0 ? `${(s.moved ?? []).length} moved to another column, ` : ""}${(s.removed ?? []).length} removed, ` +
+    `${(s.kept ?? []).length} kept because still in use, ${s.unchanged} unchanged` +
+    `${addedKept > 0 ? `; of those added after the TDP, ${addedKept} kept` : ""}` +
+    `${adopted > 0 ? `${addedKept > 0 ? " and" : "; of those added after the TDP,"} ${adopted} now in the amended TDP` : ""}.`;
+};
 
 const REPLACE_STEPS = ["Upload the amended TDP", "Map its rows", "Check what changes", "Replace"];
 

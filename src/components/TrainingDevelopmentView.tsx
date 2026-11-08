@@ -1140,10 +1140,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
               A training in the TDP: <strong className="font-semibold text-slate-700">Add a seminar from the plan</strong>, below.
               One the TDP doesn't list: <strong className="font-semibold text-slate-700">Add Training Program</strong> (Save asks why it is held outside the TDP).
             </p>
-            {/* A person the TDP doesn't list (the user's report, 2026-11-03: a new hire after the upload) needs no new TDP. */}
+            {/* A person the TDP doesn't list (the user's report, 2026-11-03: a new hire after the upload) needs no new TDP:
+                one of its trainings is added to their plan (12ad), or they are seated once with a justification (12z). */}
             <p data-tdp="seat-help" className="ml-auto mt-0.5 max-w-xl text-right text-[11px] leading-snug text-slate-500">
-              Someone the TDP doesn't list, such as an employee hired after it was approved: in the seminar's participant picker, choose{" "}
-              <strong className="font-semibold text-slate-700">All employees</strong>, tick them and record why they are seated.
+              Someone the TDP doesn't list, such as a new hire: plan their training with{" "}
+              <strong className="font-semibold text-slate-700">Add Training Need</strong> on Training Needs. To seat them just once, choose{" "}
+              <strong className="font-semibold text-slate-700">All employees</strong> in the participant picker and record why.
             </p>
           </>
         )}
@@ -1178,7 +1180,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
 
       {activeTab === "plan-a" && (
         <>
-          <TrainingNeedsPlanA />
+          <TrainingNeedsPlanA canPlan={canPlan} />
           <div className="flex justify-end">
             <button onClick={() => setActiveTab("programs")} className="text-xs font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1.5">
               Next: create a seminar for these needs <ChevronRight size={14} />
