@@ -52,6 +52,10 @@ export default function ParticipantOrderKey({ fyText, anyTarget }: { fyText: str
             <B>What you see at first:</B> those with no training yet in {fyText}, and anyone already trained whose need for
             this training is mandated.
           </p>
+          <p data-order-key="outside">
+            <Sample tone={TONE.outsideTdp}>Planned outside the TDP</Sample>: their own Plan A lists this training outside the
+            TDP. They are listed with the Plan A listers, but the TDP doesn&rsquo;t identify them, so the order doesn&rsquo;t change.
+          </p>
           <p>
             <B>Already trained this FY</B> opens the rest of those already trained. They aren&rsquo;t the priority, but
             they can still be ticked.

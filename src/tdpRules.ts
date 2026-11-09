@@ -14,15 +14,19 @@ export function normalizeTitle(title: unknown): string {
   return (typeof title === "string" ? title : "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-export interface NeedRef { employeeId: string; fiscalYear: string; title: string }
+/** A Plan A need as the TDP rules read it. `outsideTdp` marks one planned for a training the TDP doesn't list (12ae). */
+export interface NeedRef { employeeId: string; fiscalYear: string; title: string; outsideTdp?: unknown }
 export interface SeminarNeeds { fiscalYear?: string; fulfillsNeedTitles?: string[] }
 
 /** The employee's own Plan A entries the seminar covers: its fiscal year, a title it covers. `forms`
- * are the ids a need may be stored under (the internal id and the staff code). */
-export function coveredNeeds<N extends NeedRef>(needs: N[], forms: string[], seminar: SeminarNeeds): N[] {
+ * are the ids a need may be stored under (the internal id and the staff code). A need planned outside
+ * the TDP (12ae) never counts: it doesn't make the TDP identify its person, so it is left out here, for
+ * every caller, unless `outside` asks for those alone (the picker's "Planned outside the TDP" badge). */
+export function coveredNeeds<N extends NeedRef>(needs: N[], forms: string[], seminar: SeminarNeeds, opts: { outside?: boolean } = {}): N[] {
   const covered = new Set((seminar.fulfillsNeedTitles ?? []).map(normalizeTitle).filter(Boolean));
   if (covered.size === 0) return [];
-  return (needs ?? []).filter(n => !!n && forms.includes(n.employeeId) && n.fiscalYear === seminar.fiscalYear
+  const outside = !!opts.outside;
+  return (needs ?? []).filter(n => !!n && !!n.outsideTdp === outside && forms.includes(n.employeeId) && n.fiscalYear === seminar.fiscalYear
     && covered.has(normalizeTitle(n.title)));
 }
 
@@ -37,10 +41,11 @@ export function tdpStanding(e: { identified: boolean; tdpException?: unknown; un
 }
 
 /** Whether a seminar is in the TDP (Part C): one of the titles it covers is a need in its fiscal year's
- * Plan A, anyone's. A title typed in that no plan lists doesn't count. */
-export function seminarCoversPlan(needs: { fiscalYear: string; title: string }[], seminar: SeminarNeeds): boolean {
+ * Plan A, anyone's. A title typed in that no plan lists doesn't count, nor a need planned outside the
+ * TDP (12ae): a seminar for it is held with its own justification. */
+export function seminarCoversPlan(needs: { fiscalYear: string; title: string; outsideTdp?: unknown }[], seminar: SeminarNeeds): boolean {
   const covered = new Set((seminar.fulfillsNeedTitles ?? []).map(normalizeTitle).filter(Boolean));
-  return covered.size > 0 && (needs ?? []).some(n => !!n && n.fiscalYear === seminar.fiscalYear && covered.has(normalizeTitle(n.title)));
+  return covered.size > 0 && (needs ?? []).some(n => !!n && !n.outsideTdp && n.fiscalYear === seminar.fiscalYear && covered.has(normalizeTitle(n.title)));
 }
 
 /** The day the seminar rule took effect (Manila): a seminar created before it is "outside the TDP

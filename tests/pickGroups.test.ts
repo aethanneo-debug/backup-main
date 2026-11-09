@@ -1,7 +1,7 @@
 // The participant picker's groups (the instructor's review, R10). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { onScreenToChoose, pickGroups } from "../src/components/training/pickGroups";
+import { onScreenToChoose, pickGroups, plannedOutside, plansThis, seatsWithoutJustification } from "../src/components/training/pickGroups";
 import type { TrainingCandidate } from "../src/types";
 
 const candidate = (id: string, over: Partial<TrainingCandidate> = {}) => ({
@@ -96,6 +96,17 @@ test("someone selected who isn't among the candidates has a group of their own; 
   assert.equal(listedOnly.everyone, 2);
   const failed = view([], { unlisted: ["emp-x"], failed: true });
   assert.equal(failed.groups.find(g => g.key === "unlisted")!.label, "Selected");
+});
+
+test("a training planned outside the TDP (12ae): its planners are Plan A listers on screen, never identified by the TDP", () => {
+  const outside = candidate("o", { needsThis: false, outsideNeeds: ["A new law"] });
+  const tdp = candidate("t");
+  const nobody = candidate("n", { needsThis: false });
+  assert.deepEqual([plannedOutside(outside), plannedOutside(tdp), plannedOutside(candidate("e", { outsideNeeds: [] }))], [true, false, false]);
+  assert.deepEqual([plansThis(outside), plansThis(tdp), plansThis(nobody)], [true, true, false]);
+  // Seated with no justification of their own: the TDP's listers always; outside planners only under the seminar's own.
+  assert.deepEqual([seatsWithoutJustification(tdp, false), seatsWithoutJustification(outside, false), seatsWithoutJustification(outside, true)], [true, false, true]);
+  assert.equal(seatsWithoutJustification(nobody, true), false, "the seminar's justification covers them, but they planned nothing");
 });
 
 test("who can be chosen from the screen: no training yet, or a mandated need, or anyone eligible with the list open; never someone already sent", () => {

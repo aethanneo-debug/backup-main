@@ -15,7 +15,9 @@ import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import AttendanceModal from "./training/AttendanceModal";
 import NeedCoverageModal from "./training/NeedCoverageModal";
-import PlanNeedPicker, { PlanFill, PlanFillNote, eligibleListers } from "./training/PlanNeedPicker";
+import PlanNeedPicker, { PlanFill, PlanFillNote } from "./training/PlanNeedPicker";
+import { eligibleListers, outsideCatalogTitles, outsideNeedJustification } from "./training/planFill";
+import { TONE } from "./training/candidateBadges";
 import TrainingNeedsPlanA from "./training/TrainingNeedsPlanA";
 import TrainingMonitoringPlanD from "./training/TrainingMonitoringPlanD";
 import TrainingEvaluationsDesk from "./training/evaluation/TrainingEvaluationsDesk";
@@ -70,6 +72,20 @@ const sameIds = (a?: string[], b?: string[]) => {
   return x.size === y.size && [...x].every(id => y.has(id));
 };
 
+// A Plan A need a seminar covers, as its row shows it: emerald for the TDP's, purple for a training planned only
+// outside the TDP (12ae), which puts no seminar in the TDP (Plan D still checks it off).
+function NeedChip({ title, outside }: { title: string; outside: boolean }) {
+  return (
+    <div
+      data-need-mark={outside ? "outside" : undefined}
+      className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold leading-snug ${outside ? TONE.outsideTdp : "bg-emerald-50 text-emerald-800 border-emerald-200"}`}
+    >
+      {title}
+      {outside && <span className="block text-[9px] font-normal">Outside the TDP</span>}
+    </div>
+  );
+}
+
 export default function TrainingDevelopmentView({ user, triggerRefresh, focus, onFocusHandled }: {
   user: any;
   triggerRefresh: () => void;
@@ -93,6 +109,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   // The year's TDP as "Add a seminar from the plan" loaded it (R9: seminars start from it): null when none is
   // uploaded yet, undefined while it is loading or couldn't be.
   const [planTdp, setPlanTdp] = useState<TdpUpload | null | undefined>(undefined);
+  // The active year's trainings planned only outside the TDP (12ae; no TDP need has the title), as that list loaded
+  // them, normalised: a seminar covering only these is held outside the TDP, so its rows mark them.
+  const [planOutside, setPlanOutside] = useState<Set<string>>(() => new Set());
 
   // A notification opened this screen: a seminar is shown in Programs & Budget (scrolled to and
   // outlined), anything else opens its step.
@@ -360,7 +379,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
   };
 
   // "Add a seminar from the plan" (PlanNeedPicker): a draft row named after the training and
-  // linked to it, seated as fillFromPlan says.
+  // linked to it, seated as fillFromPlan says. A training planned only outside the TDP (12ae) is
+  // kept on the row as such (`outsideNeedTitles`, screen only: the server reads named fields), for
+  // its mark and the "Save asks why" line.
   const handleAddFromPlan = (item: TrainingNeedCatalogItem) => {
     const id = newDraftId();
     setNewRows(prev => [...prev, {
@@ -368,11 +389,22 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       title: item.title,
       autoTitle: item.title,
       fulfillsNeedTitles: [item.title],
+      outsideNeedTitles: item.outside ? [item.title] : [],
       planFill: "loading" as PlanFill
     }]);
     focusRowOnRender.current = id;
     fillFromPlan(id, [item.title], item.title);
   };
+
+  // Whether a title a row covers is a training planned only outside the TDP (12ae): as the row was given it (from the
+  // plan, or "Plan needs covered"), else as the active year's catalog lists it.
+  const isOutsideTitle = (row: { fiscalYear?: string; outsideNeedTitles?: string[] }, title: string) => {
+    const key = normalizeTitle(title);
+    return (row.outsideNeedTitles ?? []).some(t => normalizeTitle(t) === key) || (row.fiscalYear === fyLabel && planOutside.has(key));
+  };
+  // A row covering no need the TDP lists: none at all, or only trainings planned outside it. Held outside the TDP.
+  const coversNoTdpNeed = (row: { fiscalYear?: string; outsideNeedTitles?: string[]; fulfillsNeedTitles?: string[] }) =>
+    (row.fulfillsNeedTitles ?? []).every(t => isOutsideTitle(row, t));
 
   // One save per row at a time: a second click while one is in flight is ignored (a double-click on a new
   // row created two seminars, 12x, and would now ask why each is held).
@@ -457,10 +489,15 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         const code = apiErrorCode(err);
         if (code === "NOT_IN_TDP" && !body.seminarTdpException) {
           // Filled in from before: one given for this row earlier, or the one on record, which is asked
-          // again when the seminar was renamed (a justification is for the training it names).
+          // again when the seminar was renamed (a justification is for the training it names). With
+          // neither, a training planned outside the TDP that the row covers (12ae) starts it: its need's
+          // justification, from the year's catalog (none, or a failed read, opens the form empty).
           const renamedFrom = saved?.tdpException && normalizeTitle(saved.title) !== normalizeTitle(row.title) ? String(saved.title || "").trim() : "";
-          const why = await askSeminarWhy(row.title, row.fiscalYear, row.seminarTdpException ?? saved?.tdpException,
-            renamedFrom ? `It was renamed from "${renamedFrom}". Its justification was for that title: confirm it, or change it, for this one.` : undefined);
+          const onRecord = row.seminarTdpException ?? saved?.tdpException;
+          const fromNeed = onRecord ? null : await outsideNeedJustification(row.fiscalYear, row.fulfillsNeedTitles || []);
+          const why = await askSeminarWhy(row.title, row.fiscalYear, onRecord ?? fromNeed ?? undefined,
+            renamedFrom ? `It was renamed from "${renamedFrom}". Its justification was for that title: confirm it, or change it, for this one.`
+              : fromNeed ? "Filled in from the training need added outside the TDP: confirm it, or change it." : undefined);
           if (!why) return;
           body = { ...body, seminarTdpException: why };
           // Kept with the draft row, so saving it again (after a Cancel below) doesn't ask twice.
@@ -655,9 +692,11 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           const id = staffIdOf(part.employeeId);
           return [id, { tdp: part.tdp, tdpException: part.tdpException, fullName: employees.find(e => e.id === id)?.fullName }];
         })),
-      // A row covering no need is held outside the TDP with its own justification, which covers everyone
-      // on it (Part C): Save asks for it when the seminar is new or was in the TDP, or it has one.
-      seminarCovers: (row.fulfillsNeedTitles || []).length === 0 && (isNew || !!row.seminarTdpException
+      // A row covering no need the TDP lists (none at all, or only trainings planned outside it, 12ae) is held
+      // outside the TDP with its own justification, which covers everyone on it (Part C): Save asks for it when
+      // the seminar is new or was in the TDP, or one is given or on record. The picker's guess until the server
+      // answers (`seminarCovers` on the recommendations), which then decides.
+      seminarCovers: coversNoTdpNeed(row) && (isNew || !!row.seminarTdpException
         || ["inTdp", "justified"].includes(programs.find(x => x.id === rowId)?.tdp ?? ""))
     };
     setParticipantModalData({ program, selectedIds: row.participantIds || [], justifications: row.tdpExceptions || {}, mustJustify });
@@ -678,7 +717,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     });
   };
 
-  const handleSaveCoverage = (titles: string[]) => {
+  // `outsideTitles`: those of them the plan lists only outside the TDP (12ae), kept on the row for its marks.
+  const handleSaveCoverage = (titles: string[], outsideTitles: string[] = []) => {
     if (!coverageModalData) return;
     const { rowId, isNew } = coverageModalData;
 
@@ -691,8 +731,8 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
       return !typed || typed === (r.autoTitle || "");
     };
     const patchRow = (r: any) => titles.length > 0 && canAutofill(r)
-      ? { ...r, fulfillsNeedTitles: titles, title: titles[0], autoTitle: titles[0] }
-      : { ...r, fulfillsNeedTitles: titles };
+      ? { ...r, fulfillsNeedTitles: titles, outsideNeedTitles: outsideTitles, title: titles[0], autoTitle: titles[0] }
+      : { ...r, fulfillsNeedTitles: titles, outsideNeedTitles: outsideTitles };
 
     if (isNew) {
       const before = newRows.find(r => r.id === rowId);
@@ -849,9 +889,17 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
             <div className="space-y-1">
               <input id={titleInputId(p.id)} type="text" value={row.title} onChange={e => updateRow(p.id, "title", e.target.value, isNew)} className={CELL_INPUT} placeholder="Title" aria-label="Training title" />
               {(row.fulfillsNeedTitles || []).length > 0 ? (
-                (row.fulfillsNeedTitles || []).map((t: string) => (
-                  <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
-                ))
+                <>
+                  {(row.fulfillsNeedTitles || []).map((t: string) => <NeedChip key={t} title={t} outside={isOutsideTitle(row, t)} />)}
+                  {/* Only trainings planned outside the TDP (12ae): held outside it, as a row covering nothing is. */}
+                  {coversNoTdpNeed(row) && (holdsWhy || saveAsksWhy) && (
+                    <p data-tdp="row-outside-note" className="text-[9px] leading-snug text-purple-800">
+                      {holdsWhy
+                        ? "Held outside the TDP: its justification covers everyone on it."
+                        : "Save asks why it is held outside the TDP, filled in from the training need's justification."}
+                    </p>
+                  )}
+                </>
               ) : (
                 <div className="px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200 text-[10px] font-semibold leading-snug">
                   No plan need linked yet
@@ -869,13 +917,12 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
           ) : (
             <div className="space-y-1">
               <div className="font-bold text-slate-800">{p.title}</div>
-              {(p.fulfillsNeedTitles || []).map((t: string) => (
-                <div key={t} className="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-semibold leading-snug">{t}</div>
-              ))}
+              {(p.fulfillsNeedTitles || []).map((t: string) => <NeedChip key={t} title={t} outside={isOutsideTitle(p, t)} />)}
               {/* Outside the TDP (12z Part C): none of its needs is in its year's Plan A, so it can never mark
-                  anything accomplished in Plan D, and its participants lose the "Needs this" ranking. Shown
-                  with its own justification (HR's and the Administrator's to see), or flagged until one is
-                  recorded. (It used to read as grey italic small print, which is how it went unnoticed.) */}
+                  anything accomplished in Plan D (a training planned outside the TDP, 12ae, is still checked off),
+                  and its participants lose the "Needs this" ranking. Shown with its own justification (HR's and the
+                  Administrator's to see), or flagged until one is recorded. (It used to read as grey italic small
+                  print, which is how it went unnoticed.) */}
               {seminarTdpBadgeText(p.tdp, p.tdpException) && (
                 <div className={`rounded border px-1.5 py-1 leading-snug ${p.tdp === "justified" ? "border-slate-300 bg-slate-50" : "border-amber-200 bg-amber-50"}`}>
                   <span className={`block text-[10px] font-semibold ${p.tdp === "justified" ? "text-slate-700" : "text-amber-800"}`}>{seminarTdpBadgeText(p.tdp, p.tdpException)}</span>
@@ -885,7 +932,9 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
                     </span>
                   ) : (
                     <span className="block text-[9px] text-amber-700">
-                      It covers no need in its year&rsquo;s plan, so Plan D can never mark it accomplished. Tick the need it answers, or record why it is held.
+                      {(p.fulfillsNeedTitles || []).some((t: string) => isOutsideTitle(p, t))
+                        ? "It covers no need the TDP lists: a training planned outside it doesn't count, though Plan D still checks it off. Record why it is held."
+                        : <>It covers no need in its year&rsquo;s plan, so Plan D can never mark it accomplished. Tick the need it answers, or record why it is held.</>}
                     </span>
                   )}
                   <button type="button" onClick={() => recordSeminarWhy(p)} className="mt-0.5 rounded text-[10px] font-semibold text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
@@ -1288,6 +1337,7 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
             onPick={handleAddFromPlan}
             onOpenPlan={() => setActiveTab("plan-a")}
             onTdp={setPlanTdp}
+            onCatalog={needs => setPlanOutside(outsideCatalogTitles(needs))}
           />
         )}
         <div className="overflow-x-auto border border-slate-200 rounded-lg">

@@ -227,7 +227,7 @@ export default function ParticipantChecklist({
             <button
               type="button"
               onClick={selectAll}
-              title={`Ticks the first ${bulkCount} employees on screen whose Plan A lists this training. Anyone else is ticked one at a time.`}
+              title={`Ticks the first ${bulkCount} employees on screen whose Plan A lists this training and who need no justification of their own. Anyone else is ticked one at a time.`}
               className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               <Sparkles size={13} aria-hidden="true" />

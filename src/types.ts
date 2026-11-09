@@ -555,8 +555,9 @@ export interface TdpUpload {
   needs: number;
   employees: number;
   /** A replacement: what it changed. `addedKept` and `adopted` count needs HR added after the TDP (12ad): kept though
-   * the amended TDP leaves them out, or now listed by it. */
-  changes?: { added: number; removed: number; kept: number; moved: number; addedKept?: number; adopted?: number };
+   * the amended TDP leaves them out, or now listed by it; `outsideKept` and `outsideAdopted` the same for needs added
+   * for trainings outside the TDP (12ae). */
+  changes?: { added: number; removed: number; kept: number; moved: number; addedKept?: number; adopted?: number; outsideKept?: number; outsideAdopted?: number };
   /** A replacement: the needs it kept though the amended TDP leaves them out (still in use), so Plan A can mark them. */
   keptNeedIds?: string[];
   /** The TDP's own trainings, per column, from every row of the sheet (rows assigned to nobody, and rows skipped as
@@ -570,6 +571,8 @@ export interface TdpReplaceNeed {
   employee: string;        // the employee's full name
   category: TrainingNeedCategory;
   title: string;
+  /** A need for a training outside the TDP (12ae), among those added after it. */
+  outside?: true;
 }
 
 /** What replacing the TDP does to the year's plan (a dry run says it before; the replacement says it after). */
@@ -1213,6 +1216,8 @@ export interface TrainingCandidate {
   /** Those of their matched needs whose title HR marked as mandated, with the law or rule: among the
    * plan's listers, they come first (HSAC RAB 1's step 5). */
   mandatedNeeds?: { title: string; basis: string }[];
+  /** Titles of the seminar their own plan lists outside the TDP (12ae): shown, never counted as the TDP's. */
+  outsideNeeds?: string[];
   /** Their other trainings that count toward the seminar's fiscal year (seminars and
    * HR-recorded trainings), by title. Empty: none yet, so they are offered first. */
   trainingsThisYear: string[];
@@ -1550,8 +1555,18 @@ export interface TrainingNeed {
   // Set when HR added this need after the TDP was uploaded ("Add Training Need", 12ad): one of the TDP's own
   // trainings, under a column where the TDP lists it, for someone it couldn't list. Absent: from the TDP, or carried.
   addedAfterTdp?: TrainingNeedAddition;
+  // Set on a need for a training the uploaded TDP doesn't list (12ae): its justification and who added it. It never
+  // counts as a TDP need (who the TDP identifies, whether a seminar is in it), and is kept when the need is carried.
+  outsideTdp?: OutsideTdpNeed;
   createdAt: string;
   createdBy: string;
+}
+
+// Why a training the uploaded TDP doesn't list is in someone's plan (12ae, the user's request of 2026-11-09): the same
+// justification a seminar outside the TDP gives (12z Part C), and who added it and when.
+export interface OutsideTdpNeed extends SeminarTdpJustificationInput {
+  addedBy: { id: string; name: string; role: UserRole };
+  addedAt: string;         // ISO
 }
 
 // Why HR added a need after the TDP (the user's request of 2026-11-08, known-issues 12ad).
@@ -1618,6 +1633,8 @@ export interface TrainingNeedCatalogItem {
   categories: TrainingNeedCategory[];
   /** The law or rule that makes it mandatory, when HR marked its title (listed first). */
   mandate?: { basis: string };
+  /** A training outside the TDP (12ae): the justification of its first need, to start a seminar's from. */
+  outside?: SeminarTdpJustificationInput;
 }
 
 export interface TrainingPlanOffice {

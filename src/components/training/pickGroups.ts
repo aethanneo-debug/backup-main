@@ -20,6 +20,21 @@ const mandatedHere = (c: TrainingCandidate) => (c.mandatedNeeds ?? []).length > 
 export const onScreenToChoose = (c: TrainingCandidate, showTrained: boolean) =>
   c.eligible && (!trainedThisYear(c) || mandatedHere(c) || showTrained);
 
+/** Their own Plan A lists this seminar's training outside the TDP (12ae): shown with the plan's listers, never counted as
+ * identified by the TDP (the server's `needsThis` stays false, and its order doesn't change). */
+export const plannedOutside = (c: TrainingCandidate) => (c.outsideNeeds ?? []).length > 0;
+
+/** Their own Plan A lists this seminar's training, from the TDP or outside it: the picker's Plan A view, its listers'
+ * count and the representative's list take them (the lead's decision for 12ae), so a training planned outside the TDP
+ * has listers to seat. */
+export const plansThis = (c: TrainingCandidate) => c.needsThis || plannedOutside(c);
+
+/** Seated with no justification of their own, so "Select all recommended" and "Add a seminar from the plan" may seat them:
+ * those the TDP identifies, and, when the seminar's own justification covers everyone on it (`seminarCovers`, 12z Part
+ * C), those who planned it outside the TDP. On a seminar in the TDP those still need their own, one at a time. */
+export const seatsWithoutJustification = (c: TrainingCandidate, seminarCovers: boolean) =>
+  c.needsThis || (seminarCovers && plannedOutside(c));
+
 export const rowMatches = (r: PickRow, terms: string[]) => matchesTerms(terms, `${r.name} ${r.c?.position ?? ""} ${r.c?.division ?? ""}`);
 
 interface Input {

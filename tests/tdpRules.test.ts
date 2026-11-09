@@ -108,6 +108,18 @@ test("Part C: a seminar is in the TDP when one of its titles is a need in its ye
   assert.equal(seminarCoversPlan(needs, { fiscalYear: "2027", fulfillsNeedTitles: ["typed in", "Legal Ethics"] }), true, "one real need is enough");
 });
 
+test("12ae: a need planned outside the TDP identifies nobody and puts no seminar in the TDP, for every caller", () => {
+  const plan = [{ employeeId: "e1", fiscalYear: "2028", title: "Data Privacy", outsideTdp: { kind: "New law or issuance" } }];
+  const seminar = { fiscalYear: "2028", fulfillsNeedTitles: ["Data Privacy"] };
+  assert.deepEqual(coveredNeeds(plan, ["e1"], seminar), [], "its person isn't identified by it");
+  assert.equal(seminarCoversPlan(plan, seminar), false, "a seminar for it is outside the TDP");
+  assert.deepEqual(coveredNeeds(plan, ["e1"], seminar, { outside: true }).map(n => n.title), ["Data Privacy"], "asked for alone, for the picker's badge");
+  const both = [...plan, { employeeId: "e2", fiscalYear: "2028", title: "data privacy" }];
+  assert.equal(seminarCoversPlan(both, seminar), true, "someone's TDP need for the same training still puts it in");
+  assert.deepEqual(coveredNeeds(both, ["e1", "e2"], seminar).map(n => n.employeeId), ["e2"]);
+  assert.deepEqual(coveredNeeds(both, ["e1", "e2"], seminar, { outside: true }).map(n => n.employeeId), ["e1"]);
+});
+
 test("Part B: \"In lieu of\" is read only for a representative, who still needs a reason and who identified them", () => {
   const ok = { reason: "In place of the accountant, on leave", identifiedBy: { name: "Test Chief", position: "Regional Adjudicator" } };
   assert.equal("problem" in readTdpJustification({ ...ok, kind: "In lieu of" }, "2026-10-29"), true, "never chosen on its own");

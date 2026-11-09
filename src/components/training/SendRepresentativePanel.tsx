@@ -4,6 +4,7 @@ import { TrainingCandidate, TrainingProgram, type TdpJustificationInput } from "
 import { apiCall, apiErrorCode, getLocalTodayString } from "../../utils";
 import { addedGaps, datesText, divisionGapQuestion, divisionGaps, gapText, seminarWeekdays } from "../../divisionCoverage";
 import PlanAViewSwitch from "./PlanAViewSwitch";
+import { plannedOutside, plansThis } from "./pickGroups";
 import TdpJustificationForm from "./TdpJustificationForm";
 
 // Sending a representative in lieu of someone enrolled (HSAC RAB 1, 2026-10-28: e.g. the accountant is on
@@ -56,7 +57,8 @@ export default function SendRepresentativePanel({ program, original, rosterIds, 
   // anyone, e.g. in lieu of an accountant on leave); the "In lieu of" reason is recorded either way.
   const coversNeeds = (program.fulfillsNeedTitles ?? []).length > 0;
   const planOnly = coversNeeds && !showAll;
-  const listed = choices.filter(c => c.needsThis);
+  // Their plan lists the training, from the TDP or outside it (12ae): a training planned outside the TDP has listers too.
+  const listed = choices.filter(plansThis);
   const shown = planOnly ? listed : choices;
   const chosenOne = shown.find(c => c.employeeId === chosen);
   const fyText = program.fiscalYear ? `FY ${program.fiscalYear}` : "this fiscal year";
@@ -155,7 +157,8 @@ export default function SendRepresentativePanel({ program, original, rosterIds, 
                 <option value="">Choose an employee…</option>
                 {shown.map(c => (
                   <option key={c.employeeId} value={c.employeeId}>
-                    {c.fullName} — {c.division || "No division"}{!planOnly && c.needsThis ? " · listed in their plan" : ""}
+                    {c.fullName} — {c.division || "No division"}{!planOnly && plansThis(c) ? " · listed in their plan" : ""}
+                    {plannedOutside(c) ? " · planned outside the TDP" : ""}
                     {(c.awayOn ?? []).length > 0 ? ` · at another seminar on ${datesText(c.awayOn!)}` : ""}
                   </option>
                 ))}

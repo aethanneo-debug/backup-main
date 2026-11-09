@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, Loader2, X } from "lucide-react";
 import { TrainingCandidate, type TdpJustification, type TdpJustificationInput, type TdpStanding } from "../../types";
-import { apiCall, getLocalTodayString } from "../../utils";
+import { getLocalTodayString } from "../../utils";
 import { divisionGaps, seminarWeekdays } from "../../divisionCoverage";
 import { tdpBadgeText } from "../../tdpRules";
 import { searchTerms } from "../../tableView";
@@ -10,7 +10,8 @@ import { TrainingHistoryWindow } from "./EmployeeTrainingHistory";
 import ParticipantChecklist, { type PickRow } from "./ParticipantChecklist";
 import PlanAViewSwitch from "./PlanAViewSwitch";
 import { PickerFooter, PickerIntro } from "./PickerParts";
-import { onScreenToChoose, pickGroups } from "./pickGroups";
+import { onScreenToChoose, pickGroups, plannedOutside, plansThis, seatsWithoutJustification } from "./pickGroups";
+import { useRecommendations } from "./useRecommendations";
 
 // The seminar being staffed: a saved program or an unsaved draft row from the TDP table.
 export interface PickerProgram {
@@ -52,14 +53,13 @@ const seatsLeft = (free: number) => (free <= 0 ? "All seats are filled." : `${pl
 const OUTSIDE_TDP = "Not in their TDP: needs a justification";
 
 export default function ParticipantPickerModal({ program, initialSelectedIds, initialJustifications, mustJustify, onConfirm, onClose }: Props) {
-  const [candidates, setCandidates] = useState<TrainingCandidate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds ?? []);
   const [reloadKey, setReloadKey] = useState(0);
-  // The server's answer for the seminar as drafted (Part C): its own justification will cover everyone on
-  // it. Null until it arrives; the row's guess stands in meanwhile.
-  const [serverCovers, setServerCovers] = useState<boolean | null>(null);
+  // Mirrors the server, which treats a blank or invalid max as 1.
+  const max = parseInt(String(program.maxParticipants)) || 1;
+  // The server's ranking, and its answer for the seminar as drafted (Part C: its own justification will cover everyone
+  // on it; null until it arrives, the row's guess standing in meanwhile).
+  const { candidates, loading, error, serverCovers } = useRecommendations(program, max, reloadKey);
   // A seminar that covers Plan A needs lists only those whose plan lists one of them; "All employees" is
   // for the exceptions (someone with no plan entry, or one HR knows needs it anyway).
   const [showAll, setShowAll] = useState(false);
@@ -93,45 +93,11 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   };
   const coversNeeds = (program.fulfillsNeedTitles ?? []).length > 0;
   const planOnly = coversNeeds && !showAll;
-  const inScope = (c: TrainingCandidate) => !planOnly || c.needsThis;
+  // The Plan A view lists those whose plan lists the training, from the TDP or outside it (12ae): a training planned
+  // outside the TDP has its listers too. Who needs a justification is still the TDP's rule (`needsThis`), below.
+  const inScope = (c: TrainingCandidate) => !planOnly || plansThis(c);
 
-  // Mirrors the server, which treats a blank or invalid max as 1.
-  const max = parseInt(String(program.maxParticipants)) || 1;
   const freeSlots = Math.max(0, max - selectedIds.length);
-
-  useEffect(() => {
-    let cancelled = false;
-    const params = new URLSearchParams({
-      title: program.title || "",
-      fiscalYear: program.fiscalYear || "",
-      targetDivision: program.targetDivision || "",
-      targetSpecialization: program.targetSpecialization || "",
-      maxParticipants: String(max),
-      startDate: program.startDate || "",
-      endDate: program.endDate || ""
-    });
-    if (!program.isNew) params.set("programId", program.id);
-    // Repeatable needTitle, so an unsaved draft row ranks by the plan too. A row with no needs sends
-    // one empty needTitle: with none at all, the server would go by the saved seminar's needs.
-    const needTitles = program.fulfillsNeedTitles ?? [];
-    if (needTitles.length === 0) params.append("needTitle", "");
-    for (const title of needTitles) params.append("needTitle", title);
-
-    setLoading(true);
-    setError("");
-    apiCall(`/api/training/recommendations?${params.toString()}`)
-      .then(res => {
-        if (cancelled) return;
-        if (res.status === "success") {
-          setCandidates(res.data?.candidates ?? []);
-          if (typeof res.data?.seminarCovers === "boolean") setServerCovers(res.data.seminarCovers);
-        } else setError(res.message || "Unable to load recommendations.");
-      })
-      .catch(err => { if (!cancelled) setError(err.message || "Unable to load recommendations."); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [program.id, program.isNew, program.title, program.fiscalYear, program.targetDivision, program.targetSpecialization,
-      (program.fulfillsNeedTitles ?? []).join("|"), max, program.startDate, program.endDate, reloadKey]);
 
   const byId = useMemo(() => new Map((candidates ?? []).map(c => [c.employeeId, c])), [candidates]);
 
@@ -153,10 +119,10 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   // or a mandated need for this seminar, and the rest of those already trained once their list is open (R10).
   const available = (candidates ?? []).filter(c => onScreenToChoose(c, showTrained) && !selectedIds.includes(c.employeeId) && inScope(c));
   const recommended = available.slice(0, freeSlots);
-  const listers = (candidates ?? []).filter(c => c.needsThis).length;
+  const listers = (candidates ?? []).filter(plansThis).length;
   // What "All employees" adds: everyone off the plan not selected yet (whichever list is on), and, while
   // the Plan A list is on, how many of them are hidden and how many could be picked.
-  const outsidePlan = (candidates ?? []).filter(c => !c.needsThis && !selectedIds.includes(c.employeeId));
+  const outsidePlan = (candidates ?? []).filter(c => !plansThis(c) && !selectedIds.includes(c.employeeId));
   // (Not those kept on screen after being unticked: they are shown, not hidden.)
   const offPlan = planOnly ? outsidePlan.filter(c => !kept.has(c.employeeId)) : [];
   const hiddenCount = offPlan.length;
@@ -180,12 +146,15 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
   const needsJustification = (id: string) => !bySeminar(id) && outsideTdp(id) && !justifications[id] && !saved(id)?.tdpException
     && (!saved(id) || required.has(id) || saved(id)?.tdp === "identified");
   const pending = selectedIds.filter(needsJustification);
-  // "Select all recommended" ticks only people the TDP identifies, up to the free seats; anyone else is
-  // ticked one at a time.
-  const bulk = available.filter(c => c.needsThis).slice(0, freeSlots);
+  // "Select all recommended" ticks only people seated with no justification of their own, up to the free
+  // seats: those the TDP identifies, and those who planned it outside the TDP when the seminar's own
+  // justification covers them (12ae). Anyone else is ticked one at a time.
+  const bulk = available.filter(c => seatsWithoutJustification(c, bySeminar(c.employeeId))).slice(0, freeSlots);
   // In the "All employees" view the top of the order can include someone off the plan, whom the button
-  // doesn't tick: then it says whom it ticks instead of "all recommended" (the code review, 2026-10-30).
+  // doesn't tick: then it says whom it ticks instead of "all recommended" (the code review, 2026-10-30). On a
+  // seminar in the TDP, the top can include someone who planned it outside the TDP, who needs their own.
   const bulkIsRecommended = bulk.length === recommended.length && bulk.every((c, i) => c.employeeId === recommended[i]?.employeeId);
+  const bulkSkipsOutside = recommended.some(c => plannedOutside(c) && !bulk.includes(c));
 
   const add = (ids: string[]) => {
     setSelectedIds(prev => {
@@ -316,7 +285,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
             through the gap above the toolbar. */}
         <div className="custom-scrollbar flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
           <div className="space-y-4 pt-4 sm:pt-6">
-            <PickerIntro coversNeeds={coversNeeds} seminarCovers={seminarCovers} fyText={fyText} />
+            <PickerIntro coversNeeds={coversNeeds} seminarCovers={seminarCovers} fyText={fyText} outsidePlanners={(candidates ?? []).filter(plannedOutside).length} />
 
             {coversNeeds && !loading && !error && (
               <PlanAViewSwitch
@@ -378,7 +347,7 @@ export default function ParticipantPickerModal({ program, initialSelectedIds, in
                             : "No more eligible employees to recommend."
                         : null}
                     bulkCount={bulk.length}
-                    bulkLabel={bulkIsRecommended ? "Select all recommended" : "Select the top Plan A listers"}
+                    bulkLabel={bulkIsRecommended ? "Select all recommended" : bulkSkipsOutside ? "Select those the TDP identifies" : "Select the top Plan A listers"}
                     onSelectAll={selectAll}
                     onToggle={toggle}
                     onHistory={r => setHistoryFor({ id: r.id, name: r.name })}

@@ -1,12 +1,13 @@
 import { Ref, useId } from "react";
 import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { TdpReplaceNeed, TdpReplaceSummary as Summary } from "../../../types";
-import { count } from "../tdpText";
+import { count, hrKinds, hrNeedsText as hrNeeds } from "../tdpText";
 
 // What replacing the TDP does, as the server's dry run worked it out (nothing is saved by it), and the step that
 // replaces it. Removing a need takes it off Plan A and Monitoring, so the needs it removes and the ones it keeps are
 // named, and the final button stays off while the check is out of date (the mapping changed since). Needs HR added
-// after the TDP (12ad) are never removed: those the amended TDP leaves out stay, those it lists become its own.
+// after the TDP (12ad), or for trainings outside it (12ae, tagged), are never removed: those the amended TDP leaves out
+// stay, those it lists become its own.
 interface Props {
   summary: Summary;
   /** The mapping or sheet changed after this check: it may not be what Replace would do. */
@@ -41,6 +42,21 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
 const kept = (row: Summary["kept"][number]) =>
   row.reason === "seminar" ? `Seated for it on “${row.detail}”` : `Already accomplished: ${row.detail}`;
 
+// HR's own additions come in two kinds: one of the TDP's trainings after it (12ad), or a training outside it (12ae).
+// Said as the list holds them (hrKinds, hrNeeds: tdpText.ts), so a plan with only 12ad's reads as it always has.
+/** A heading's start: "Added after the TDP", "Outside the TDP", or "Added by HR, after the TDP or outside it". */
+function hrHeading(list: TdpReplaceNeed[]): string {
+  const { outside, after } = hrKinds(list);
+  return outside && after ? "Added by HR, after the TDP or outside it" : outside ? "Outside the TDP" : "Added after the TDP";
+}
+/** A tile's label start, shorter. */
+function hrTile(list: TdpReplaceNeed[]): string {
+  const { outside, after } = hrKinds(list);
+  return outside && after ? "Added by HR" : outside ? "Outside TDP" : "Added after TDP";
+}
+/** A heading's start inside a caption: "Needs added after the TDP", "Needs outside the TDP". */
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
 /** The needs named in one list: employee, column, training, and a fourth column when `why` names it (why it stays, or
  * the column it moves from). */
 function NeedList({ caption, rows, why }: { caption: string; rows: (TdpReplaceNeed & { why?: string })[]; why?: string }) {
@@ -61,7 +77,15 @@ function NeedList({ caption, rows, why }: { caption: string; rows: (TdpReplaceNe
             <tr key={`${row.employee}|${row.category}|${row.title}|${i}`} className="align-top">
               <td className="border-b border-slate-100 px-2 py-1.5 font-semibold text-slate-800">{row.employee}</td>
               <td className="whitespace-nowrap border-b border-slate-100 px-2 py-1.5 text-slate-600">{row.category}</td>
-              <td className="border-b border-slate-100 px-2 py-1.5 text-slate-700">{row.title}</td>
+              <td className="border-b border-slate-100 px-2 py-1.5 text-slate-700">
+                {row.title}
+                {/* A training the TDP doesn't list, planned by HR (12ae). */}
+                {row.outside && (
+                  <span data-need-mark="outside" className="ml-1.5 inline-block rounded border border-purple-200 bg-purple-50 px-1 py-px align-middle text-[10px] font-semibold text-purple-800">
+                    outside the TDP
+                  </span>
+                )}
+              </td>
               {why && <td className="border-b border-slate-100 px-2 py-1.5 text-slate-600">{row.why}</td>}
             </tr>
           ))}
@@ -79,8 +103,8 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
   const keptRows = (summary.kept ?? []).map(row => ({ ...row, why: kept(row) }));
   // Seminars that would cover no training left in the plan: they would need their own justification (12z Part C).
   const outside = summary.seminarsOutside ?? [];
-  // Needs HR added after the TDP: every one is kept (not in the amended TDP) or adopted (listed by it, in place or
-  // moved, so also counted there). With none, their tiles would only ever read 0.
+  // Needs HR added after the TDP, or for trainings outside it: every one is kept (not in the amended TDP) or adopted
+  // (listed by it, in place or moved, so also counted there). With none, their tiles would only ever read 0.
   const addedKept = summary.addedKept ?? [];
   const adopted = summary.adopted ?? [];
   const anyAdded = addedKept.length + adopted.length > 0;
@@ -123,8 +147,8 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
             <Stat label="Carried: always kept" value={summary.carried} tone={NEUTRAL} />
             {anyAdded && (
               <>
-                <Stat label="Added after TDP: kept" value={addedKept.length} tone={NEUTRAL} />
-                <Stat label="Added after TDP: now listed" value={adopted.length} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
+                <Stat label={`${hrTile([...addedKept, ...adopted])}: kept`} value={addedKept.length} tone={NEUTRAL} />
+                <Stat label={`${hrTile([...addedKept, ...adopted])}: now listed`} value={adopted.length} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
               </>
             )}
           </dl>
@@ -135,8 +159,8 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
                 : "The amended TDP lists the same needs as the plan: no need is added or removed."
               : "Unchanged needs stay as they are, with Monitoring's marks and remarks."}
             {summary.carried > 0 && ` ${count(summary.carried, "need")} carried from an earlier year ${summary.carried === 1 ? "isn't" : "aren't"} part of any TDP, so ${summary.carried === 1 ? "it stays" : "they stay"}.`}
-            {addedKept.length > 0 && ` ${count(addedKept.length, "need")} added after the TDP ${addedKept.length === 1 ? "isn't" : "aren't"} in it, so ${addedKept.length === 1 ? "it stays" : "they stay"}.`}
-            {adopted.length > 0 && ` ${count(adopted.length, "need")} added after the TDP ${adopted.length === 1 ? "is" : "are"} listed by it for the same person, so ${adopted.length === 1 ? "it becomes a TDP need" : "they become TDP needs"}.`}
+            {addedKept.length > 0 && ` ${hrNeeds(addedKept)} ${addedKept.length === 1 ? "isn't" : "aren't"} in it, so ${addedKept.length === 1 ? "it stays" : "they stay"}.`}
+            {adopted.length > 0 && ` ${hrNeeds(adopted)} ${adopted.length === 1 ? "is" : "are"} listed by it for the same person, so ${adopted.length === 1 ? "it becomes a TDP need" : "they become TDP needs"}.`}
           </p>
 
           {added.length > 0 && (
@@ -165,14 +189,14 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
           )}
           {addedKept.length > 0 && (
             <div className="mt-3 space-y-1">
-              <h5 className="text-[11px] font-bold text-slate-700">Added after the TDP, kept ({addedKept.length}): not in the amended TDP; a need HR added stays, as a carried one does</h5>
-              <NeedList caption={`Needs added after the TDP, kept (${addedKept.length})`} rows={addedKept} />
+              <h5 className="text-[11px] font-bold text-slate-700">{hrHeading(addedKept)}, kept ({addedKept.length}): not in the amended TDP; a need HR added stays, as a carried one does</h5>
+              <NeedList caption={`Needs ${lowerFirst(hrHeading(addedKept))}, kept (${addedKept.length})`} rows={addedKept} />
             </div>
           )}
           {adopted.length > 0 && (
             <div className="mt-3 space-y-1">
-              <h5 className="text-[11px] font-bold text-emerald-800">Added after the TDP, now in the amended TDP ({adopted.length}): it lists them for the same person, so they become TDP needs</h5>
-              <NeedList caption={`Needs added after the TDP, now in the amended TDP (${adopted.length})`} rows={adopted} />
+              <h5 className="text-[11px] font-bold text-emerald-800">{hrHeading(adopted)}, now in the amended TDP ({adopted.length}): it lists them for the same person, so they become TDP needs</h5>
+              <NeedList caption={`Needs ${lowerFirst(hrHeading(adopted))}, now in the amended TDP (${adopted.length})`} rows={adopted} />
             </div>
           )}
           {outside.length > 0 && (
@@ -206,8 +230,8 @@ export default function TdpReplaceSummary({ summary, stale, changed, filename, f
           {count(summary.added, "need")} added{movedRows.length > 0 ? `, ${movedRows.length} moved to another column` : ""} and {removed.length} removed
           {keptRows.length > 0 ? `; ${keptRows.length} it leaves out ${keptRows.length === 1 ? "stays" : "stay"} because still in use` : ""}.
           {removed.length > 0 && " Removed needs leave Plan A and Monitoring."}
-          {addedKept.length > 0 && ` ${count(addedKept.length, "need")} added after the TDP ${addedKept.length === 1 ? "stays" : "stay"}.`}
-          {adopted.length > 0 && ` ${count(adopted.length, "need")} added after the TDP ${adopted.length === 1 ? "becomes" : "become"} the TDP's own.`}
+          {addedKept.length > 0 && ` ${hrNeeds(addedKept)} ${addedKept.length === 1 ? "stays" : "stay"}.`}
+          {adopted.length > 0 && ` ${hrNeeds(adopted)} ${adopted.length === 1 ? "becomes" : "become"} the TDP's own.`}
           {outside.length > 0 && ` ${outside.length === 1 ? "1 seminar" : `${outside.length} seminars`} would then need ${outside.length === 1 ? "its" : "their"} own justification.`}{" "}
           The replacement is recorded in the audit log, and HR and the
           Administrator are notified. To change it later, upload another amended TDP.

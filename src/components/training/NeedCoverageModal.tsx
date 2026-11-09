@@ -7,12 +7,14 @@ import {
   TRAINING_NEED_COLUMN_LABELS
 } from "../../types";
 import { apiCall } from "../../utils";
+import { outsideKindText } from "./tdpText";
 
 interface Props {
   seminarTitle: string;
   fiscalYear?: string;
   selectedTitles: string[];
-  onConfirm: (titles: string[]) => void;
+  /** The ticked titles, and those of them the plan lists only outside the TDP (12ae), for the row's marks. */
+  onConfirm: (titles: string[], outsideTitles: string[]) => void;
   onClose: () => void;
 }
 
@@ -88,6 +90,13 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
               Tick what this seminar answers from <strong>Plan A</strong>. Employees who listed it are marked
               <strong> Needs this</strong> in the participant picker and ranked first, and their Plan D item is
               checked off once they attend.
+              {needs.some(n => n.outside) && (
+                <>
+                  {" "}A training marked <strong>Outside the TDP</strong> was planned outside it: its listers are marked
+                  <strong> Planned outside the TDP</strong>, and a seminar covering only such trainings is held outside the TDP,
+                  with its own justification (Save asks, filled in from the need&rsquo;s).
+                </>
+              )}
             </p>
           </div>
 
@@ -156,6 +165,12 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
                             <span className="block text-[10px] text-slate-500 mt-0.5">
                               {/* The law or a rule requires it (HSAC RAB 1's step 5): listed first. */}
                               {need.mandate && <span className="font-semibold text-blue-700">Mandated: {need.mandate.basis} · </span>}
+                              {/* Planned outside the TDP (12ae): a seminar covering only such trainings is held outside it. */}
+                              {need.outside && (
+                                <span data-need-mark="outside" className="font-semibold text-purple-800">
+                                  Outside the TDP ({outsideKindText(need.outside.kind)}) ·{" "}
+                                </span>
+                              )}
                               Listed by {need.employeeCount} employee{need.employeeCount === 1 ? "" : "s"} · {need.categories.join(", ")}
                             </span>
                           </span>
@@ -175,7 +190,12 @@ export default function NeedCoverageModal({ seminarTitle, fiscalYear, selectedTi
           </span>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-4 py-2 text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
-            <button onClick={() => onConfirm(selected)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Confirm</button>
+            <button
+              onClick={() => onConfirm(selected, needs.filter(n => n.outside && selectedKeys.has(norm(n.title))).map(n => n.title))}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Confirm
+            </button>
           </div>
         </div>
       </div>

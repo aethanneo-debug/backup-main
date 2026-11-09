@@ -134,8 +134,8 @@ test("a year's counts leave carried needs out of the TDP", () => {
     { ...need("e1", "A"), fiscalYear: "2027" }, { ...need("e1", "B"), fiscalYear: "2027" }, { ...need("e2", "A"), fiscalYear: "2027" },
     { ...need("e3", "C", { carriedFromFiscalYear: "2026" }), fiscalYear: "2027" }, { ...need("e4", "D"), fiscalYear: "2026" }
   ];
-  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 3, employees: 2, carried: 1, added: 0 });
-  assert.deepEqual(tdpCounts(undefined, "2027"), { needs: 0, employees: 0, carried: 0, added: 0 });
+  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 3, employees: 2, carried: 1, added: 0, outside: 0 });
+  assert.deepEqual(tdpCounts(undefined, "2027"), { needs: 0, employees: 0, carried: 0, added: 0, outside: 0 });
 });
 
 // Needs HR added after the TDP ("Add Training Need", 12ad).
@@ -165,7 +165,7 @@ test("an added need keeps its person's training, so a left-out copy in another c
 
 test("added needs aren't the TDP's: counted apart, and no year gets an upload record from them alone", () => {
   const needs = [{ ...need("e1", "A"), fiscalYear: "2027" }, { ...need("e2", "B", { addedAfterTdp: addedMark }), fiscalYear: "2027" }];
-  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 1, employees: 1, carried: 0, added: 1 });
+  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 1, employees: 1, carried: 0, added: 1, outside: 0 });
   const onlyAdded = [{ ...need("e2", "B", { addedAfterTdp: addedMark }), fiscalYear: "2029" }];
   assert.deepEqual(recordsBeforeUploads({ needs: onlyAdded, records: [], auditLogs: [], fullNameOf: () => "" }), []);
 });
@@ -181,6 +181,9 @@ test("the record keeps the TDP's trainings once per title and column, in the she
   assert.equal("trainings" in (currentTdp([{ fiscalYear: "2027" }], "2027") ?? {}), false, "a record from before has none");
   assert.deepEqual(currentTdp([{ fiscalYear: "2027", changes: { added: 1, addedKept: 2, adopted: 3 } }], "2027")?.changes,
     { added: 1, removed: 0, kept: 0, moved: 0, addedKept: 2, adopted: 3 });
+  // Those for trainings outside the TDP (12ae) reach the screens too; a damaged count is none.
+  assert.deepEqual(currentTdp([{ fiscalYear: "2027", changes: { added: 0, outsideKept: 2, outsideAdopted: 1, adopted: "x" } }], "2027")?.changes,
+    { added: 0, removed: 0, kept: 0, moved: 0, outsideKept: 2, outsideAdopted: 1 });
 });
 
 const importEntry = (timestamp: string, fiscalYear: string, file: string, username = "hr") => ({
@@ -227,6 +230,35 @@ test("an old entry's names are cleaned, and one too long to be the import's own 
     fullNameOf: () => "An⁦ Officer"
   });
   assert.deepEqual(records.map(r => [r.filename, r.uploadedAt, r.uploadedByName]), [["plan.xlsx", "2026-10-16T01:00:00.000Z", "An Officer"]]);
+});
+
+test("a need outside the TDP (12ae) is replaced as an added one: kept, or adopted when the amended TDP lists it", () => {
+  const outsideMark = { kind: "New law or issuance", reason: "R", approvedBy: { name: "C", position: "Chief" } };
+  const current = [
+    need("e1", "Data Privacy", { outsideTdp: outsideMark, id: "kept" } as never),
+    need("e2", "Data Privacy", { outsideTdp: outsideMark, id: "adopted" } as never),
+    need("e3", "Data Privacy", { outsideTdp: outsideMark, carriedFromFiscalYear: "2027", id: "carried" } as never)
+  ];
+  const plan = planTdpReplace(current, [need("e2", "Data Privacy")], () => null);
+  assert.deepEqual([plan.addedKept.map(n => n.id), plan.adopted.map(n => n.id), plan.removed, plan.added.length], [["kept"], ["adopted"], [], 0],
+    "never removed; the carried one is kept as carried");
+  const needs = [{ ...need("e1", "A"), fiscalYear: "2027" }, { ...current[0], fiscalYear: "2027" }, { ...current[2], fiscalYear: "2027" }];
+  assert.deepEqual(tdpCounts(needs, "2027"), { needs: 1, employees: 1, carried: 1, added: 0, outside: 1 }, "counted apart; a carried one as carried");
+  assert.deepEqual(recordsBeforeUploads({ needs: [{ ...current[0], fiscalYear: "2029" }], records: [], auditLogs: [], fullNameOf: () => "" }), [],
+    "no year gets an upload record from needs outside the TDP alone");
+
+  // Carried in still marked, and now listed by the amended TDP for the same person and column: adopted, never added twice.
+  const carriedListed = planTdpReplace([current[2]], [need("e3", "Data Privacy")], () => null);
+  assert.deepEqual([carriedListed.carried.map(n => n.id), carriedListed.adopted.map(n => n.id), carriedListed.added.length], [["carried"], ["carried"], 0]);
+
+  // A TDP copy in use for a seat isn't let go because the person "still has" the training outside the TDP: that copy
+  // identifies nobody (12z), so the seat would rest on nothing.
+  const seated = [
+    need("e4", "Ethics", { id: "tdp-copy" } as never),
+    need("e4", "Ethics", { outsideTdp: outsideMark, category: "Career Advancement", carriedFromFiscalYear: "2027", id: "outside-copy" } as never)
+  ];
+  const left = planTdpReplace(seated, [], n => (n.id === "tdp-copy" ? { reason: "seminar", detail: "Ethics Seminar" } : null));
+  assert.deepEqual([left.kept.map(k => k.need.id), left.removed], [["tdp-copy"], []]);
 });
 
 test("damaged data can't stop the server loading", () => {

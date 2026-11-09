@@ -129,9 +129,16 @@ export default function ModalDialog({
   // Focus in once per opening, and give focus back to the opener on close.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const first = bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
+    // A radio group whose answer is already filled in is entered on that answer, as Tab enters it: from its first
+    // option, Space or an arrow key would change it (a form opened filled in, 12ae).
+    const checkedRadio = first instanceof HTMLInputElement && first.type === "radio" && !first.checked && first.name
+      ? [...(bodyRef.current?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? [])].find(r => r.name === first.name && r.checked) ?? null
+      : null;
     const target =
       initialFocusRef?.current ??
-      bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE) ??
+      checkedRadio ??
+      first ??
       panelRef.current;
     target?.focus();
     return () => {

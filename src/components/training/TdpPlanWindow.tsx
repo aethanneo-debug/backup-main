@@ -3,24 +3,22 @@ import { createPortal } from "react-dom";
 import { FileSpreadsheet, X } from "lucide-react";
 import {
   TdpUpload,
-  TrainingNeedAddition,
   TrainingNeedRow,
   TrainingPlanEmployee,
   TrainingPlanOffice,
   TRAINING_NEED_CATEGORIES,
   TRAINING_NEED_COLUMN_LABELS
 } from "../../types";
-import { formatDate } from "../../utils";
 import { needAdditionBasisLabel } from "../../tdpAdditions";
 import { useDialogLayer } from "../ui/ModalDialog";
 import PlanHeader from "./PlanHeader";
-import { count, tdpSourceText } from "./tdpText";
+import { additionText, count, orList, outsideKindText, outsideNeedText, tdpSourceText } from "./tdpText";
 
 // Plan A as uploaded, read-only (the instructor's review, R9: the big table moves behind a button, and nobody types
 // trainings into it). The official layout: each office, each person's three columns, the mandated badges. Needs carried
 // in unmet from an earlier year are marked: they aren't part of the TDP, and stay when it is replaced. So are needs HR
-// added after the TDP (12ad: one of its own trainings, for someone it didn't list). Without a TDP it shows just the
-// carried needs.
+// added after the TDP (12ad: one of its own trainings, for someone it didn't list), and needs for trainings the TDP
+// doesn't list (12ae: "Outside the TDP", with why). Without a TDP it shows just the needs that aren't any TDP's.
 //
 // A dialog in the app's stack (useDialogLayer): Esc closes only the one on top, Tab stays inside, and the focus goes
 // back to the button that opened it. One scroll area, so the column headings stay in view over ~460 needs.
@@ -30,28 +28,15 @@ interface Props {
   /** The TDP in force, or null when there is none and only carried needs are shown. */
   tdp: TdpUpload | null;
   onClose: () => void;
-  /** Removes a need carried in from an earlier year, or one HR added after the TDP (no TDP's, so the only needs that can
-   * be taken out here; the user's decisions of 2026-11-02 and 2026-11-08). Resolves to the server's reason when it was
-   * refused, else to the seminars it was the last need in the plan for (they now need their own justification, 12z
-   * Part C). */
+  /** Removes a need carried in from an earlier year, one HR added after the TDP, or one for a training outside it (no
+   * TDP's, so the only needs that can be taken out here; the user's decisions of 2026-11-02 and 2026-11-08, and 12ae).
+   * Resolves to the server's reason when it was refused, else to the seminars it was the last need in the plan for (they
+   * now need their own justification, 12z Part C). */
   onRemoveNeed?: (need: TrainingNeedRow) => Promise<{ problem: string } | { outside: string[] }>;
 }
 
 const needsOf = (emp: TrainingPlanEmployee): TrainingNeedRow[] =>
   TRAINING_NEED_CATEGORIES.flatMap(c => emp.needs?.[c] ?? []);
-
-/** "Hired after the TDP was approved · added by … (HR Officer) on Nov 8, 2026 · note: …": an added need's marker says why,
- * who and when, and HR's note when there is one (the tooltip only: the note stays out of the audit log and the notices,
- * since it may mention someone's leave). */
-function additionText(a: TrainingNeedAddition): string {
-  const name = typeof a?.addedBy?.name === "string" ? a.addedBy.name.trim() : "";
-  const role = typeof a?.addedBy?.role === "string" ? a.addedBy.role : "";
-  const when = typeof a?.addedAt === "string" && !Number.isNaN(Date.parse(a.addedAt)) ? ` on ${formatDate(a.addedAt)}` : "";
-  // The note too (an SO or Office Order number, the reason for "Another reason"): only HR and the Administrator open
-  // this window. It stays out of the audit log and the notices.
-  const note = typeof a?.note === "string" && a.note.trim() ? ` · note: ${a.note.trim()}` : "";
-  return `${needAdditionBasisLabel(a?.basis)} · added${name ? ` by ${name}${role ? ` (${role})` : ""}` : ""}${when}${note}`;
-}
 
 const HEAD = "sticky top-0 z-10 border-b border-r border-slate-700 bg-slate-900 p-2 text-[9px] font-bold uppercase tracking-wide text-white last:border-r-0";
 const CELL = "border-b border-r border-slate-100 p-2 align-top last:border-r-0";
@@ -72,7 +57,9 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
     if (!onRemoveNeed || removing) return;
     const origin = need.carriedFromFiscalYear
       ? `It was carried in unmet from CY ${need.carriedFromFiscalYear} and isn't part of the TDP.`
-      : `It was added after the TDP (${needAdditionBasisLabel(need.addedAfterTdp?.basis)}) and isn't part of the uploaded file.`;
+      : need.outsideTdp
+        ? `It is a training outside the TDP (${outsideKindText(need.outsideTdp.kind)}), planned by HR, and isn't part of the uploaded file.`
+        : `It was added after the TDP (${needAdditionBasisLabel(need.addedAfterTdp?.basis)}) and isn't part of the uploaded file.`;
     if (!confirm(`Remove “${need.title}” for ${name}? ${origin} The removal is recorded in the audit log.`)) return;
     setRemoving(need.id);
     setRemoval(null);
@@ -106,10 +93,12 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
   // in the plan, but not in the uploaded file, so they are marked and counted apart.
   const keptIds = useMemo(() => new Set(tdp?.keptNeedIds ?? []), [tdp]);
 
-  // Only people the plan lists anything for: the TDP's rows, and anyone with needs carried in or added after it. Each
-  // need is counted once: carried, added after the TDP, kept, or the TDP's own.
-  const { listed, needs, carried, added, kept, unlisted, carriedYear } = useMemo(() => {
-    let needs = 0, carried = 0, added = 0, kept = 0, unlisted = 0;
+  // Only people the plan lists anything for: the TDP's rows, and anyone with needs carried in, added after it or outside
+  // it. Each need is counted once, as the server counts them: carried, outside the TDP, added after it, kept, or the
+  // TDP's own. `marked` counts every need that shows the "Outside the TDP" mark, carried ones included (a carried need
+  // keeps it), so the legend comes whenever the mark does.
+  const { listed, needs, carried, added, outside, marked, kept, unlisted, carriedYear } = useMemo(() => {
+    let needs = 0, carried = 0, added = 0, outside = 0, marked = 0, kept = 0, unlisted = 0;
     let carriedYear = "";
     const listed = (offices ?? [])
       .map(office => {
@@ -117,10 +106,12 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
           const rows = needsOf(emp);
           if (rows.length === 0) unlisted++;
           for (const need of rows) {
+            if (need.outsideTdp) marked++;
             if (need.carriedFromFiscalYear) {
               carried++;
               carriedYear ||= need.carriedFromFiscalYear;
-            } else if (need.addedAfterTdp) added++;
+            } else if (need.outsideTdp) outside++;
+            else if (need.addedAfterTdp) added++;
             else if (keptIds.has(need.id)) kept++;
             else needs++;
           }
@@ -129,24 +120,25 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
         return { ...office, employees };
       })
       .filter(office => office.employees.length > 0);
-    return { listed, needs, carried, added, kept, unlisted, carriedYear };
+    return { listed, needs, carried, added, outside, marked, kept, unlisted, carriedYear };
   }, [offices, keptIds]);
   const people = listed.reduce((n, o) => n + o.employees.length, 0);
 
-  // No TDP's, so they can be taken out here: "carried in from an earlier year", "added after the TDP", or both.
-  const removable = !!onRemoveNeed && (carried > 0 || added > 0);
-  const removableText = [carried > 0 ? "carried in from an earlier year" : "", added > 0 ? "added after the TDP" : ""].filter(Boolean).join(" or ");
-  const title = tdp ? `Uploaded TDP, FY ${fiscalYear}` : added > 0 ? `Needs in the FY ${fiscalYear} plan` : `Needs carried into FY ${fiscalYear}`;
+  // No TDP's, so they can be taken out here: "carried in from an earlier year", "added after the TDP", "outside the TDP".
+  const removable = !!onRemoveNeed && (carried > 0 || added > 0 || outside > 0);
+  const removableText = orList([carried > 0 ? "carried in from an earlier year" : "", added > 0 ? "added after the TDP" : "", outside > 0 ? "outside the TDP" : ""].filter(Boolean));
+  const title = tdp ? `Uploaded TDP, FY ${fiscalYear}` : added > 0 || outside > 0 ? `Needs in the FY ${fiscalYear} plan` : `Needs carried into FY ${fiscalYear}`;
   const subtitle = tdp
     ? `${tdpSourceText(tdp)} · read-only${removable ? `, but for needs ${removableText}` : ""}`
-    : `No TDP is uploaded for FY ${fiscalYear} yet. ${added > 0 ? "These aren't part of any TDP" : "These were carried in unmet from an earlier year"}${removable ? " and can be removed" : " · read-only"}`;
+    : `No TDP is uploaded for FY ${fiscalYear} yet. ${added > 0 || outside > 0 ? "These aren't part of any TDP" : "These were carried in unmet from an earlier year"}${removable ? " and can be removed" : " · read-only"}`;
   // Who is listed, then what: "N TDP needs for M employees" read as if the TDP's needs were everyone's, when most of a
   // year can be carried in (FY 2028's TDP added none: each of its rows was already carried).
   const parts = [
     ...(tdp ? [count(needs, "TDP need")] : []),
     kept > 0 ? `${kept} kept from before because still in use` : "",
     carried > 0 || !tdp ? `${count(carried, "need")} carried from an earlier year` : "",
-    added > 0 ? `${added} added after the TDP` : ""
+    added > 0 ? `${added} added after the TDP` : "",
+    outside > 0 ? `${outside} outside the TDP` : ""
   ].filter(Boolean);
   const summary = `${count(people, "employee")} listed: ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0]}.`;
 
@@ -211,6 +203,16 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
                   {onRemoveNeed && " One that no longer applies can be removed here."}
                 </p>
               )}
+              {marked > 0 && (
+                <p data-tdp="outside-legend">
+                  Needs marked{" "}
+                  <span className="rounded border border-purple-200 bg-purple-50 px-1 text-[9px] font-bold uppercase tracking-wider text-purple-800">Outside the TDP</span>{" "}
+                  are trainings the TDP doesn&rsquo;t list, planned by HR with why they are held (Add Training Need). The TDP doesn&rsquo;t
+                  identify anyone by them, and a seminar for one is held outside the TDP with its own justification. They stay when the
+                  TDP is replaced, and become its own if the amended TDP lists them. Point at the mark to see why, who approved it and who added it.
+                  {onRemoveNeed && " One that no longer applies can be removed here."}
+                </p>
+              )}
               {kept > 0 && (
                 <p>
                   Needs marked{" "}
@@ -264,9 +266,9 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
                             ) : (
                               <ul className="space-y-1">
                                 {rows.map(need => {
-                                  // No TDP's, so it can be taken out: carried in, or added after the TDP (carried wins, as
-                                  // the server counts it).
-                                  const origin = need.carriedFromFiscalYear ? "carried" : need.addedAfterTdp ? "added" : null;
+                                  // No TDP's, so it can be taken out: carried in, outside the TDP, or added after it (carried
+                                  // wins, as the server counts it; a carried need outside the TDP keeps its mark too).
+                                  const origin = need.carriedFromFiscalYear ? "carried" : need.outsideTdp ? "outside" : need.addedAfterTdp ? "added" : null;
                                   return (
                                     <li key={need.id} className="leading-snug text-slate-700">
                                       {need.title}
@@ -288,15 +290,28 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
                                           Added after the TDP<span className="sr-only">: {additionText(need.addedAfterTdp)}</span>
                                         </span>
                                       )}
+                                      {/* A training the TDP doesn't list, planned with why it is held (12ae): why, who approved
+                                          it, who added it and when, and the reason. */}
+                                      {need.outsideTdp && (
+                                        <span
+                                          data-need-mark="outside"
+                                          title={`Outside the TDP: ${outsideNeedText(need.outsideTdp)}`}
+                                          className={`${MARK} border-purple-200 bg-purple-50 text-purple-800`}
+                                        >
+                                          Outside the TDP<span className="sr-only">: {outsideNeedText(need.outsideTdp)}</span>
+                                        </span>
+                                      )}
                                       {origin && onRemoveNeed && (
                                         <button
                                           type="button"
-                                          data-tdp={origin === "carried" ? "remove-carried" : "remove-added"}
+                                          data-tdp={origin === "carried" ? "remove-carried" : origin === "outside" ? "remove-outside" : "remove-added"}
                                           onClick={() => removeNeed(need, emp.fullName)}
                                           disabled={removing !== null}
                                           aria-label={origin === "carried"
                                             ? `Remove “${need.title}”, carried in from ${need.carriedFromFiscalYear}, for ${emp.fullName}`
-                                            : `Remove “${need.title}”, added after the TDP, for ${emp.fullName}`}
+                                            : origin === "outside"
+                                              ? `Remove “${need.title}”, outside the TDP, for ${emp.fullName}`
+                                              : `Remove “${need.title}”, added after the TDP, for ${emp.fullName}`}
                                           className="ml-1.5 cursor-pointer rounded align-middle text-[10px] font-semibold text-rose-700 underline hover:text-rose-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                           {removing === need.id ? "Removing…" : "Remove"}
@@ -342,7 +357,7 @@ export default function TdpPlanWindow({ fiscalYear, offices, tdp, onClose, onRem
               {summary}{" "}
               <span className="text-slate-500">
                 {tdp
-                  ? "Read-only: the TDP's own needs change only through an amended TDP, and Add Training Need gives someone one of its trainings"
+                  ? "Read-only: the TDP's own needs change only through an amended TDP, and Add Training Need gives people it doesn't list its trainings"
                   : "Read-only: Plan A comes from the TDP once it is uploaded"}
                 {removable ? `; needs ${removableText} can be removed here` : ""}.
               </span>

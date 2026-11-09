@@ -114,19 +114,22 @@ import {
   TrainingProgramRow,
   TdpUpload,
   TdpReplaceSummary,
+  TdpReplaceNeed,
+  OutsideTdpNeed,
+  SEMINAR_TDP_KINDS,
   AlreadySent,
   TrainingProgramReport,
   CompletedTrainingPrograms
 } from "./src/types";
 import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsEnteringTdp, seminarsLeavingTdp, tdpCounts, tdpTrainings, trainingListChanges, type TdpNeedUse } from "./src/tdpUpload";
-import { needAdditionBasisLabel, readNeedAddition, tdpTrainingChoices } from "./src/tdpAdditions";
+import { additionPairs, existingNeedText, needAdditionBasisLabel, OUTSIDE_NEEDS_MAX_PER_YEAR, readNeedAdditions, readOutsideTdpAddition, tdpTrainingChoices, type NeedAdditionTraining } from "./src/tdpAdditions";
 import { employeeTrainingHistory } from "./src/trainingHistory";
 import { completedTrainingPrograms, trainingProgramReport } from "./src/trainingReports";
 import { readTrainingRecord, readTrainingReview, recordCounts } from "./src/trainingRecord";
 import { loginClosed, stillWithOffice } from "./src/staffStatus";
 import {
   coveredNeeds, normalizeTitle, readSeminarTdpJustification, readTdpJustification, seatsNeedingJustification, seminarCoversPlan,
-  seminarNeedsJustification, seminarTdpStanding, TDP_KIND_CHOICE, tdpKindText, tdpStanding, type SeatCheck
+  seminarNeedsJustification, seminarTdpStanding, TDP_KIND_CHOICE, TDP_NAME_MAX, TDP_REASON_MAX, TDP_REFERENCE_MAX, tdpKindText, tdpStanding, type SeatCheck
 } from "./src/tdpRules";
 import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
@@ -1293,7 +1296,9 @@ function saveDB() {
 // Helper to log audit actions
 function logEvent(userId: string, username: string, role: string, action: string, details: string) {
   const newLog: AuditLog = {
-    id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    // A random suffix: one save can write many entries in the same millisecond (12ad's batches), and the screens key rows
+    // by this id.
+    id: `log-${Date.now()}-${crypto.randomUUID()}`,
     timestamp: new Date().toISOString(),
     userId,
     username,
@@ -1425,8 +1430,10 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
       const asOf = manilaToday();
       const oldNeeds = (db.trainingNeeds || []).filter((n: TrainingNeed) => n.fiscalYear === activeFy.label);
       const carriedNeeds: TrainingNeed[] = [];
-      // Carried needs HR had added after the TDP (12ad) are carried needs from now on, so the entry says how many.
-      let carriedAdded = 0;
+      // Carried needs HR had added after the TDP (12ad) are carried needs from now on, so the entry says how many. One for
+      // a training outside the TDP (12ae) stays marked (the user's decision of 2026-11-09): being carried can't make it a
+      // TDP need. The entry counts those too.
+      let carriedAdded = 0, carriedOutside = 0;
 
       for (const need of oldNeeds) {
         if (needAccomplishment(need, asOf).accomplished) continue;
@@ -1445,9 +1452,11 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
         if (alreadyThere) continue;
 
         if (need.addedAfterTdp) carriedAdded++;
+        if (need.outsideTdp) carriedOutside++;
         carriedNeeds.push({
           ...need,
-          id: `tn-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+          // Hundreds are made in the same millisecond, and PUT and DELETE act on the first need with an id: a random suffix.
+          id: `tn-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
           fiscalYear: newFy.label,
           // Keep the ORIGINAL year, so a need rolled twice still shows its true age.
           carriedFromFiscalYear: need.carriedFromFiscalYear || activeFy.label,
@@ -1476,6 +1485,7 @@ app.post("/api/fiscal-years", authenticateToken, (req: any, res) => {
       logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Carry Training Needs",
         `Carried ${carriedNeeds.length} unmet need(s) from ${activeFy.label} to ${newFy.label}` +
         (carriedAdded ? ` (${carriedAdded} of them had been added after the TDP)` : "") +
+        (carriedOutside ? ` (${carriedOutside} of them for trainings outside the TDP, still marked)` : "") +
         `; ${oldNeeds.length - carriedNeeds.length} not carried (accomplished, inactive employee, or duplicate)`);
     }
 
@@ -7203,9 +7213,35 @@ function normalizeFulfillsNeedTitles(raw: any): string[] {
 // Which of this employee's own Plan A entries the seminar covers (same title, same fiscal year), with
 // the plan's column for each: the same training can be needed for the function itself, or for an
 // additional designation (HSAC RAB 1's answer 6: RA 12009 for the Admin Officer IV vs the BAC TWG).
+// A need planned outside the TDP (12ae) plans and tracks a training but never makes the TDP identify its person (12z
+// Part A) nor puts a seminar in the TDP (Part C): `coveredNeeds` and `seminarCoversPlan` (src/tdpRules.ts) leave it
+// out for every caller, so a new reader of the plan can't count it by mistake (the security review).
 function employeeCoveredNeeds(employeeId: string, program: SeminarRef): TrainingNeed[] {
   const emp = employeeByKey(employeeId);
   return coveredNeeds(db.trainingNeeds || [], emp ? [emp.id, emp.employeeId].filter(Boolean) : [employeeId], program);
+}
+
+// The titles of the seminar this employee's own plan lists outside the TDP (12ae): shown in the picker, never counted.
+function employeeOutsideNeeds(employeeId: string, program: SeminarRef): string[] {
+  const emp = employeeByKey(employeeId);
+  return [...new Set(coveredNeeds(db.trainingNeeds || [], emp ? [emp.id, emp.employeeId].filter(Boolean) : [employeeId], program, { outside: true }).map(n => n.title))];
+}
+
+// A need's justification for a training outside the TDP (12ae) as the screens get it, for a seminar's own to start from:
+// the kind, the reason, who approved it and the reference, read field by field and cleaned, so a damaged entry carries
+// nothing else (and who added it stays out). null when it isn't one.
+function outsideJustification(j: unknown): SeminarTdpJustificationInput | null {
+  const o = (j && typeof j === "object" ? j : {}) as Record<string, any>;
+  if (!(SEMINAR_TDP_KINDS as readonly unknown[]).includes(o.kind)) return null;
+  const text = (v: unknown, max: number) => (typeof v === "string" ? cleanText(v.slice(0, max * 4)).slice(0, max) : "");
+  const referenceNo = text(o.referenceNo, TDP_REFERENCE_MAX);
+  return {
+    kind: o.kind,
+    reason: text(o.reason, TDP_REASON_MAX),
+    approvedBy: { name: text(o.approvedBy?.name, TDP_NAME_MAX), position: text(o.approvedBy?.position, TDP_NAME_MAX) },
+    ...(referenceNo ? { referenceNo } : {}),
+    ...(isCalendarDate(o.referenceDate) ? { referenceDate: o.referenceDate } : {})
+  };
 }
 
 // Whether the TDP identifies this employee for the seminar (HSAC RAB 1, 2026-10-28): their own Plan A
@@ -7451,7 +7487,7 @@ function tdpSeatsPlan(program: TrainingProgram, created: TrainingParticipant[], 
 }
 
 // Whether a seminar is in the TDP (12z Part C): one of its titles is a need in its fiscal year's Plan A,
-// anyone's. A title typed in that no plan lists doesn't count.
+// anyone's. A title typed in that no plan lists doesn't count, nor a need planned outside the TDP (12ae).
 function seminarInTdp(program: SeminarRef): boolean {
   return seminarCoversPlan(db.trainingNeeds || [], program);
 }
@@ -7461,7 +7497,8 @@ function seminarInTdp(program: SeminarRef): boolean {
 function refuseNotInTdp(res: any, program: TrainingProgram): void {
   res.status(409).json({
     status: "error",
-    message: `"${String(program.title || "").trim()}" covers no need in FY ${program.fiscalYear}'s Plan A, so it is outside the TDP. `
+    // ("TDP need": one planned outside the TDP is in Plan A too, and doesn't count, 12ae.)
+    message: `"${String(program.title || "").trim()}" covers no TDP need in FY ${program.fiscalYear}'s Plan A, so it is outside the TDP. `
       + "Record why it is held (a Central Office training, an invitation from another agency, a new law or issuance, or another reason) and who approved it.",
     data: { code: "NOT_IN_TDP" }
   });
@@ -7680,9 +7717,13 @@ function rankTrainingCandidates(program: SeminarRef): { candidates: TrainingCand
       const covered = employeeCoveredNeeds(emp.id, program);
       // Each title once, even when their plan lists it under two columns.
       const needMatches = [...new Set(covered.map(n => n.title))];
+      // Planned outside the TDP (12ae): the picker shows it, and lists them with the plan's people, but the TDP doesn't
+      // identify them for it, so it never counts as `needsThis` and the order doesn't change.
+      const outsideNeeds = employeeOutsideNeeds(emp.id, program);
       return {
         needsThis: needMatches.length > 0,
         needMatches,
+        ...(outsideNeeds.length ? { outsideNeeds } : {}),
         // The plan's columns those entries are under (in the form's order).
         needCategories: TRAINING_NEED_CATEGORIES.filter(c => covered.some(n => n.category === c)),
         // Those the law requires (12z Part D): such listers come first among the listers.
@@ -8990,14 +9031,18 @@ app.post("/api/training/needs/import/preview", authenticateToken, (req: any, res
 // Plan A comes from the uploaded TDP (the instructor's review, R9): a need is added, removed or renamed only by
 // uploading the year's TDP, or an amended one in its place. The one opening (12ad): Add Training Need gives someone one
 // of the uploaded TDP's own trainings; a need carried in, or added that way, can be removed while not in use.
-const PLAN_FROM_TDP = "Plan A comes from the uploaded TDP. To give someone one of its trainings (a new hire, a new designation), use Add Training Need in Training Needs; anything else changes only through an amended TDP: replace the TDP with the amended workbook.";
+const PLAN_FROM_TDP = "Plan A comes from the uploaded TDP. To give someone one of its trainings (a new hire, a new designation), or a training it doesn't list with the reason it is needed, use Add Training Need in Training Needs; anything else changes only through an amended TDP: replace the TDP with the amended workbook.";
 // The most needs one import takes (the real Plan A lists about 480).
 const MAX_IMPORT_NEEDS = 5000;
 
 // How a Replace names a need it adds, moves, removes or keeps (its summary, the audit entry).
-function replaceNeedOf(need: { employeeId: string; category: TrainingNeedCategory; title: string }): { employee: string; category: TrainingNeedCategory; title: string } {
+function replaceNeedOf(need: { employeeId: string; category: TrainingNeedCategory; title: string; outsideTdp?: unknown }): TdpReplaceNeed {
   const emp = employeeByKey(need.employeeId);
-  return { employee: cleanText(emp?.fullName || need.employeeId).slice(0, 200), category: need.category, title: cleanText(String(need.title ?? "").slice(0, 300)).slice(0, 300) };
+  return {
+    employee: cleanText(emp?.fullName || need.employeeId).slice(0, 200), category: need.category, title: cleanText(String(need.title ?? "").slice(0, 300)).slice(0, 300),
+    // A training outside the TDP (12ae), named apart from those added after it.
+    ...(need.outsideTdp ? { outside: true as const } : {})
+  };
 }
 
 // The key a need is compared by, with its person read as the TDP rule reads them (internal id first, 7j).
@@ -9132,7 +9177,7 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
   }
   const yearNeeds = (db.trainingNeeds || [])
     .filter((n: TrainingNeed) => n && n.fiscalYear === fiscalYear)
-    .map((n: TrainingNeed) => ({ employeeId: needPersonKey(n.employeeId), category: n.category, title: n.title, carriedFromFiscalYear: n.carriedFromFiscalYear, addedAfterTdp: n.addedAfterTdp, need: n }));
+    .map((n: TrainingNeed) => ({ employeeId: needPersonKey(n.employeeId), category: n.category, title: n.title, carriedFromFiscalYear: n.carriedFromFiscalYear, addedAfterTdp: n.addedAfterTdp, outsideTdp: n.outsideTdp, need: n }));
   const today = manilaToday();
   const yearSeminars = (db.trainingPrograms || []).filter(p => p && p.fiscalYear === fiscalYear && !p.archivedBeforeUse);
   // In use for a seminar only for the person seated for it (the user's decision of 2026-11-02): a colleague's seat
@@ -9149,11 +9194,16 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
   };
   // Only a replacement removes: a first upload finds at most needs carried in, which stay.
   const change = replace ? planTdpReplace<(typeof yearNeeds)[number]>(yearNeeds, incoming, inUse) : null;
-  // The seminars it would leave covering nothing in the plan (they would need their own justification, 12z Part C).
+  // The seminars it would leave covering nothing in the plan (they would need their own justification, 12z Part C). A
+  // need outside the TDP puts no seminar in it (12ae), unless the amended TDP adopts it.
   const outside = change ? (() => {
     const gone = new Set(change.removed);
-    const before = new Set(yearNeeds.map(n => normalizeTitle(n.title)));
-    const after = new Set([...yearNeeds.filter(n => !gone.has(n)).map(n => normalizeTitle(n.title)), ...change.added.map(n => normalizeTitle(n.title))]);
+    const adopted = new Set(change.adopted);
+    const before = new Set(yearNeeds.filter(n => !n.outsideTdp).map(n => normalizeTitle(n.title)));
+    const after = new Set([
+      ...yearNeeds.filter(n => !gone.has(n) && (!n.outsideTdp || adopted.has(n))).map(n => normalizeTitle(n.title)),
+      ...change.added.map(n => normalizeTitle(n.title))
+    ]);
     return seminarsLeavingTdp(yearSeminars, before, after).map(s => ({ id: s.id, title: cleanText(s.title).slice(0, 300) }));
   })() : [];
   const summary: TdpReplaceSummary | null = change && {
@@ -9233,13 +9283,27 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
     perEmployee.push({ employeeId: emp.id, fullName: emp.fullName, imported: mine, skipped });
   }
 
-  // A need HR added after the TDP (12ad) that this TDP lists for the same person, column and title is the TDP's from now
-  // on: one the amended TDP lists in place or moved to its column (both counted as adopted), or, after a damaged list
-  // of uploads was reset, one a first upload lists.
+  // A need HR added after the TDP (12ad), or for a training outside it (12ae), that this TDP lists for the same person,
+  // column and title is the TDP's from now on: one the amended TDP lists in place or moved to its column (both counted as
+  // adopted), one outside the TDP carried in from last year that this TDP lists, or, after a damaged list of uploads was
+  // reset, one a first upload lists.
   const listedByTdp = new Set(incoming.map(n => trainingNeedKey(n.employeeId, n.category, n.title)));
+  // Those outside the TDP among them, before their mark goes: adopting one makes the TDP identify its person, where an
+  // addition after the TDP already did (both reviews). The log names them, and one on the officer's own plan is flagged.
+  const adoptedOutside = (db.trainingNeeds || []).filter((n: TrainingNeed) => n && n.fiscalYear === fiscalYear && n.outsideTdp
+    && listedByTdp.has(trainingNeedKey(needPersonKey(n.employeeId), n.category, n.title)));
+  const me = accountEmployee(req.user);
+  const ownAdopted = me ? adoptedOutside.filter((n: TrainingNeed) => [me.id, me.employeeId].includes(needPersonKey(n.employeeId))) : [];
+  const flagOwnAdopted = (how: string) => {
+    if (ownAdopted.length === 0) return;
+    flagSelfApproval(req.user, `made the FY ${fiscalYear} TDP identify them by ${how} it, for ` +
+      ownAdopted.slice(0, 20).map((n: TrainingNeed) => auditNeedTitle(n.title)).join("; ") + (ownAdopted.length > 20 ? `; and ${ownAdopted.length - 20} more` : "") +
+      ": trainings planned outside the TDP on their own plan, which it now lists");
+  };
   for (const n of db.trainingNeeds || []) {
-    if (n && n.fiscalYear === fiscalYear && n.addedAfterTdp && listedByTdp.has(trainingNeedKey(needPersonKey(n.employeeId), n.category, n.title))) {
+    if (n && n.fiscalYear === fiscalYear && (n.addedAfterTdp || n.outsideTdp) && listedByTdp.has(trainingNeedKey(needPersonKey(n.employeeId), n.category, n.title))) {
       delete n.addedAfterTdp;
+      delete n.outsideTdp;
     }
   }
 
@@ -9265,8 +9329,12 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
     ...(change ? {
       changes: {
         added: imported, removed: change.removed.length, kept: change.kept.length, moved: change.moved.length,
-        ...(change.addedKept.length ? { addedKept: change.addedKept.length } : {}),
-        ...(change.adopted.length ? { adopted: change.adopted.length } : {})
+        // HR's own additions by kind: after the TDP (12ad), or for a training outside it (12ae).
+        ...(() => {
+          const n = (list: { outsideTdp?: unknown }[], outside: boolean) => list.filter(x => !!x.outsideTdp === outside).length;
+          const counts = { addedKept: n(change.addedKept, false), adopted: n(change.adopted, false), outsideKept: n(change.addedKept, true), outsideAdopted: n(change.adopted, true) };
+          return Object.fromEntries(Object.entries(counts).filter(([, v]) => v > 0));
+        })()
       },
       // So Plan A can say which of its needs the amended TDP left out (kept because still in use).
       keptNeedIds: change.kept.map(k => k.need.need.id)
@@ -9292,6 +9360,9 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
     // one?" (the reasons a need was kept too). Names and titles are quoted.
     const named = (list: { employee: string; title: string }[], extra: (n: any) => string = () => "") =>
       list.slice(0, 20).map(n => `${auditNeedTitle(n.title)} for ${JSON.stringify(n.employee)}${extra(n)}`).join("; ") + (list.length > 20 ? `; and ${list.length - 20} more` : "");
+    // HR's own additions, named by kind: after the TDP (12ad), or for a training outside it (12ae).
+    const afterKept = summary.addedKept.filter(n => !n.outside), outsideKept = summary.addedKept.filter(n => n.outside);
+    const afterAdopted = summary.adopted.filter(n => !n.outside), outsideAdopted = summary.adopted.filter(n => n.outside);
     logEvent(req.user.id, req.user.username, req.user.role, "Replace TDP",
       `Replaced the FY ${fiscalYear} TDP with ${JSON.stringify(record.filename)} sheet ${JSON.stringify(record.sheetName)}: ${imported} need(s) added, ` +
       `${change.moved.length} moved to another column, ${change.removed.length} removed, ${change.kept.length} kept though the amended TDP leaves them out, ` +
@@ -9300,8 +9371,10 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
       (summary.moved.length ? ` Moved: ${named(summary.moved, n => ` (${n.from} to ${n.category})`)}.` : "") +
       (summary.removed.length ? ` Removed: ${named(summary.removed)}.` : "") +
       (summary.kept.length ? ` Kept (in use): ${named(summary.kept)}.` : "") +
-      (summary.addedKept.length ? ` Added after the TDP, kept: ${named(summary.addedKept)}.` : "") +
-      (summary.adopted.length ? ` Added after the TDP, now in the amended TDP: ${named(summary.adopted)}.` : "") +
+      (afterKept.length ? ` Added after the TDP, kept: ${named(afterKept)}.` : "") +
+      (outsideKept.length ? ` Outside the TDP, kept: ${named(outsideKept)}.` : "") +
+      (afterAdopted.length ? ` Added after the TDP, now in the amended TDP: ${named(afterAdopted)}.` : "") +
+      (outsideAdopted.length ? ` Outside the TDP, now in the amended TDP: ${named(outsideAdopted)}.` : "") +
       (summary.seminarsOutside.length ? ` Seminars left covering no need in the plan: ${summary.seminarsOutside.slice(0, 20).map(s => JSON.stringify(s.title)).join("; ")}.` : "") +
       trainingsText);
     // Adding a need makes the TDP identify its person for a seminar (12z): one added to the officer's own plan is
@@ -9312,13 +9385,16 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
       flagSelfApproval(req.user, `added ${own.length} need(s) to their own FY ${fiscalYear} plan by replacing the TDP: ` +
         own.slice(0, 20).map(n => auditNeedTitle(n.title)).join("; ") + (own.length > 20 ? `; and ${own.length - 20} more` : ""));
     }
+    flagOwnAdopted("replacing");
     const notice = {
       title: `TDP for FY ${fiscalYear} replaced`,
       message: `${JSON.stringify(actor)} replaced the FY ${fiscalYear} TDP with ${JSON.stringify(record.filename)}: ` +
         `${imported} need(s) added, ${change.moved.length} moved to another column, ${change.removed.length} removed, ` +
         `${change.kept.length} kept because they are still in use.` +
-        (summary.addedKept.length ? ` ${summary.addedKept.length} need(s) added after the TDP kept.` : "") +
-        (summary.adopted.length ? ` ${summary.adopted.length} need(s) added after the TDP are now in it.` : "") +
+        (afterKept.length ? ` ${afterKept.length} need(s) added after the TDP kept.` : "") +
+        (outsideKept.length ? ` ${outsideKept.length} need(s) outside the TDP kept.` : "") +
+        (afterAdopted.length ? ` ${afterAdopted.length} need(s) added after the TDP are now in it.` : "") +
+        (outsideAdopted.length ? ` ${outsideAdopted.length} need(s) outside the TDP are now in it.` : "") +
         (listChange && (listChange.offered.length || listChange.withdrawn.length)
           ? ` Add Training Need offers ${listChange.offered.length} training(s) more and ${listChange.withdrawn.length} fewer.` : "") +
         (summary.seminarsOutside.length ? ` ${summary.seminarsOutside.length} seminar(s) now cover no need in the plan and need their own justification.` : ""),
@@ -9335,11 +9411,18 @@ app.post("/api/training/needs/import/commit", authenticateToken, transactional((
     logEvent(req.user.id, req.user.username, req.user.role, "Import Plan A Workbook",
       `Imported ${imported} training need(s) from ${JSON.stringify(safeName)} sheet ${JSON.stringify(record.sheetName)} into the ${fiscalYear} plan for ${resolved.length} employee(s); ` +
       `${skippedRows} row(s) skipped, ${skippedDuplicateInFile} duplicate(s) in the file, ${skippedAlreadyInPlan} already in the plan.` +
-      ` It lists ${(record.trainings ?? []).length} training(s), which Add Training Need offers.`);
+      ` It lists ${(record.trainings ?? []).length} training(s), which Add Training Need offers.` +
+      // Needs planned outside the TDP (carried in, or kept from a reset list) that this TDP lists: the TDP's from now on,
+      // so it identifies their people (counted among those "already in the plan" above). This upload makes the year's
+      // record, so the wording read back for years before records is never this one's.
+      (adoptedOutside.length ? ` ${adoptedOutside.length} need(s) planned outside the TDP are in it now: ` +
+        adoptedOutside.slice(0, 20).map((n: TrainingNeed) => `${auditNeedTitle(n.title)} for ${JSON.stringify(replaceNeedOf(n).employee)}`).join("; ") +
+        (adoptedOutside.length > 20 ? `; and ${adoptedOutside.length - 20} more` : "") + "." : ""));
     // A row mapped to the officer's own record gives them needs too, as an addition by replacement does: flagged.
     const self = accountEmployee(req.user)?.id;
     const ownCount = self ? perEmployee.find(p => p.employeeId === self)?.imported ?? 0 : 0;
     if (ownCount > 0) flagSelfApproval(req.user, `added ${ownCount} need(s) to their own FY ${fiscalYear} plan by uploading the TDP`);
+    flagOwnAdopted("uploading");
 
     if (imported > 0) {
       notify({ role: UserRole.HR_OFFICER }, {
@@ -9365,26 +9448,35 @@ app.get("/api/training/needs/catalog", authenticateToken, (req: any, res: any) =
   if (!requireTrainingPlanRole(req, res)) return;
   const fiscalYear = (typeof req.query.fiscalYear === "string" && req.query.fiscalYear) || activeFiscalYearLabel();
 
-  const byTitle = new Map<string, { title: string; employees: Set<string>; categories: Set<TrainingNeedCategory> }>();
+  // Per title: who lists it in the TDP's own way, and who planned it outside the TDP (12ae), apart.
+  const byTitle = new Map<string, { title: string; employees: Set<string>; outsiders: Set<string>; categories: Set<TrainingNeedCategory>; inTdp: boolean; outside?: OutsideTdpNeed }>();
   const logins = loginsByStaff();
   for (const need of db.trainingNeeds || []) {
     if (need.fiscalYear !== fiscalYear) continue;
     const key = normalizeTitle(need.title);
     if (!key) continue;
-    if (!byTitle.has(key)) byTitle.set(key, { title: need.title, employees: new Set(), categories: new Set() });
+    if (!byTitle.has(key)) byTitle.set(key, { title: need.title, employees: new Set(), outsiders: new Set(), categories: new Set(), inTdp: false });
     const entry = byTitle.get(key)!;
     entry.categories.add(need.category);
+    // A title only needs outside the TDP list (12ae) puts no seminar in it: the first one's justification goes with it,
+    // for the seminar's own to start from.
+    if (!need.outsideTdp) entry.inTdp = true;
+    else if (!entry.outside) entry.outside = need.outsideTdp;
     // Counted only while they are still with the office (src/staffStatus.ts), as the picker lists them. The title stays
-    // either way: it is still in the TDP, and "Plan needs covered" must still be able to untick it.
+    // either way, so "Plan needs covered" can still untick it.
     const emp = employeeByKey(String(need.employeeId || ""));
-    if (emp && staffStillWithOffice(emp, logins)) entry.employees.add(emp.id);
+    if (emp && staffStillWithOffice(emp, logins)) (need.outsideTdp ? entry.outsiders : entry.employees).add(emp.id);
   }
 
-  // Mandated trainings first (12z Part D), then by how many people list them.
+  // Mandated trainings first (12z Part D), then by how many people list them. The count is who "Add a seminar from the
+  // plan" would seat: the TDP's own listers for a training in it, and those who planned it outside the TDP only for one
+  // it doesn't list, whose seminar is held under its own justification (the code review).
   const mandates = trainingMandateIndex();
   const data: TrainingNeedCatalogItem[] = catalogOrder([...byTitle.values()].map(e => {
     const mandate = mandateFor(e.title, mandates);
-    return { title: e.title, employeeCount: e.employees.size, categories: [...e.categories], ...(mandate ? { mandate } : {}) };
+    const outside = !e.inTdp && e.outside ? outsideJustification(e.outside) : null;
+    const employeeCount = e.inTdp ? e.employees.size : e.outsiders.size;
+    return { title: e.title, employeeCount, categories: [...e.categories], ...(mandate ? { mandate } : {}), ...(outside ? { outside } : {}) };
   }));
 
   // Whether the year's TDP is in (R9): planning starts from it, and says so when it isn't.
@@ -9410,7 +9502,7 @@ app.get("/api/training/needs", authenticateToken, (req: any, res: any) => {
     status: "success",
     data: {
       fiscalYear, asOf, offices: buildTrainingPlan(fiscalYear, asOf), tdp: tdpForClient(tdp), carried: counts.carried, added: counts.added,
-      choices, choicesFrom: !tdp ? null : tdp.trainings?.length ? "tdp" : "plan"
+      outside: counts.outside, choices, choicesFrom: !tdp ? null : tdp.trainings?.length ? "tdp" : "plan"
     }
   });
 });
@@ -9439,8 +9531,8 @@ function trainingNeedKey(employeeInternalId: string, category: string, title: st
 /**
  * The single place a training need is validated and created.
  *
- * Since R9 needs come from the TDP's upload (the inline add-box is gone), and since 12ad one at
- * a time from "Add Training Need" too. `seen` is the caller's dedupe index, seeded once from the
+ * Since R9 needs come from the TDP's upload (the inline add-box is gone), and since 12ad from
+ * "Add Training Need" too, several in one save. `seen` is the caller's dedupe index, seeded once from the
  * year's plan: a scan per need would be O(n^2) with an employee lookup inside it, at 480 needs.
  *
  * `idSuffix` exists because `Date.now()` is not unique across a bulk insert: hundreds of
@@ -9489,105 +9581,316 @@ function createTrainingNeed(
 // quote would pass for more of the line.
 function auditNeedTitle(title: unknown): string {
   // Cut again after cleaning: normalising can lengthen a title many times over.
-  return JSON.stringify(cleanText(String(title ?? "").slice(0, 300)).slice(0, 300));
+  return quoteWords(cleanText(String(title ?? "").slice(0, 300)).slice(0, 300));
 }
 
-// A need is added through the TDP (R9): uploading the year's, or an amended one in its place; or one of its trainings
-// at a time, through the route below (12ad). Any other title stays refused here.
+// HR's own words quoted for an audit line or a notice: curly quotes made straight first, so a title, a name or a
+// reference can't close its quotes and read as another field (the security review of 12ae; Phase 4's remarks do the same).
+function quoteWords(text: unknown): string {
+  return JSON.stringify(String(text ?? "").replace(/[“”]/g, '"').replace(/[‘’]/g, "'"));
+}
+
+// A need is added through the TDP (R9): uploading the year's, or an amended one in its place; through Add Training Need,
+// one of its trainings for people it doesn't list (12ad, `/additions`) or a training it doesn't list, marked outside it
+// (12ae, `/outside`). Any other title stays refused here.
 app.post("/api/training/needs", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   res.status(409).json({ status: "error", message: PLAN_FROM_TDP });
 });
 
-// "Add Training Need" (the user's request of 2026-11-08, 12ad): one of the uploaded TDP's own trainings, under a column
-// where the TDP lists it, for someone it couldn't list (a new hire, a new designation). Adding a need makes the TDP
-// identify the person for every seminar covering it, so they can be seated with no justification (12z): the addition
-// is logged, HR and the Administrator are told, and an officer's own plan is flagged.
+// The active year and its TDP, for an addition to Plan A (12ad, 12ae): the year the screen showed, required, so a tab
+// left open across a new fiscal year can't add to another one, with a TDP in force for it, and the year's needs. Answers
+// the refusal itself and returns null.
+function additionYear(res: any, body: any): { fiscalYear: string; tdp: TdpUpload; yearNeeds: TrainingNeed[] } | null {
+  const fiscalYear = typeof body.fiscalYear === "string" ? body.fiscalYear : "";
+  const fy = (db.fiscalYears || []).find((f: any) => f.label === fiscalYear);
+  if (!fy) {
+    res.status(400).json({ status: "error", message: "Reload the page: the plan's fiscal year wasn't found." });
+    return null;
+  }
+  if (fy.status !== "Active") {
+    res.status(400).json({ status: "error", message: fy.status === "Closed" ? `The ${fiscalYear} plan is closed and cannot be changed.` : `FY ${fiscalYear} isn't the active fiscal year.` });
+    return null;
+  }
+  const tdp = currentTdp(db.tdpUploads, fiscalYear);
+  if (!tdp) {
+    res.status(409).json({ status: "error", message: `No TDP has been uploaded for FY ${fiscalYear} yet: upload it first, then add needs to the plan.` });
+    return null;
+  }
+  return { fiscalYear, tdp, yearNeeds: (db.trainingNeeds || []).filter((n: TrainingNeed) => n && n.fiscalYear === fiscalYear) };
+}
+
+// The employees an addition names, every one checked before anything is written (12ad, 12ae): found, chosen once, still
+// with the office (12ab), and no other staff record carrying their id. The TDP rule counts a need for every record
+// carrying its key as its id or its staff code (7j), so with such a record the need would identify both and the log
+// would name one: refused until the staff codes are corrected (the security review; the live data has no such clash).
+// Answers the refusal itself and returns null.
+function additionPeople(res: any, employeeIds: string[]): { emp: Employee; who: string }[] | null {
+  const people: { emp: Employee; who: string }[] = [];
+  // Worked out once for the save, not once a person (both reviews).
+  const logins = loginsByStaff();
+  for (const key of employeeIds) {
+    const emp = employeeByKey(key);
+    if (!emp) {
+      res.status(404).json({ status: "error", message: employeeIds.length > 1 ? "One of the employees chosen was not found: reload the page." : "That employee was not found." });
+      return null;
+    }
+    const who = cleanText(emp.fullName || emp.id).slice(0, 200);
+    if (people.some(p => p.emp === emp)) {
+      res.status(400).json({ status: "error", message: `${who} is chosen twice.` });
+      return null;
+    }
+    if (!staffStillWithOffice(emp, logins)) {
+      res.status(409).json({ status: "error", message: `${who} is no longer with the office, so no need can be added to their plan.` });
+      return null;
+    }
+    if ((db.employees || []).some((e: Employee) => e && e !== emp && (e.id === emp.id || e.employeeId === emp.id))) {
+      res.status(409).json({
+        status: "error",
+        message: `Another staff record carries ${who}'s record id as its own id or staff code, so a need added here would count for both. Correct the staff codes first.`
+      });
+      return null;
+    }
+    people.push({ emp, who });
+  }
+  return people;
+}
+
+// What an addition writes: each training for each person, less what they already have this year (matched by both of
+// their ids, as the plan's needs are read), which is skipped and said, never added twice (the user's decision of
+// 2026-11-09). The year's needs are sorted by person once for the save. When everyone already has everything, it answers
+// 409 itself, saying who has what, and returns null.
+function additionPlan(res: any, people: { emp: Employee; who: string }[], trainings: NeedAdditionTraining[], yearNeeds: TrainingNeed[]) {
+  const needsByPerson = new Map<string, TrainingNeed[]>();
+  for (const n of yearNeeds) {
+    const person = needPersonKey(n.employeeId);
+    const list = needsByPerson.get(person);
+    if (list) list.push(n);
+    else needsByPerson.set(person, [n]);
+  }
+  const needsOf = (person: string) => needsByPerson.get(person) ?? [];
+  const plan = additionPairs(people.map(p => p.emp.id), trainings, needsOf);
+  const skipped = plan.skip.map(s => ({ employeeId: s.employeeId, title: s.title, where: existingNeedText(s.existing) }));
+  if (plan.add.length === 0) {
+    const whoOf = (person: string) => people.find(p => p.emp.id === person)?.who ?? person;
+    const only = plan.skip.length === 1 ? plan.skip[0] : null;
+    res.status(409).json({
+      status: "error",
+      // Titles quoted cleaned, as the log quotes them: a direction mark in a workbook title can't turn the line around.
+      message: only
+        ? `They already have ${auditNeedTitle(only.title)} in their plan (${existingNeedText(only.existing)}).`
+        : `Nothing to add: everyone chosen already has ${trainings.length === 1 ? "this training" : "these trainings"}. ` + plan.skip.slice(0, 20)
+          .map(s => `${JSON.stringify(whoOf(s.employeeId))} has ${auditNeedTitle(s.title)} (${existingNeedText(s.existing)})`).join("; ") +
+          (plan.skip.length > 20 ? `; and ${plan.skip.length - 20} more.` : "."),
+      data: { skipped }
+    });
+    return null;
+  }
+  return { ...plan, skipped, needsOf };
+}
+
+// "Add Training Need" (the user's requests of 2026-11-08 and 2026-11-09, 12ad): the uploaded TDP's own trainings, each
+// under a column where the TDP lists it, for people it couldn't list (new hires, new designations). One save gives every
+// ticked training to every ticked employee, less what each already has (skipped, and said). Adding a need makes the TDP
+// identify its person for every seminar covering it, so they can be seated with no justification (12z): each person's
+// additions are logged, HR and the Administrator are told, and an officer's own plan is flagged. HR and the
+// Administrator; one transaction.
 app.post("/api/training/needs/additions", authenticateToken, transactional((req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const body = req.body || {};
-  // The year the screen showed, required: a tab left open across a new fiscal year can't add to another one.
-  const fiscalYear = typeof body.fiscalYear === "string" ? body.fiscalYear : "";
-  const fy = (db.fiscalYears || []).find((f: any) => f.label === fiscalYear);
-  if (!fy) return res.status(400).json({ status: "error", message: "Reload the page: the plan's fiscal year wasn't found." });
-  if (fy.status !== "Active") {
-    return res.status(400).json({ status: "error", message: fy.status === "Closed" ? `The ${fiscalYear} plan is closed and cannot be changed.` : `FY ${fiscalYear} isn't the active fiscal year.` });
-  }
-  const tdp = currentTdp(db.tdpUploads, fiscalYear);
-  if (!tdp) return res.status(409).json({ status: "error", message: `No TDP has been uploaded for FY ${fiscalYear} yet: upload it first, then add needs from it.` });
-  if (typeof body.employeeId !== "string" || !body.employeeId.trim()) return res.status(400).json({ status: "error", message: "Choose the employee." });
-  const emp = employeeByKey(body.employeeId);
-  if (!emp) return res.status(404).json({ status: "error", message: "That employee was not found." });
-  const who = cleanText(emp.fullName || emp.id).slice(0, 200);
-  if (!staffStillWithOffice(emp)) {
-    return res.status(409).json({ status: "error", message: `${who} is no longer with the office, so no need can be added to their plan.` });
-  }
-  // The TDP rule counts a need for every staff record carrying its key as its id or its staff code (7j). With another
-  // record carrying this person's id, the need would identify both and the log would name one, so it is refused until
-  // the staff codes are corrected (the security review; the live data has no such clash).
-  if ((db.employees || []).some((e: any) => e && e !== emp && (e.id === emp.id || e.employeeId === emp.id))) {
-    return res.status(409).json({
-      status: "error",
-      message: `Another staff record carries ${who}'s record id as its own id or staff code, so a need added here would count for both. Correct the staff codes first.`
-    });
-  }
+  const year = additionYear(res, body);
+  if (!year) return;
+  const { fiscalYear, tdp, yearNeeds } = year;
 
-  // Their needs this year, matched by both of their ids, as the plan's needs are read (7j).
-  const person = emp.id;
-  const yearNeeds = (db.trainingNeeds || []).filter((n: TrainingNeed) => n && n.fiscalYear === fiscalYear);
-  const personNeeds = yearNeeds.filter((n: TrainingNeed) => needPersonKey(n.employeeId) === person);
   // The TDP's own list of trainings, or, for a record kept before lists were, the year's plan standing in for it, which
   // the log and the notice say (both reviews).
   const fromPlan = !tdp.trainings?.length;
-  const read = readNeedAddition(body, { choices: tdpTrainingChoices(tdp.trainings, yearNeeds), personNeeds });
-  if ("problem" in read) return res.status(read.duplicate ? 409 : 400).json({ status: "error", message: read.problem });
-  const { category, title, basis, note } = read.value;
+  const read = readNeedAdditions(body, { choices: tdpTrainingChoices(tdp.trainings, yearNeeds) });
+  if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
+  const { employeeIds, trainings, basis, note } = read.value;
 
-  const seen = new Set(personNeeds.map((n: TrainingNeed) => trainingNeedKey(person, n.category, n.title)));
-  const made = createTrainingNeed(emp, category, title, fiscalYear, req.user.username, seen, crypto.randomUUID().slice(0, 8));
-  if (!made.need) return res.status(400).json({ status: "error", message: made.message });
+  const people = additionPeople(res, employeeIds);
+  if (!people) return;
+  const plan = additionPlan(res, people, trainings, yearNeeds);
+  if (!plan) return;
+  const { needsOf, skipped } = plan;
+
   const actor = cleanText(req.user.fullName || req.user.username).slice(0, 200);
-  made.need.addedAfterTdp = {
-    basis,
-    ...(note ? { note } : {}),
-    addedBy: { id: req.user.id, name: actor, role: req.user.role },
-    addedAt: new Date().toISOString()
-  };
-
-  // A seat on the year's seminars this need now stands behind (its person's own Plan A lists it, 12z), named in the log.
-  const yearSeminars = (db.trainingPrograms || []).filter(p => p && p.fiscalYear === fiscalYear && !p.archivedBeforeUse);
-  const seatedOn = seatedFor(db.trainingParticipants, yearSeminars, needPersonKey).get(`${person}|${normalizeTitle(title)}`);
-  // The seminars it brings into the TDP: they covered no need in the plan before it, so they read "Not in the TDP" until
-  // now (12z Part C).
-  const titlesBefore = new Set(yearNeeds.map((n: TrainingNeed) => normalizeTitle(n.title)));
-  const entering = seminarsEnteringTdp(yearSeminars, titlesBefore, new Set([...titlesBefore, normalizeTitle(title)]))
-    .map(s => JSON.stringify(cleanText(s.title).slice(0, 300)));
-  const column = TRAINING_NEED_COLUMN_LABELS[category];
-  // The basis is HR's word: the facts to check "hired after the TDP" against go with it. The note stays out of the log
-  // and the notices, as a justification's reason does (12z): it may mention someone's leave.
-  const basisText = needAdditionBasisLabel(basis) + (basis === "Hired after the TDP" ? ` (${hiredAfterTdpFacts(person, fiscalYear)})` : "");
+  const addedAt = new Date().toISOString();
+  const basisLabel = needAdditionBasisLabel(basis);
   const sourceText = fromPlan ? " Chosen from the year's plan: this TDP was uploaded before its list of trainings was kept." : "";
-  logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need (after the TDP)",
-    `${JSON.stringify(actor)} added ${auditNeedTitle(title)} under ${JSON.stringify(column)} to ${JSON.stringify(who)}'s FY ${fiscalYear} plan, after the TDP. ` +
-    `Basis: ${basisText}.` + sourceText +
-    (seatedOn !== undefined ? ` They are seated on ${JSON.stringify(cleanText(seatedOn).slice(0, 300))}, which this need now stands behind.` : "") +
-    (entering.length ? ` It brings ${entering.slice(0, 20).join("; ")}${entering.length > 20 ? `; and ${entering.length - 20} more` : ""} into the TDP.` : ""));
-  // One's own plan, under either of one's record's ids (7j), is flagged.
-  const mine = accountEmployee(req.user);
-  if (mine && (mine.id === person || mine.employeeId === person)) {
-    flagSelfApproval(req.user, `added ${auditNeedTitle(title)} to their own FY ${fiscalYear} plan, after the TDP`);
+  const yearSeminars = (db.trainingPrograms || []).filter(p => p && p.fiscalYear === fiscalYear && !p.archivedBeforeUse);
+  const seats = seatedFor(db.trainingParticipants, yearSeminars, needPersonKey);
+  // The plan's titles so far, so each person's entry names the seminars their own additions bring into the TDP: seminars
+  // that covered no need in the plan before, and read "Not in the TDP" until now (12z Part C).
+  // (A need outside the TDP puts no seminar in it, 12ae.)
+  const titlesSoFar = new Set(yearNeeds.filter((n: TrainingNeed) => !n.outsideTdp).map((n: TrainingNeed) => normalizeTitle(n.title)));
+  // The facts to check "hired after the TDP" against, worked out once for the save, worded as hiredAfterTdpFacts words them.
+  const uploadedOn = manilaDateOf(tdp.uploadedAt) || "on a date not recorded";
+  const hiredOn = (emp: Employee) => {
+    const hired = String(emp.dateHired || "");
+    return isCalendarDate(hired) ? hired : "on a date not on record";
+  };
+  const added: TrainingNeed[] = [];
+  const done: { person: string; who: string; hired: string; titles: string[]; columns: string[] }[] = [];
+  for (const { emp, who } of people) {
+    const person = emp.id;
+    const mine = plan.add.filter(p => p.employeeId === person);
+    // Everything ticked was already theirs: nothing is written for them, so nothing is logged.
+    if (mine.length === 0) continue;
+    const seen = new Set(needsOf(person).map((n: TrainingNeed) => trainingNeedKey(person, n.category, n.title)));
+    for (const pair of mine) {
+      const made = createTrainingNeed(emp, pair.category, pair.title, fiscalYear, req.user.username, seen, crypto.randomUUID().slice(0, 8));
+      // (Every pair was checked above: a refusal here undoes the whole save.)
+      if (!made.need) return res.status(400).json({ status: "error", message: made.message });
+      made.need.addedAfterTdp = { basis, ...(note ? { note } : {}), addedBy: { id: req.user.id, name: actor, role: req.user.role }, addedAt };
+      added.push(made.need);
+    }
+    // The seats these needs now stand behind (their person's own Plan A lists them, 12z), and the seminars they bring in.
+    const seatsBehind = [...new Set(mine.map(p => seats.get(`${person}|${normalizeTitle(p.title)}`)).filter((s): s is string => s !== undefined))]
+      .map(s => JSON.stringify(cleanText(s).slice(0, 300)));
+    const before = new Set(titlesSoFar);
+    for (const p of mine) titlesSoFar.add(normalizeTitle(p.title));
+    const entering = seminarsEnteringTdp(yearSeminars, before, titlesSoFar).map(s => JSON.stringify(cleanText(s.title).slice(0, 300)));
+    const theirSkips = plan.skip.filter(s => s.employeeId === person);
+    // The basis is HR's word: the facts to check "hired after the TDP" against go with it. The note stays out of the log
+    // and the notices, as a justification's reason does (12z): it may mention someone's leave.
+    const facts = basis === "Hired after the TDP" ? ` (hired ${hiredOn(emp)}; the FY ${fiscalYear} TDP in force was uploaded ${uploadedOn})` : "";
+    const many = (list: string[]) => list.slice(0, 20).join("; ") + (list.length > 20 ? `; and ${list.length - 20} more` : "");
+    logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need (after the TDP)",
+      `${JSON.stringify(actor)} added ${mine.map(p => `${auditNeedTitle(p.title)} under ${JSON.stringify(TRAINING_NEED_COLUMN_LABELS[p.category])}`).join(", ")} ` +
+      `to ${JSON.stringify(who)}'s FY ${fiscalYear} plan, after the TDP. Basis: ${basisLabel}${facts}.` + sourceText +
+      (seatsBehind.length ? ` They are seated on ${many(seatsBehind)}, which ${mine.length === 1 ? "this need now stands" : "these needs now stand"} behind.` : "") +
+      (entering.length ? ` ${mine.length === 1 ? "It brings" : "These needs bring"} ${many(entering)} into the TDP.` : "") +
+      (theirSkips.length ? ` Skipped, already in their plan: ${theirSkips.map(s => `${auditNeedTitle(s.title)} (${existingNeedText(s.existing)})`).join("; ")}.` : ""));
+    done.push({ person, who, hired: hiredOn(emp), titles: mine.map(p => p.title), columns: mine.map(p => TRAINING_NEED_COLUMN_LABELS[p.category]) });
   }
-  // Told as a replacement is: HR, and the Administrator (who approves the plan, HSAC's step 6) unless they did it.
+
+  // One's own plan, under either of one's record's ids (7j), is flagged, once for the save.
+  const self = accountEmployee(req.user);
+  const own = self ? done.filter(d => d.person === self.id || d.person === self.employeeId) : [];
+  if (own.length > 0) {
+    flagSelfApproval(req.user, `added ${own.flatMap(d => d.titles).map(t => auditNeedTitle(t)).join(", ")} to their own FY ${fiscalYear} plan, after the TDP`);
+  }
+
+  // One notice for the save, told as a replacement is: HR, and the Administrator (who approves the plan, HSAC's step 6)
+  // unless they did it. It names everyone (at most 50: HR can't open the audit log, so the notice is their record);
+  // people given the same trainings are named together, and a list of trainings is cut at 5 ("and N more"; each
+  // person's audit entry has them all). For "hired after the TDP", each one's hire date and the TDP's upload day.
+  const hiredFacts = basis !== "Hired after the TDP" ? ""
+    : done.length === 1 ? ` (hired ${done[0].hired}; the FY ${fiscalYear} TDP in force was uploaded ${uploadedOn})`
+    : ` (hired: ${done.map(d => `${JSON.stringify(d.who)} ${d.hired}`).join(", ")}; the FY ${fiscalYear} TDP in force was uploaded ${uploadedOn})`;
+  const listOf = (d: { titles: string[]; columns: string[] }) =>
+    d.titles.slice(0, 5).map((t, i) => `${auditNeedTitle(t)} (${d.columns[i]})`).join(", ") + (d.titles.length > 5 ? `, and ${d.titles.length - 5} more` : "");
+  const groups: { key: string; names: string[]; list: string }[] = [];
+  for (const d of done) {
+    const key = d.titles.map((t, i) => `${d.columns[i]}|${t}`).join("\n");
+    const group = groups.find(g => g.key === key);
+    if (group) group.names.push(JSON.stringify(d.who));
+    else groups.push({ key, names: [JSON.stringify(d.who)], list: listOf(d) });
+  }
+  const whom = done.length === 1
+    ? `${listOf(done[0])} to ${JSON.stringify(done[0].who)}'s FY ${fiscalYear} plan`
+    : `${added.length} needs to the FY ${fiscalYear} plan for ${done.length} employees: ` + groups.map(g => `${g.names.join(", ")}: ${g.list}`).join("; ");
   const notice = {
-    title: "Training need added after the TDP",
-    message: `${JSON.stringify(actor)} added ${auditNeedTitle(title)} (${column}) to ${JSON.stringify(who)}'s FY ${fiscalYear} plan. Basis: ${basisText}.${sourceText}`,
+    title: `Training need${added.length === 1 ? "" : "s"} added after the TDP`,
+    message: `${JSON.stringify(actor)} added ${whom}. Basis: ${basisLabel}${hiredFacts}.${sourceText}` +
+      (plan.skip.length ? ` ${plan.skip.length} skipped: already in their plan.` : ""),
     type: "info" as const,
     link: { tab: "training_development", subTab: "plan-a" }
   };
   notify({ role: UserRole.HR_OFFICER }, notice);
   if (req.user.role !== UserRole.SUPER_ADMIN) notify({ role: UserRole.SUPER_ADMIN }, notice);
   saveDB();
-  res.json({ status: "success", message: `Added ${cleanText(title)} (${column}) to ${who}'s FY ${fiscalYear} plan.`, data: made.need });
+  const skipTail = plan.skip.length ? `; ${plan.skip.length} skipped: already in their plan.` : ".";
+  const message = added.length === 1
+    ? `Added ${cleanText(added[0].title)} (${TRAINING_NEED_COLUMN_LABELS[added[0].category]}) to ${done[0].who}'s FY ${fiscalYear} plan${skipTail}`
+    : `Added ${added.length} training needs for ${done.length} employee${done.length === 1 ? "" : "s"} to the FY ${fiscalYear} plan${skipTail}`;
+  res.json({ status: "success", message, data: { added, skipped } });
+}));
+
+// A training the uploaded TDP doesn't list, planned for several employees in one save (12ae, the user's request of
+// 2026-11-09): a typed title, a column, and the justification a seminar outside the TDP needs (12z Part C: why, the
+// reason, who approved it, a reference optional). The need is marked (`outsideTdp`) and never counts as a TDP need: the
+// TDP rule and a seminar's standing leave it out (`coveredNeeds`, `seminarCoversPlan`), so nobody is identified by it, and a
+// seminar for it still asks why it is held outside the TDP (the screen fills that in from this justification). A title
+// the TDP lists is refused, pointing back to its list. One training a save, since the justification is for that
+// training. HR and the Administrator; one transaction.
+app.post("/api/training/needs/outside", authenticateToken, transactional((req: any, res: any) => {
+  if (!requireTrainingPlanRole(req, res)) return;
+  const body = req.body || {};
+  const year = additionYear(res, body);
+  if (!year) return;
+  const { fiscalYear, tdp, yearNeeds } = year;
+  const read = readOutsideTdpAddition(body, { choices: tdpTrainingChoices(tdp.trainings, yearNeeds), today: manilaToday() });
+  if ("problem" in read) return res.status(400).json({ status: "error", message: read.problem });
+  const { employeeIds, training, justification: j } = read.value;
+
+  const people = additionPeople(res, employeeIds);
+  if (!people) return;
+  const plan = additionPlan(res, people, [training], yearNeeds);
+  if (!plan) return;
+  const { needsOf, skipped } = plan;
+  // Bounded for the year (the security review): a training planned this widely belongs in an amended TDP.
+  const already = yearNeeds.filter((n: TrainingNeed) => n.outsideTdp && !n.carriedFromFiscalYear).length;
+  if (already + plan.add.length > OUTSIDE_NEEDS_MAX_PER_YEAR) {
+    return res.status(409).json({
+      status: "error",
+      message: `FY ${fiscalYear} already has ${already} needs planned outside the TDP; the most is ${OUTSIDE_NEEDS_MAX_PER_YEAR}. A training planned this widely belongs in an amended TDP.`
+    });
+  }
+
+  const actor = cleanText(req.user.fullName || req.user.username).slice(0, 200);
+  const addedAt = new Date().toISOString();
+  const column = TRAINING_NEED_COLUMN_LABELS[training.category];
+  const titleText = auditNeedTitle(training.title);
+  // The justification as a seminar's is logged (12z Part C): the kind and who approved it, HR's words quoted, and the
+  // reference; never the reason, which may mention someone's leave.
+  const why = `Kind: ${j.kind}. Approved by: ${quoteWords(j.approvedBy.name)}, ${quoteWords(j.approvedBy.position)}.` +
+    (j.referenceNo ? ` Reference: ${quoteWords(j.referenceNo)}${j.referenceDate ? ` (${j.referenceDate})` : ""}.` : "");
+  const added: TrainingNeed[] = [];
+  const done: { person: string; who: string }[] = [];
+  for (const { emp, who } of people) {
+    const person = emp.id;
+    // Already theirs: nothing is written for them, so nothing is logged.
+    if (!plan.add.some(p => p.employeeId === person)) continue;
+    const seen = new Set(needsOf(person).map((n: TrainingNeed) => trainingNeedKey(person, n.category, n.title)));
+    const made = createTrainingNeed(emp, training.category, training.title, fiscalYear, req.user.username, seen, crypto.randomUUID().slice(0, 8));
+    // (Every pair was checked above: a refusal here undoes the whole save.)
+    if (!made.need) return res.status(400).json({ status: "error", message: made.message });
+    made.need.outsideTdp = { ...j, addedBy: { id: req.user.id, name: actor, role: req.user.role }, addedAt };
+    added.push(made.need);
+    logEvent(req.user.id, req.user.username, req.user.role, "Add Training Need (outside the TDP)",
+      `${quoteWords(actor)} added ${titleText} under ${JSON.stringify(column)} to ${quoteWords(who)}'s FY ${fiscalYear} plan, ` +
+      `outside the TDP. ${why}`);
+    done.push({ person, who });
+  }
+
+  // One's own plan, under either of one's record's ids (7j), is flagged, once for the save.
+  const self = accountEmployee(req.user);
+  if (self && done.some(d => d.person === self.id || d.person === self.employeeId)) {
+    flagSelfApproval(req.user, `added ${titleText} to their own FY ${fiscalYear} plan, outside the TDP`);
+  }
+
+  // One notice for the save, as for a need added from the TDP: HR, and the Administrator unless they did it. It names
+  // everyone (HR can't open the audit log, so the notice is their record) and says what the mark means.
+  const notice = {
+    title: "Training outside the TDP added",
+    message: `${quoteWords(actor)} added ${titleText} (${column}), which the TDP doesn't list, to the FY ${fiscalYear} plan of ` +
+      `${namesText(done.map(d => quoteWords(d.who)))}: ${j.kind}, approved by ${quoteWords(j.approvedBy.name)}. ` +
+      `It isn't a TDP need: a seminar for it still asks why it is held outside the TDP.` +
+      (plan.skip.length ? ` ${plan.skip.length} skipped: already in their plan.` : ""),
+    type: "info" as const,
+    link: { tab: "training_development", subTab: "plan-a" }
+  };
+  notify({ role: UserRole.HR_OFFICER }, notice);
+  if (req.user.role !== UserRole.SUPER_ADMIN) notify({ role: UserRole.SUPER_ADMIN }, notice);
+  saveDB();
+  const skipTail = plan.skip.length ? `; ${plan.skip.length} skipped: already in their plan.` : ".";
+  const message = done.length === 1
+    ? `Added ${training.title} (${column}) to ${done[0].who}'s FY ${fiscalYear} plan, outside the TDP${skipTail}`
+    : `Added ${training.title} (${column}) to the FY ${fiscalYear} plan of ${done.length} employees, outside the TDP${skipTail}`;
+  res.json({ status: "success", message, data: { added, skipped } });
 }));
 
 // Monitoring's decision on a need, and its remarks. Its title and column are the TDP's (R9): they change only through
@@ -9618,21 +9921,22 @@ app.put("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
 });
 
 // A need leaves the plan only through an amended TDP (R9), except one no TDP put there: carried in unmet from an earlier
-// year by the rollover (the user's decision of 2026-11-02), or added after the TDP (12ad). No replacement removes either,
-// so HR and the Administrator may.
+// year by the rollover (the user's decision of 2026-11-02), added after the TDP (12ad), or for a training outside it
+// (12ae). No replacement removes these, so HR and the Administrator may.
 app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) => {
   if (!requireTrainingPlanRole(req, res)) return;
   const index = (db.trainingNeeds || []).findIndex(n => n && n.id === req.params.id);
   if (index === -1) return res.status(404).json({ status: "error", message: "Training need not found." });
   const need = db.trainingNeeds[index];
-  // The TDP's own needs change only through an amended TDP; one carried in, or added by HR after the TDP (12ad), can be
-  // removed while it isn't in use.
-  if (!need.carriedFromFiscalYear && !need.addedAfterTdp) return res.status(409).json({ status: "error", message: PLAN_FROM_TDP });
+  // The TDP's own needs change only through an amended TDP; one carried in, added by HR after the TDP (12ad) or for a
+  // training outside it (12ae) can be removed while it isn't in use.
+  if (!need.carriedFromFiscalYear && !need.addedAfterTdp && !need.outsideTdp) return res.status(409).json({ status: "error", message: PLAN_FROM_TDP });
   const fy = (db.fiscalYears || []).find((f: any) => f.label === need.fiscalYear);
   if (fy?.status === "Closed") return res.status(400).json({ status: "error", message: `The ${need.fiscalYear} plan is closed and cannot be changed.` });
 
   // In use, it stays, as a replacement keeps it: its person seated for it on a seminar of the year (their seat would
-  // read "Outside the TDP", 12z), or accomplished (Monitoring would lose it). Only a need that no longer applies goes.
+  // read "Outside the TDP", 12z; one outside the TDP identifies nobody, but it is their plan's record of the training they
+  // are seated for), or accomplished (Monitoring would lose it). Only a need that no longer applies goes.
   const emp = employeeByKey(need.employeeId);
   const who = cleanText(emp?.fullName || need.employeeId).slice(0, 200);
   const yearSeminars = (db.trainingPrograms || []).filter(p => p && p.fiscalYear === need.fiscalYear && !p.archivedBeforeUse);
@@ -9640,7 +9944,8 @@ app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) =>
   if (seatedOn !== undefined) {
     return res.status(409).json({
       status: "error",
-      message: `${auditNeedTitle(need.title)} can't be removed for ${who}: they are seated for it on ${JSON.stringify(cleanText(seatedOn).slice(0, 300))}, and their seat rests on it.`
+      message: `${auditNeedTitle(need.title)} can't be removed for ${who}: they are seated for it on ${JSON.stringify(cleanText(seatedOn).slice(0, 300))}, ` +
+        (need.outsideTdp ? "and it is their plan's record of that training." : "and their seat rests on it.")
     });
   }
   if (needAccomplishment(need, manilaToday()).accomplished) {
@@ -9648,8 +9953,8 @@ app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) =>
   }
 
   // As a replacement says it (12z Part C): the seminars this was the last need in the plan for now cover none, so they
-  // read "Not in the TDP" and need their own justification.
-  const yearNeeds = (db.trainingNeeds || []).filter(n => n && n.fiscalYear === need.fiscalYear);
+  // read "Not in the TDP" and need their own justification. Only the TDP's own needs count (12ae).
+  const yearNeeds = (db.trainingNeeds || []).filter(n => n && n.fiscalYear === need.fiscalYear && !n.outsideTdp);
   const outside = seminarsLeavingTdp(
     yearSeminars,
     new Set(yearNeeds.map(n => normalizeTitle(n.title))),
@@ -9657,8 +9962,10 @@ app.delete("/api/training/needs/:id", authenticateToken, (req: any, res: any) =>
   ).map(s => ({ id: s.id, title: cleanText(s.title).slice(0, 300) }));
 
   db.trainingNeeds.splice(index, 1);
+  const outsideText = need.outsideTdp ? `outside the TDP (${cleanText(String(need.outsideTdp.kind ?? "")).slice(0, 100) || "no kind recorded"})` : "";
   const origin = need.carriedFromFiscalYear
-    ? `carried in unmet from FY ${cleanText(String(need.carriedFromFiscalYear)).slice(0, 20)}`
+    ? `carried in unmet from FY ${cleanText(String(need.carriedFromFiscalYear)).slice(0, 20)}${outsideText ? `, ${outsideText}` : ""}`
+    : need.outsideTdp ? `added ${outsideText}`
     : `added after the TDP (${needAdditionBasisLabel(need.addedAfterTdp?.basis)})`;
   logEvent(req.user.id, req.user.username, req.user.role, "Remove Training Need",
     `Removed ${auditNeedTitle(need.title)} (${need.category}), ${origin}, ` +

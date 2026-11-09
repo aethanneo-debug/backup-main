@@ -1,18 +1,21 @@
 import { Ref } from "react";
 import { CheckCircle2, Eye, FileSpreadsheet, Plus, RefreshCw } from "lucide-react";
 import { TdpUpload } from "../../types";
-import { addedChangesText, addedText, count, manilaDay, tdpCountsText, uploadedBy } from "./tdpText";
+import { addedChangesText, addedText, count, manilaDay, outsideText, tdpCountsText, uploadedBy } from "./tdpText";
 
 // The TDP is uploaded once a year (the instructor's review, R9: "may button dito na TDP na uploaded"). Once it is in,
 // this bar takes the upload panel's place: which file, when and by whom, what it holds, and the ways on: Plan A
 // read-only, replacing it with an amended TDP (the only way the TDP's own needs change), and, for HR and the
-// Administrator, adding one of its trainings to someone's plan (12ad: a new hire, a new designation).
+// Administrator, adding its trainings to the plans of people it doesn't list (12ad: new hires, new designations), or a
+// training it doesn't list (12ae). Needs from either are counted apart: none of them is the uploaded file's.
 interface Props {
   tdp: TdpUpload;
   /** Needs carried in from an earlier year: in the plan, but not part of the TDP. */
   carried: number;
-  /** Needs HR added after the TDP, one of its trainings at a time: in the plan, but not part of the uploaded file. */
+  /** Needs HR added after the TDP, from its own trainings: in the plan, but not part of the uploaded file. */
   added?: number;
+  /** Needs for trainings the TDP doesn't list (12ae): in the plan, and never the TDP's. */
+  outside?: number;
   /** The replace flow is open below (the Replace button controls it). */
   replacing: boolean;
   replacePanelId: string;
@@ -30,7 +33,7 @@ const FOCUS = "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-5
 const BUTTON = `inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition-colors ${FOCUS}`;
 
 export default function TdpStatusBar({
-  tdp, carried, added = 0, replacing, replacePanelId, onView, onReplace, canPlan = false, onAdd, headingRef, replaceRef, addRef
+  tdp, carried, added = 0, outside = 0, replacing, replacePanelId, onView, onReplace, canPlan = false, onAdd, headingRef, replaceRef, addRef
 }: Props) {
   const day = manilaDay(tdp.uploadedAt);
   const who = uploadedBy(tdp);
@@ -67,8 +70,10 @@ export default function TdpStatusBar({
               )}
             </p>
             <p className="text-xs text-slate-600">{tdpCountsText(tdp, carried)}.</p>
-            {/* Not the TDP's: one of its trainings each, for someone it didn't list (12ad). */}
+            {/* Not the TDP's: its trainings, added for people it didn't list (12ad). */}
             {added > 0 && <p data-tdp="added-count" className="text-xs text-slate-600">{addedText(added)}.</p>}
+            {/* Nor these: trainings the TDP doesn't list, planned with why they are held (12ae). */}
+            {outside > 0 && <p data-tdp="outside-count" className="text-xs text-slate-600">{outsideText(outside)}.</p>}
             {tdp.kind === "replace" && (
               <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-700">
                 <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700">

@@ -13,11 +13,16 @@ export interface TdpNeedFields {
   title: string;
 }
 
-/** A need of the year's plan, as a replacement sees it. `addedAfterTdp` marks one HR added after the TDP (12ad). */
+/** A need of the year's plan, as a replacement sees it. `addedAfterTdp` marks one HR added after the TDP (12ad), and
+ * `outsideTdp` one for a training the TDP doesn't list (12ae): a replacement treats both alike. */
 export interface TdpPlanNeed extends TdpNeedFields {
   carriedFromFiscalYear?: string;
   addedAfterTdp?: unknown;
+  outsideTdp?: unknown;
 }
+
+/** Added by HR, not the TDP's: one of its trainings after it (12ad), or a training outside it (12ae). */
+const addedByHr = (need: Partial<TdpPlanNeed>) => !!(need.addedAfterTdp || need.outsideTdp);
 
 export const tdpNeedKey = (need: TdpNeedFields) => `${need.employeeId}|${need.category}|${normalizeTitle(need.title)}`;
 
@@ -97,11 +102,12 @@ export interface TdpReplacePlan<N> {
   kept: { need: N; use: TdpNeedUse }[];
   /** Carried from an earlier year by the rollover: not part of any TDP, so always kept. */
   carried: N[];
-  /** Added by HR after the TDP (12ad) and not in the amended TDP: always kept, as carried ones are (the user's
-   * decision of 2026-11-08). */
+  /** Added by HR, after the TDP (12ad) or for a training outside it (12ae), and not in the amended TDP: always kept, as
+   * carried ones are (the user's decisions of 2026-11-08 and 2026-11-09). */
   addedKept: N[];
-  /** Added by HR after the TDP and listed by the amended TDP for the same person, in place (in `unchanged`) or under
-   * another column (in `moved`): the TDP's from then on, so the caller clears their mark. */
+  /** Added by HR (either way) and listed by the amended TDP for the same person, in place (in `unchanged`) or under
+   * another column (in `moved`), or carried in still marked outside the TDP and listed under its own column: the TDP's
+   * from then on, so the caller clears their mark. Adopting one outside the TDP makes the TDP identify its person. */
   adopted: N[];
 }
 
@@ -142,27 +148,33 @@ export function planTdpReplace<N extends TdpPlanNeed>(
   // The trainings each person still has after it, in some column: the amended TDP's, those carried in, and those HR
   // added (all stay). A copy left out of its own column isn't kept for a seat while its person keeps the training
   // elsewhere: they stay identified for it (12z) without it, and keeping it would list the training twice. One
-  // accomplished still stays (Monitoring's record).
+  // accomplished still stays (Monitoring's record). A need outside the TDP (12ae) identifies nobody, so it doesn't count
+  // here: the seat would be left with nothing in the TDP under it.
   const keepsTraining = new Set<string>([
     ...incoming.map(personTitle),
-    ...current.filter(n => n.carriedFromFiscalYear || n.addedAfterTdp).map(personTitle)
+    ...current.filter(n => (n.carriedFromFiscalYear || addedByHr(n)) && !n.outsideTdp).map(personTitle)
   ]);
   const movedTo = new Set<TdpNeedFields>();
   for (const need of current) {
-    if (need.carriedFromFiscalYear) continue;
+    if (need.carriedFromFiscalYear) {
+      // Carried in still marked outside the TDP (12ae), and now listed by it for the same person and column: the TDP's
+      // from then on, as an addition is.
+      if (addedByHr(need) && wanted.has(tdpNeedKey(need))) plan.adopted.push(need);
+      continue;
+    }
     if (wanted.has(tdpNeedKey(need))) {
       plan.unchanged.push(need);
-      if (need.addedAfterTdp) plan.adopted.push(need);
+      if (addedByHr(need)) plan.adopted.push(need);
       continue;
     }
     const target = addedFor.get(personTitle(need))?.find(n => !movedTo.has(n));
     if (target) {
       movedTo.add(target);
       plan.moved.push({ need, category: target.category });
-      if (need.addedAfterTdp) plan.adopted.push(need);
+      if (addedByHr(need)) plan.adopted.push(need);
       continue;
     }
-    if (need.addedAfterTdp) {
+    if (addedByHr(need)) {
       plan.addedKept.push(need);
       continue;
     }
@@ -229,7 +241,10 @@ export function currentTdp(records: unknown, fiscalYear: string): TdpUpload | nu
         changes: {
           added: whole(c.added), removed: whole(c.removed), kept: whole(c.kept), moved: whole(c.moved),
           ...(whole(c.addedKept) ? { addedKept: whole(c.addedKept) } : {}),
-          ...(whole(c.adopted) ? { adopted: whole(c.adopted) } : {})
+          ...(whole(c.adopted) ? { adopted: whole(c.adopted) } : {}),
+          // Needs for trainings outside the TDP (12ae), which the bar words apart.
+          ...(whole(c.outsideKept) ? { outsideKept: whole(c.outsideKept) } : {}),
+          ...(whole(c.outsideAdopted) ? { outsideAdopted: whole(c.outsideAdopted) } : {})
         }
       } : {}),
       ...(Array.isArray(r.keptNeedIds) ? { keptNeedIds: r.keptNeedIds.filter((id: unknown): id is string => typeof id === "string") } : {}),
@@ -239,17 +254,23 @@ export function currentTdp(records: unknown, fiscalYear: string): TdpUpload | nu
   return null;
 }
 
-/** How many of a year's needs are its TDP's, and for how many employees; and how many were carried in, or added by HR
- * after the TDP (12ad; neither is part of it). */
+/** How many of a year's needs are its TDP's, and for how many employees; and how many were carried in, added by HR
+ * after the TDP (12ad), or added for trainings outside it (12ae): none of them is part of it. A carried need counts as
+ * carried, whatever it was. */
 export function tdpCounts(needs: Array<Partial<TdpPlanNeed> & { fiscalYear?: string }> | null | undefined, fiscalYear: string) {
   const people = new Set<string>();
   let tdp = 0;
   let carried = 0;
   let added = 0;
+  let outside = 0;
   for (const need of Array.isArray(needs) ? needs : []) {
     if (!need || need.fiscalYear !== fiscalYear) continue;
     if (need.carriedFromFiscalYear) {
       carried++;
+      continue;
+    }
+    if (need.outsideTdp) {
+      outside++;
       continue;
     }
     if (need.addedAfterTdp) {
@@ -259,7 +280,7 @@ export function tdpCounts(needs: Array<Partial<TdpPlanNeed> & { fiscalYear?: str
     tdp++;
     if (typeof need.employeeId === "string") people.add(need.employeeId);
   }
-  return { needs: tdp, employees: people.size, carried, added };
+  return { needs: tdp, employees: people.size, carried, added, outside };
 }
 
 // The import's audit entry, as server.ts writes it:
@@ -291,7 +312,7 @@ export function recordsBeforeUploads(input: {
     !!n && typeof n === "object" && typeof (n as any).fiscalYear === "string");
   const recorded = new Set((Array.isArray(input.records) ? input.records : []).filter(Boolean).map((r: any) => r.fiscalYear));
   // (Needs HR added after the TDP aren't an upload either.)
-  const years = [...new Set(needs.filter(n => !n.carriedFromFiscalYear && !n.addedAfterTdp).map(n => n.fiscalYear))].filter(fy => !recorded.has(fy));
+  const years = [...new Set(needs.filter(n => !n.carriedFromFiscalYear && !addedByHr(n)).map(n => n.fiscalYear))].filter(fy => !recorded.has(fy));
   // Every start reads this, and the audit log is never trimmed: nothing to do, nothing read.
   if (years.length === 0) return [];
   // The entries the import wrote are short. A long one (a raw sheet name from before the names were cleaned) is passed

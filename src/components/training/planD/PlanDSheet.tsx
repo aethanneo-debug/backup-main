@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { TRAINING_NEED_CATEGORIES } from "../../../types";
 import { longDate } from "../evaluation/evaluationQueue";
 import PlanHeader from "../PlanHeader";
-import { PLAN_D_HEADINGS, PlanDSnapshot, hasNoNeeds, notAccomplishedText, planDLines } from "./planDRows";
+import { PLAN_D_HEADINGS, PlanDSnapshot, hasNoNeeds, notAccomplishedText, planDLines, planDNeedTitle } from "./planDRows";
 
 const COLUMN_COUNT = PLAN_D_HEADINGS.length;
 
@@ -97,7 +97,7 @@ export default function PlanDSheet({ plan }: { plan: PlanDSnapshot }) {
                             last ? "border-b-slate-600" : "border-b-slate-300"
                           }`;
                           return [
-                            <td key={`${c}-need`} className={cell}>{need?.title ?? ""}</td>,
+                            <td key={`${c}-need`} className={cell}>{planDNeedTitle(need)}</td>,
                             <td key={`${c}-not`} className={cell}>{notAccomplishedText(need)}</td>
                           ];
                         })

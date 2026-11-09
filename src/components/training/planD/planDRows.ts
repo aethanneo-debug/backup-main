@@ -61,6 +61,13 @@ export function notAccomplishedText(need: TrainingNeedRow | null): string {
   return need && !need.status?.accomplished ? need.title : "";
 }
 
+/** A need's title as the printed sheet and its CSV write it: one for a training the uploaded TDP doesn't list says so
+ * (12ae), so the official form never passes it off as the TDP's. Its NOT ACCOMPLISHED pair repeats the title alone. */
+export function planDNeedTitle(need: Pick<TrainingNeedRow, "title" | "outsideTdp"> | null | undefined): string {
+  if (!need) return "";
+  return need.outsideTdp ? `${need.title} (outside the TDP)` : need.title;
+}
+
 /** Column headings in the workbook's order — each need column followed by its pair. */
 export const PLAN_D_HEADINGS: string[] = [
   "Name",
@@ -95,7 +102,7 @@ export function planDCsvRows(plan: PlanDSnapshot): string[][] {
         rows.push([
           i === 0 ? emp.fullName : "",
           i === 0 ? emp.position : "",
-          ...TRAINING_NEED_CATEGORIES.flatMap(c => [line[c]?.title ?? "", notAccomplishedText(line[c])])
+          ...TRAINING_NEED_CATEGORIES.flatMap(c => [planDNeedTitle(line[c]), notAccomplishedText(line[c])])
         ]);
       });
     }

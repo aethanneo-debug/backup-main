@@ -2,6 +2,7 @@ import { Ref, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { PlanAImportAssignment, PlanAImportPreview, PlanAImportResult, TdpReplaceSummary as Summary, TdpUpload } from "../../../types";
 import { apiCall, apiErrorCode, type ApiError } from "../../../utils";
+import { hrKinds } from "../tdpText";
 import PlanAImportPreviewTable from "./PlanAImportPreview";
 import TdpReplaceSummary from "./TdpReplaceSummary";
 
@@ -27,15 +28,19 @@ interface Props {
 
 type Stage = "idle" | "reading" | "previewing" | "committing";
 
+/** One kind of HR's additions in the counts: "; of those added after the TDP, 2 kept and 1 now in the amended TDP". */
+const hrClause = (which: string, kept: number, adopted: number) => (kept || adopted
+  ? `; of those ${which}, ${[kept ? `${kept} kept` : "", adopted ? `${adopted} now in the amended TDP` : ""].filter(Boolean).join(" and ")}`
+  : "");
+
 /** "2 added, 3 removed, 0 kept because still in use, 461 unchanged." (and how many moved to another column, and what
- * happens to needs HR added after the TDP, if any: 12ad) */
+ * happens to needs HR added after the TDP (12ad) or for trainings outside it (12ae), each kind said apart, if any) */
 const countsText = (s: Summary) => {
-  const addedKept = (s.addedKept ?? []).length;
-  const adopted = (s.adopted ?? []).length;
+  const kept = hrKinds(s.addedKept);
+  const adopted = hrKinds(s.adopted);
   return `${s.added} added, ${(s.moved ?? []).length > 0 ? `${(s.moved ?? []).length} moved to another column, ` : ""}${(s.removed ?? []).length} removed, ` +
     `${(s.kept ?? []).length} kept because still in use, ${s.unchanged} unchanged` +
-    `${addedKept > 0 ? `; of those added after the TDP, ${addedKept} kept` : ""}` +
-    `${adopted > 0 ? `${addedKept > 0 ? " and" : "; of those added after the TDP,"} ${adopted} now in the amended TDP` : ""}.`;
+    `${hrClause("added after the TDP", kept.after, adopted.after)}${hrClause("outside the TDP", kept.outside, adopted.outside)}.`;
 };
 
 const REPLACE_STEPS = ["Upload the amended TDP", "Map its rows", "Check what changes", "Replace"];

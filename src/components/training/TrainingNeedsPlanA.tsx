@@ -13,8 +13,9 @@ import { addedChangesText, count } from "./tdpText";
 // and Plan A, what each employee still needs, comes from it. Until then the upload panel shows; once it is in, a bar
 // says which file, when and by whom, with Plan A behind "View uploaded TDP" (read-only) and "Replace with an amended
 // TDP", the only way the TDP's own needs change (the server refuses renaming or removing one). "Add Training Need"
-// gives someone the TDP doesn't list one of its trainings (12ad: a new hire, a new designation). Needs carried in unmet
-// from an earlier year are in the plan either way, apart from the TDP, and so are those added after it.
+// gives people the TDP doesn't list its trainings (12ad: new hires, new designations), or plans a training it doesn't
+// list (12ae). Needs carried in unmet from an earlier year are in the plan either way, apart from the TDP, and so are
+// those added after it or outside it.
 type Message = { tone: "success" | "warning"; text: string; detail?: string };
 type FocusTarget = "bar" | "replace" | "panel" | "upload" | "add";
 
@@ -51,10 +52,14 @@ function replacedMessage(result: PlanAImportResult, fiscalYear: string): Message
   };
   const file = result.tdp?.filename ? ` with “${result.tdp.filename}”` : "";
   const moved = changes.moved > 0 ? `${changes.moved} moved to another column, ` : "";
-  // What it did to the needs HR had added after the TDP (12ad), when there were any.
+  // What it did to the needs HR had added after the TDP (12ad), or for trainings outside it (12ae), when there were any.
+  const hrKept = result.replace?.addedKept ?? [];
+  const hrAdopted = result.replace?.adopted ?? [];
   const addedNote = addedChangesText(result.tdp?.changes ?? {
-    addedKept: (result.replace?.addedKept ?? []).length,
-    adopted: (result.replace?.adopted ?? []).length
+    addedKept: hrKept.filter(n => !n.outside).length,
+    adopted: hrAdopted.filter(n => !n.outside).length,
+    outsideKept: hrKept.filter(n => n.outside).length,
+    outsideAdopted: hrAdopted.filter(n => n.outside).length
   });
   const now = result.tdp ? `It now lists ${count(result.tdp.needs, "need")} for ${count(result.tdp.employees, "employee")}.` : "";
   return {
@@ -70,8 +75,10 @@ export default function TrainingNeedsPlanA({ onChanged, canPlan = false }: { onC
   const [fiscalYear, setFiscalYear] = useState("");
   const [tdp, setTdp] = useState<TdpUpload | null>(null);
   const [carried, setCarried] = useState(0);
-  // Needs added after the TDP this year, and the TDP's own trainings "Add Training Need" offers (12ad).
+  // Needs added after the TDP this year, and the TDP's own trainings "Add Training Need" offers (12ad); needs for
+  // trainings the TDP doesn't list (12ae).
   const [added, setAdded] = useState(0);
+  const [outside, setOutside] = useState(0);
   const [choices, setChoices] = useState<TdpTrainingChoice[]>([]);
   // The TDP's own list, or the year's plan for a TDP uploaded before its list was kept: the dialog says which.
   const [choicesFrom, setChoicesFrom] = useState<"tdp" | "plan" | null>(null);
@@ -109,6 +116,7 @@ export default function TrainingNeedsPlanA({ onChanged, canPlan = false }: { onC
       setTdp(res.data?.tdp ?? null);
       setCarried(Number(res.data?.carried) || 0);
       setAdded(Number(res.data?.added) || 0);
+      setOutside(Number(res.data?.outside) || 0);
       setChoices(Array.isArray(res.data?.choices) ? res.data.choices : []);
       setChoicesFrom(res.data?.choicesFrom === "plan" || res.data?.choicesFrom === "tdp" ? res.data.choicesFrom : null);
       setError("");
@@ -165,9 +173,9 @@ export default function TrainingNeedsPlanA({ onChanged, canPlan = false }: { onC
     load(true);
   }
 
-  // A need carried in from an earlier year, or one HR added after the TDP, is no TDP's, so these are what Plan A lets HR
-  // take out while they aren't in use (the user's decisions of 2026-11-02 and 2026-11-08; the server refuses any
-  // other). The window shows what came of it.
+  // A need carried in from an earlier year, one HR added after the TDP, or one for a training outside it (12ae), is no
+  // TDP's, so these are what Plan A lets HR take out while they aren't in use (the user's decisions of 2026-11-02 and
+  // 2026-11-08; the server refuses any other). The window shows what came of it.
   async function removeNeed(need: TrainingNeedRow): Promise<{ problem: string } | { outside: string[] }> {
     try {
       const res = await apiCall(`/api/training/needs/${encodeURIComponent(need.id)}`, { method: "DELETE" });
@@ -227,8 +235,9 @@ export default function TrainingNeedsPlanA({ onChanged, canPlan = false }: { onC
         <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800">Training and Development Plan, FY {fiscalYear}</h3>
         <p className="mt-0.5 text-xs text-slate-500">
           HR uploads the year's TDP once, from the RAB-1 workbook. Plan A, what each employee still needs, comes from it; its
-          needs change only through an amended TDP, and <strong>Add Training Need</strong> gives someone it doesn&rsquo;t list (a new
-          hire, a new designation) one of its trainings. Seminars they attend are checked off in <strong>Monitoring</strong>.
+          needs change only through an amended TDP, and <strong>Add Training Need</strong> gives people it doesn&rsquo;t list (new
+          hires, new designations) its trainings, or plans a training it doesn&rsquo;t list, marked &ldquo;Outside the TDP&rdquo;.
+          Seminars they attend are checked off in <strong>Monitoring</strong>.
         </p>
       </div>
 
@@ -237,6 +246,7 @@ export default function TrainingNeedsPlanA({ onChanged, canPlan = false }: { onC
           tdp={tdp}
           carried={carried}
           added={added}
+          outside={outside}
           replacing={replacing}
           replacePanelId={REPLACE_PANEL}
           onView={() => setViewing(true)}

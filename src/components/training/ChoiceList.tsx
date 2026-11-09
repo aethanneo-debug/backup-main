@@ -1,39 +1,43 @@
-import { KeyboardEvent, ReactNode, Ref, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
+import { KeyboardEvent, ReactNode, Ref, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Search, SearchX, X } from "lucide-react";
 import { matchesTerms, searchTerms } from "../../tableView";
 
-// One choice from a list that can be long, inside a dialog (Add Training Need, 12ad: the employee, then the training).
-// A search box over a list that is always shown, in the dialog's body rather than floating: the body scrolls, and would
-// clip a popup. The WAI-ARIA combobox with its listbox always open, as PlanNeedPicker has it: the focus stays in the
-// search box, Up and Down move through the rows, Enter chooses one, and Esc clears the search and goes no further (on
-// an empty box it is left to the dialog, which closes). Moving through the rows chooses nothing: a choice can change
-// the rest of the form (a training fills in its column), so it waits for Enter or a click.
-// Each row looks like a checklist's (the user, 2026-11-08: "a check box/list", one choice each): a box at its left,
-// ticked on the chosen row, as the participant picker draws its rows. Choosing another row moves the tick. The box is
-// drawn, not a control: the row is the listbox's option (aria-selected says which is chosen), and an input inside it
-// would add a tab stop the combobox pattern doesn't have.
+// Several choices from a list that can be long, inside a dialog (Add Training Need, 12ad: the employees and the
+// trainings; several of each in one save since the user's request of 2026-11-09). A search box over a list that is
+// always shown, in the dialog's body rather than floating: the body scrolls, and would clip a popup. The WAI-ARIA
+// combobox with its listbox always open and multi-selectable: the focus stays in the search box, Up and Down move through
+// the rows, Enter ticks or unticks the row they are on, and Esc clears the search and goes no further (on an empty box it
+// is left to the dialog, which closes). Moving through the rows ticks nothing.
+// Each row looks like a checklist's, as the participant picker draws its rows: a box at its left, ticked on every chosen
+// row. The box is drawn, not a control: the row is the listbox's option (aria-selected says whether it is ticked), and
+// an input inside it would add a tab stop the combobox pattern doesn't have.
 interface Props<T> {
+  /** Which list this is, on the wrapper as data-choice-list (for tests): "employees", "trainings". */
+  name: string;
   /** The visible label, with its required mark: it names the search box and the list. */
   label: ReactNode;
   items: T[];
   keyOf: (item: T) => string;
   /** What the search reads: accent-blind, every word must match (src/tableView.ts). */
   searchText: (item: T) => string;
-  /** A row that can't be chosen. It is still shown and reachable, so its reason is read out; Enter and clicks pass it by. */
+  /** A row that can't be ticked. It is still shown and reachable, so its reason is read out; Enter and clicks pass it
+   * by. A ticked row can always be unticked, whatever this says. */
   isDisabled?: (item: T) => boolean;
   renderItem: (item: T) => ReactNode;
-  /** The chosen row's key, "" for none. */
-  value: string;
-  onChoose: (item: T) => void;
+  /** The ticked rows' keys, this list's or not (the caller's own filter may leave some out of `items`). */
+  values: readonly string[];
+  onToggle: (item: T) => void;
   placeholder: string;
-  /** "employee", "training": for the counts ("3 of 21 employees"). */
+  /** "employee", "training": for the counts ("3 employees ticked"). */
   noun: string;
+  /** Ticked rows that aren't in `items` at all, as the count line words them ("1 under another column"). */
+  outsideText?: (n: number) => string;
   /** Instead of the box and the list, when there is nothing to choose from. */
   empty: ReactNode;
   disabled?: boolean;
   /** A line under the label: what the list holds. */
   hint?: ReactNode;
-  /** Ids of more text describing the box: the choice said in full (the search may hide its row), a problem with it. */
+  /** Ids of more text describing the box: a problem with it. */
   describedBy?: string;
   invalid?: boolean;
   inputRef?: Ref<HTMLInputElement>;
@@ -44,8 +48,8 @@ interface Props<T> {
 const SMALL_BUTTON = "rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
 
 export default function ChoiceList<T>({
-  label, items, keyOf, searchText, isDisabled, renderItem, value, onChoose, placeholder, noun, empty, disabled = false, hint,
-  describedBy, invalid = false, inputRef, listHeight
+  name, label, items, keyOf, searchText, isDisabled, renderItem, values, onToggle, placeholder, noun, outsideText, empty,
+  disabled = false, hint, describedBy, invalid = false, inputRef, listHeight
 }: Props<T>) {
   const id = useId();
   const optionId = (i: number) => `${id}-option-${i}`;
@@ -58,12 +62,26 @@ export default function ChoiceList<T>({
   const listRef = useRef<HTMLUListElement>(null);
   useImperativeHandle(inputRef, () => box.current as HTMLInputElement);
 
+  const ticked = useMemo(() => new Set(values), [values]);
   const terms = searchTerms(query);
   const searching = terms.length > 0;
   const shown = items.filter(item => matchesTerms(terms, searchText(item)));
   const active = shown.findIndex(item => keyOf(item) === activeKey);
-  const choosable = (item: T) => !disabled && !isDisabled?.(item);
+  // A ticked row can always be unticked; one that can't be ticked is passed by.
+  const toggleable = (item: T) => !disabled && (ticked.has(keyOf(item)) || !isDisabled?.(item));
   const plural = (n: number) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+  // What the count line says: how many are ticked, and how many of those the search, or the caller's filter, hides.
+  const inList = new Set(items.map(keyOf));
+  const outside = values.filter(k => !inList.has(k)).length;
+  const hiddenBySearch = searching ? items.filter(item => ticked.has(keyOf(item)) && !matchesTerms(terms, searchText(item))).length : 0;
+  const tickedText = values.length === 0 ? `No ${noun} ticked yet.`
+    : `${plural(values.length)} ticked${hiddenBySearch ? `, ${hiddenBySearch} hidden by the search` : ""}${
+      outside ? `, ${outsideText ? outsideText(outside) : `${outside} not in this list`}` : ""}.`;
+  // Read out as the search changes (ticking is read out by the dialog, once).
+  const searchNote = !searching ? ""
+    : shown.length === 0 ? `No ${noun} matches “${query.trim()}”.${hiddenBySearch ? ` ${hiddenBySearch} ticked hidden by the search.` : ""}`
+    : `${shown.length} of ${plural(items.length)} shown.${hiddenBySearch ? ` ${hiddenBySearch} ticked hidden by the search.` : ""}`;
 
   // The active row is kept in view inside the list only: scrollIntoView would move the dialog's body as well.
   useEffect(() => {
@@ -74,18 +92,18 @@ export default function ChoiceList<T>({
     else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
   }, [active, activeKey]);
 
-  function choose(item: T) {
-    if (!choosable(item)) return;
+  function toggle(item: T) {
+    if (!toggleable(item)) return;
     setActiveKey(keyOf(item));
-    onChoose(item);
+    onToggle(item);
   }
 
-  // From no row, the first press lands on the choice when it is shown (else the first or last row), as a listbox
-  // starts from its selected option; then one row at a time, stopping at either end.
+  // From no row, the first press lands on the first ticked row shown (else the first or last row), as a listbox starts
+  // from its selected options; then one row at a time, stopping at either end.
   function move(step: 1 | -1) {
     if (shown.length === 0) return;
     if (active < 0) {
-      const at = shown.findIndex(item => keyOf(item) === value);
+      const at = shown.findIndex(item => ticked.has(keyOf(item)));
       setActiveKey(keyOf(shown[at >= 0 ? at : step === 1 ? 0 : shown.length - 1]));
       return;
     }
@@ -94,10 +112,14 @@ export default function ChoiceList<T>({
 
   function search(next: string) {
     setQuery(next);
-    // Typing puts the first row that can be chosen under Enter; an empty box goes back to the choice.
+    // Typing puts a row under Enter: the first match not ticked yet, which Enter then ticks, else the first that can be
+    // unticked. So a search for one more can't untick one already chosen (the code review). An empty box keeps the row
+    // it was on.
     const words = searchTerms(next);
-    const first = items.find(item => choosable(item) && matchesTerms(words, searchText(item)));
-    setActiveKey(words.length === 0 ? value : first ? keyOf(first) : "");
+    if (words.length === 0) return;
+    const matches = items.filter(item => toggleable(item) && matchesTerms(words, searchText(item)));
+    const first = matches.find(item => !ticked.has(keyOf(item))) ?? matches[0];
+    setActiveKey(first ? keyOf(first) : "");
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -107,7 +129,7 @@ export default function ChoiceList<T>({
     } else if (e.key === "Enter") {
       if (active >= 0) {
         e.preventDefault();
-        choose(shown[active]);
+        toggle(shown[active]);
       }
     } else if (e.key === "Escape" && query) {
       e.preventDefault();
@@ -122,7 +144,7 @@ export default function ChoiceList<T>({
   };
 
   return (
-    <div className="min-w-0 space-y-1.5">
+    <div data-choice-list={name} className="min-w-0 space-y-1.5">
       <div>
         <label id={`${id}-label`} htmlFor={items.length > 0 ? `${id}-box` : undefined} className="block text-[11px] font-semibold text-slate-700">
           {label}
@@ -170,10 +192,12 @@ export default function ChoiceList<T>({
               </button>
             )}
           </div>
-          {/* Read out as it changes; on screen only while searching. */}
-          <p id={`${id}-count`} aria-live="polite" className={searching && shown.length > 0 ? "text-[11px] text-slate-600" : "sr-only"}>
-            {!searching ? "" : shown.length === 0 ? `No ${noun} matches “${query.trim()}”.` : `${shown.length} of ${plural(items.length)} shown.`}
+          {/* How many are ticked, and how many the search hides, always on screen; described on the box. */}
+          <p id={`${id}-count`} data-choice-count className="text-[11px] text-slate-600">
+            {searching && shown.length > 0 && <>{shown.length} of {items.length} shown · </>}
+            <span className={values.length > 0 ? "font-semibold text-slate-700" : undefined}>{tickedText}</span>
           </p>
+          <p aria-live="polite" className="sr-only">{searchNote}</p>
 
           {searching && shown.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-xs text-slate-500">
@@ -187,6 +211,7 @@ export default function ChoiceList<T>({
             ref={listRef}
             id={`${id}-list`}
             role="listbox"
+            aria-multiselectable="true"
             aria-labelledby={`${id}-label`}
             hidden={shown.length === 0}
             onMouseDown={e => e.preventDefault()}
@@ -194,32 +219,34 @@ export default function ChoiceList<T>({
           >
             {shown.map((item, i) => {
               const key = keyOf(item);
-              const chosen = key === value;
-              const off = !!isDisabled?.(item);
+              const on = ticked.has(key);
+              // Greyed only while it can't be ticked: once ticked it can always be unticked.
+              const off = !on && !!isDisabled?.(item);
               return (
                 <li
                   key={key}
                   id={optionId(i)}
                   role="option"
-                  aria-selected={chosen}
+                  data-key={key}
+                  aria-selected={on}
                   aria-disabled={off || undefined}
-                  onClick={() => choose(item)}
+                  onClick={() => toggle(item)}
                   className={`px-3 py-2 transition-colors duration-150 motion-reduce:transition-none ${
-                    chosen ? "bg-blue-50/60 shadow-[inset_3px_0_0_0_var(--color-blue-600)]" : ""
-                  } ${off ? "cursor-not-allowed" : chosen ? "cursor-pointer" : "cursor-pointer hover:bg-slate-50"} ${
+                    on ? "bg-blue-50/60 shadow-[inset_3px_0_0_0_var(--color-blue-600)]" : ""
+                  } ${off || disabled ? "cursor-not-allowed" : on ? "cursor-pointer" : "cursor-pointer hover:bg-slate-50"} ${
                     focused && i === active ? "ring-2 ring-inset ring-blue-500" : ""
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    {/* The checklist's box: ticked on the chosen row, greyed on one that can't be chosen. */}
+                    {/* The checklist's box: ticked on every chosen row, greyed on one that can't be ticked. */}
                     <span
                       aria-hidden="true"
-                      data-check={chosen ? "on" : "off"}
+                      data-check={on ? "on" : "off"}
                       className={`mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors duration-150 motion-reduce:transition-none ${
-                        chosen ? "border-blue-600 bg-blue-600 text-white" : off ? "border-slate-300 bg-slate-100" : "border-slate-400 bg-white"
+                        on ? "border-blue-600 bg-blue-600 text-white" : off ? "border-slate-300 bg-slate-100" : "border-slate-400 bg-white"
                       }`}
                     >
-                      {chosen && <Check size={12} strokeWidth={3} />}
+                      {on && <Check size={12} strokeWidth={3} />}
                     </span>
                     <div className="min-w-0 flex-1">{renderItem(item)}</div>
                   </div>

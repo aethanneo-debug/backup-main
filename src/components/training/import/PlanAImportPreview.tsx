@@ -195,7 +195,7 @@ export default function PlanAImportPreviewTable({
             {preview.totals.blocks === 1 ? "" : "s"} mapped to an employee.{" "}
             <span className="text-slate-500">
               Anyone in the plan no row is mapped to is left out of the amended TDP: their TDP needs are removed, unless still in
-              use. Needs carried from an earlier year, or added after the TDP, stay.
+              use. Needs carried from an earlier year, added after the TDP, or planned outside it, stay.
             </span>
           </p>
         ) : (

@@ -4,8 +4,14 @@ import { datesText, type DivisionGap } from "../../divisionCoverage";
 // The participant picker's intro box and footer, moved out of ParticipantPickerModal.tsx when the instructor's
 // review's view made it long (R10, 2026-11-03). Who is listed is worked out in pickGroups.ts.
 
-/** What is particular to this seminar. The order itself is in "How this list is ordered". */
-export function PickerIntro({ coversNeeds, seminarCovers, fyText }: { coversNeeds: boolean; seminarCovers: boolean; fyText: string }) {
+/** What is particular to this seminar. The order itself is in "How this list is ordered". `outsidePlanners`: candidates
+ * whose own plan lists it outside the TDP (12ae), listed with the plan's people but not identified by the TDP. */
+export function PickerIntro({ coversNeeds, seminarCovers, fyText, outsidePlanners = 0 }: {
+  coversNeeds: boolean;
+  seminarCovers: boolean;
+  fyText: string;
+  outsidePlanners?: number;
+}) {
   return (
     <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 p-3 rounded-lg flex gap-2">
       <ListChecks size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
@@ -13,17 +19,31 @@ export function PickerIntro({ coversNeeds, seminarCovers, fyText }: { coversNeed
         Tick the employees who will attend.{" "}
         {coversNeeds && (
           <>This seminar covers Plan A needs, so at first only the employees whose plan lists it are shown; their badge says in
-          which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>.{" "}
+          which column: for their <strong>function</strong>, an <strong>additional designation</strong>, or <strong>career advancement</strong>
+          {outsidePlanners > 0 && <>, or that they planned it <strong>outside the TDP</strong></>}.{" "}
           {/* (Not when the seminar's own justification covers everyone: then nobody is asked why.) */}
           {!seminarCovers && (
             <>Someone the TDP doesn&rsquo;t list is under <strong>All employees</strong>: tick them and record why they are seated, for
-            this seminar only. To plan their training, use <strong>Add Training Need</strong> on Training Needs.{" "}</>
+            this seminar only. To plan their training, use <strong>Add Training Need</strong> on Training Needs.{" "}
+            {outsidePlanners > 0 && (
+              <>Those who planned it outside the TDP are listed here, but the TDP doesn&rsquo;t identify them: seating one needs a
+              justification too.{" "}</>
+            )}</>
           )}</>
         )}
-        {seminarCovers && (
+        {/* Covering needs, but none the TDP lists: trainings planned outside it (12ae), or needs that left the plan. */}
+        {seminarCovers && (coversNeeds ? (
+          outsidePlanners > 0 ? (
+            <>The trainings it covers were planned <strong>outside the TDP</strong>, so it is held outside the TDP with its own
+            justification, which covers everyone on it.{" "}</>
+          ) : (
+            <>None of the trainings it covers is in the TDP, so it is held <strong>outside the TDP</strong> with its own
+            justification, which covers everyone on it.{" "}</>
+          )
+        ) : (
           <>This seminar covers no Plan A need, so it is held <strong>outside the TDP</strong> with its own justification, which
           covers everyone on it.{" "}</>
-        )}
+        ))}
         You see first those with <strong>no training yet in {fyText}</strong>, and anyone whose need for it is mandated; the
         lists under them open the rest.
       </p>

@@ -9,6 +9,7 @@ import {
 import { apiCall, formatDate, getLocalTodayString } from "../../utils";
 import { unmetMandatedFirst } from "../../trainingMandates";
 import PlanHeader from "./PlanHeader";
+import { outsideKindText } from "./tdpText";
 
 const SOURCE_LABEL: Record<string, string> = {
   "seminar": "Seminar in the system",
@@ -33,6 +34,11 @@ function NeedStatusRow({ need, onOverride, busy }: {
       {/* The law or a rule requires it (HSAC RAB 1's step 5): listed first while unmet. */}
       {need.mandate && (
         <p className="text-[9px] font-semibold text-blue-700 leading-snug">Mandated: {need.mandate.basis}</p>
+      )}
+      {/* A training the uploaded TDP doesn't list, planned with why it is held (12ae): tracked here as any need is,
+          never the TDP's. */}
+      {need.outsideTdp && (
+        <p data-need-mark="outside" className="text-[9px] font-semibold text-purple-800 leading-snug">Outside the TDP: {outsideKindText(need.outsideTdp.kind)}</p>
       )}
       <div className="flex items-center justify-between gap-2">
         <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wide ${

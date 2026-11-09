@@ -1,5 +1,6 @@
 // The participant picker's badges for a candidate: eligibility, trainings this fiscal year, the Plan A
-// columns that list the seminar, new hires, target matches and other seminars on the same days. Moved out
+// columns that list the seminar (or that they planned it outside the TDP, 12ae), new hires, target matches and
+// other seminars on the same days. Moved out
 // of ParticipantPickerModal.tsx when it grew (Part A of the TDP exceptions, 12z). The dropdown's option
 // labels that were here went with the dropdown (2026-10-30); the picker's checklist is ParticipantChecklist.tsx,
 // and each row is PickRowItem.tsx.
@@ -32,6 +33,9 @@ export const TONE = {
   // missing) in amber; a justification kept here or on record in slate.
   unjustified: "bg-amber-50 text-amber-800 border-amber-200",
   justified: "bg-slate-50 text-slate-700 border-slate-300",
+  // A training planned outside the TDP (12ae): purple, apart from "Needs this" (the TDP's, emerald), the justification
+  // tones (amber, slate) and the blue of mandated and first trainings. The same everywhere the mark shows.
+  outsideTdp: "bg-purple-50 text-purple-800 border-purple-200",
   // The top of the order, one for each free seat. Solid navy, unlike every other badge, so the rows to
   // start from stand out in a long list.
   recommended: "bg-blue-600 text-white border-blue-600"
@@ -91,6 +95,15 @@ export function CandidateBadges({ c, selected = false, omitIneligible = false, c
           Needs this{columnsText(c) ? `: ${columnsText(c)}` : ""}
           {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
           <span className="sr-only"> ({c.needMatches.join("; ")})</span>
+        </span>
+      )}
+      {/* Their own plan lists this training outside the TDP (12ae): listed with the plan's listers, but the TDP doesn't
+          identify them by it, so the order doesn't change and, on a seminar in the TDP, seating them needs a reason. */}
+      {(c.outsideNeeds ?? []).length > 0 && (
+        <span data-badge="outside" className={`${BADGE} ${TONE.outsideTdp}`} title={`Plan A, outside the TDP: ${c.outsideNeeds!.join("; ")}`}>
+          Planned outside the TDP
+          {/* The titles, for keyboard and screen-reader users (the tooltip needs a mouse). */}
+          <span className="sr-only"> ({c.outsideNeeds!.join("; ")})</span>
         </span>
       )}
       {/* A need the law requires (HSAC RAB 1's step 5): such listers come first. The scale (the panel's

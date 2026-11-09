@@ -2,14 +2,14 @@ import { KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "reac
 import { AlertTriangle, CalendarCheck, ClipboardList, Loader2, Search } from "lucide-react";
 import {
   TdpUpload,
-  TrainingCandidate,
   TrainingNeedCatalogItem,
   TrainingNeedCategory,
   TRAINING_NEED_CATEGORIES,
   TRAINING_NEED_COLUMN_LABELS
 } from "../../types";
 import { apiCall } from "../../utils";
-import { onScreenToChoose } from "./pickGroups";
+import { TONE } from "./candidateBadges";
+import { outsideKindText } from "./tdpText";
 
 /**
  * "Add a seminar from the plan": a search-as-you-type picker over one fiscal year's Plan A
@@ -38,9 +38,12 @@ interface PlanNeedPickerProps {
   /** The year's TDP as the plan's list gave it (R9): null when none is uploaded yet, undefined while it loads or
    * when the list couldn't be loaded. */
   onTdp?: (tdp: TdpUpload | null | undefined) => void;
+  /** The year's catalog once loaded ([] while it loads or couldn't be): which trainings were planned only outside the
+   * TDP (12ae), for the seminar rows' marks. */
+  onCatalog?: (needs: TrainingNeedCatalogItem[]) => void;
 }
 
-export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPlan, onTdp }: PlanNeedPickerProps) {
+export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPlan, onTdp, onCatalog }: PlanNeedPickerProps) {
   const headingId = useId();
   const helpId = useId();
   const listId = useId();
@@ -55,15 +58,18 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
-  // Read through a ref, so a parent's new callback doesn't reload the list.
+  // Read through refs, so a parent's new callback doesn't reload the list.
   const tdpListener = useRef(onTdp);
   tdpListener.current = onTdp;
+  const catalogListener = useRef(onCatalog);
+  catalogListener.current = onCatalog;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     tdpListener.current?.(undefined);
+    catalogListener.current?.([]);
     apiCall(`/api/training/needs/catalog?fiscalYear=${encodeURIComponent(fiscalYear)}`)
       .then(res => {
         if (cancelled) return;
@@ -71,6 +77,7 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
           setNeeds(res.data?.needs ?? []);
           setTdp(res.data?.tdp ?? null);
           tdpListener.current?.(res.data?.tdp ?? null);
+          catalogListener.current?.(Array.isArray(res.data?.needs) ? res.data.needs : []);
         } else setError(res.message || "");
       })
       .catch(err => { if (!cancelled) setError(err?.message || ""); })
@@ -288,6 +295,16 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
                         {need.mandate && (
                           <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700">Mandated: {need.mandate.basis}</span>
                         )}
+                        {/* Planned outside the TDP (12ae): its seminar is held outside it too, and Save asks why. */}
+                        {need.outside && (
+                          <span
+                            data-need-mark="outside"
+                            title={`The uploaded TDP doesn't list it (${outsideKindText(need.outside.kind)}): a seminar for it is held outside the TDP, and Save asks why, filled in from the need's justification`}
+                            className={`rounded border px-1.5 py-0.5 font-semibold ${TONE.outsideTdp}`}
+                          >
+                            Outside the TDP
+                          </span>
+                        )}
                         <span>{need.employeeCount} employee{need.employeeCount === 1 ? "" : "s"}</span>
                         {columns.map(c => (
                           <span key={c} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-semibold text-slate-600">{c}</span>
@@ -310,6 +327,7 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
             Picking a training adds a seminar row with its title, seating the employees who listed it and have no training yet
             this fiscal year, and anyone whose need for it is mandated. Max is set to that number: to add others, raise Max on
             the row, then open Participants.
+            {needs.some(n => n.outside) && " A training marked Outside the TDP isn't in it: its seminar is held outside the TDP, and Save asks why, filled in from the need's justification."}
           </p>
           <p className="sr-only" aria-live="polite">
             {open ? (visible.length === 0 ? noMatch : `${visible.length} training${visible.length === 1 ? "" : "s"} found.`) : ""}
@@ -322,22 +340,6 @@ export default function PlanNeedPicker({ fiscalYear, seminars, onPick, onOpenPla
 
 /** How a row added from the plan is getting its participants. UI-only: the server ignores it. */
 export type PlanFill = "loading" | "done" | "nobody" | "failed";
-
-/**
- * The employees to seat in a seminar named `title` that covers these plan needs: those whose
- * Plan A lists any of them, whom the server would enrol, and who are on the participant picker's
- * screen at first: no training yet this fiscal year, or a mandated need for it (the instructor's
- * review, R10). Same endpoint and ranking as the picker (GET /api/training/recommendations). Ids
- * are Employee.id, the form participantIds stores.
- */
-export async function eligibleListers(title: string, fiscalYear: string, needTitles: string[] = [title]): Promise<string[]> {
-  const params = new URLSearchParams({ title, fiscalYear, maxParticipants: "999" });
-  for (const need of needTitles) params.append("needTitle", need);
-  const res = await apiCall(`/api/training/recommendations?${params.toString()}`);
-  if (res?.status !== "success") throw new Error(res?.message || "Unable to load recommendations.");
-  const candidates: TrainingCandidate[] = res.data?.candidates ?? [];
-  return candidates.filter(c => c.needsThis && onScreenToChoose(c, false)).map(c => c.employeeId);
-}
 
 /**
  * The Participants cell's note for a row added from the plan. It is a live region, so a
