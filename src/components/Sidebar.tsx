@@ -40,11 +40,12 @@ interface SidebarProps {
 // (tabsOpenTo), so a notification can never lead somewhere the sidebar wouldn't.
 function navigationFor(role: UserRole) {
   return [
-    { 
-      id: "dashboard", 
-      label: "Dashboard", 
+    {
+      id: "dashboard",
+      label: "Dashboard",
       icon: LayoutDashboard,
-      visible: role === UserRole.SUPER_ADMIN
+      // The Administrator's dashboard, or HR's own (12ag Part B): App draws the one for the role.
+      visible: role === UserRole.SUPER_ADMIN || role === UserRole.HR_OFFICER
     },
     
     // HR or ADMIN or EMPLOYEE

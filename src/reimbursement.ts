@@ -6,8 +6,17 @@
 // Finance pays it from the Reimbursement Queue once it is validated. The employee's form and the server
 // run the same checks.
 import { centavos, pesos } from "./liquidationMoney";
+import { isCalendarDate } from "./inputText";
 
 export type SeminarClaimMode = "liquidation" | "waiting" | "reimbursement";
+
+/** The period a seminar's report covers: the seminar's own first and last days, which HR sets (the user's request of
+ * 2026-11-10, known-issues 12af), as a liquidation report states the activity's dates. null when they aren't both real
+ * dates in order (an older seminar), and the report keeps what was typed. */
+export function seminarPeriod(startDate: unknown, endDate: unknown): { from: string; to: string } | null {
+  if (!isCalendarDate(startDate) || !isCalendarDate(endDate) || endDate < startDate) return null;
+  return { from: startDate, to: endDate };
+}
 
 /** How a seat's report settles, from its current cash advance (the latest record for it, if any):
  * released, a Liquidation of it; a request waiting for Finance, nothing yet (Finance releases or declines
@@ -16,6 +25,13 @@ export function seminarClaimMode(advanceStatus: string | null | undefined): Semi
   if (advanceStatus === "Released" || advanceStatus === "Liquidated") return "liquidation";
   if (advanceStatus === "Requested") return "waiting";
   return "reimbursement";
+}
+
+/** A claim Finance has validated and not yet paid: what the Reimbursement Queue offers to pay (the server refuses to
+ * pay a report not yet validated). Moved here from finance/claimChecks.ts, which still exports it, so a shared rule
+ * (HR's dashboard, src/hrDashboard.ts) doesn't reach into the screens. */
+export function isPayableClaim(sub: { status?: unknown; reimbursementStatus?: unknown; reimbursementAmount?: unknown } | null | undefined): boolean {
+  return sub?.status === "Completed" && sub?.reimbursementStatus === "Awaiting Reimbursement" && Number(sub?.reimbursementAmount || 0) > 0;
 }
 
 /** What the employee can claim back: their allowance less what HR recorded as spent for them by hand

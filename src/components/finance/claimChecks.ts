@@ -17,9 +17,9 @@ export function mismatch(sub: Claim): boolean {
 /** Shown in red: a mismatch, but not on a seminar paid out of pocket, which has no advance by design. */
 export const flagged = (sub: Claim) => mismatch(sub) && !sub?.withinAllowance;
 
-/** The server refuses to pay a report that is not yet validated: this is what can be paid. */
-export const isPayableClaim = (sub: Claim) =>
-  sub?.status === "Completed" && sub?.reimbursementStatus === "Awaiting Reimbursement" && Number(sub?.reimbursementAmount || 0) > 0;
+/** The server refuses to pay a report that is not yet validated: this is what can be paid (the shared rule,
+ * src/reimbursement.ts, also read by HR's dashboard). */
+export { isPayableClaim } from "../../reimbursement";
 
 /** The Manila day of a stored timestamp (YYYY-MM-DD), or "" when there is none. */
 export function manilaDay(at: unknown): string {

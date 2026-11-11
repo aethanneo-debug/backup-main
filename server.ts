@@ -16,10 +16,10 @@ import { firstTimestamp, SAFE_FILE_URL } from "./src/utils";
 import { cleanFileName, documentHasFile, liquidationDocumentRows } from "./src/server/liquidationDocuments";
 import { readStoredFile, storeDataUrl } from "./src/server/fileStore";
 import { fileBytes, fileProblem, MIN_FILE_BYTES, reportFilesProblem } from "./src/fileRules";
-import { isoDay, trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
+import { isoDay, seatAttended, trainingCoverage, yearTrainingCounter } from "./src/trainingCoverage";
 import {
-  advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, currentAdvance, isGroupAdvance, portionCentavos, releasedByEnrolment,
-  reportCovering, spendableCentavos
+  advanceCovering, advanceCovers, advancesCovering, coveredEnrolmentIds, coversTotal, currentAdvance, isGroupAdvance, nobodyCoveredAttended,
+  portionCentavos, releasedByEnrolment, reportCovering, spendableCentavos
 } from "./src/advanceCoverage";
 import { enrolmentsForBudget } from "./src/server/budgetEnrolments";
 import { vehicleWithAdvanceFields as checkVehicleWithAdvance, type VehicleWithAdvanceFields } from "./src/vehicleWithAdvance";
@@ -125,6 +125,9 @@ import { currentTdp, planTdpReplace, recordsBeforeUploads, seatedFor, seminarsEn
 import { additionPairs, existingNeedText, needAdditionBasisLabel, OUTSIDE_NEEDS_MAX_PER_YEAR, readNeedAdditions, readOutsideTdpAddition, tdpTrainingChoices, type NeedAdditionTraining } from "./src/tdpAdditions";
 import { employeeTrainingHistory } from "./src/trainingHistory";
 import { completedTrainingPrograms, trainingProgramReport } from "./src/trainingReports";
+import { scheduleSeminars } from "./src/trainingSchedule";
+import { seminarSpan } from "./src/trainingCalendar";
+import { hrDashboard } from "./src/hrDashboard";
 import { readTrainingRecord, readTrainingReview, recordCounts } from "./src/trainingRecord";
 import { loginClosed, stillWithOffice } from "./src/staffStatus";
 import {
@@ -134,7 +137,7 @@ import {
 import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
 import { dvKey, readDvNumber } from "./src/dvNumber";
-import { reimbursementLimit, reimbursementProblem, seminarClaimMode } from "./src/reimbursement";
+import { reimbursementLimit, reimbursementProblem, seminarClaimMode, seminarPeriod } from "./src/reimbursement";
 import { expenseLineLabel, expenseLinesProblem, isBlankExpenseLine, isProgramOnlyExpense, MAX_REPORT_LINES, vehicleOverlapsSeminar } from "./src/expenseLines";
 import { certificateDocumentName, certificateUploadProblem, MAX_CERTIFICATE_UPLOADS, seminarLastDay } from "./src/attendanceCertificate";
 import {
@@ -1639,7 +1642,7 @@ app.post("/api/auth/login", (req: any, res: any) => {
       return res.status(403).json({ status: "error", message: "This user credentials account is Deactivated. Please consult the Division Chief / Administrator." });
     }
 
-    const requirePasswordChange = user.status === "Pending Password Change" || user.requirePasswordChange === true;
+    const requirePasswordChange = mustChangePassword(user);
 
     let requirePdsUpload = false;
     if (!requirePasswordChange && user.employeeId) {
@@ -1748,6 +1751,13 @@ app.post("/api/auth/change-password", authenticateToken, (req: any, res) => {
 });
 
 // Middleware to verify Auth/RBAC Roles
+// Whether an account must change its password before anything else: a new account's first one, or one an
+// Administrator reset. Login, the sign-in gate and the session route all ask this one question, so an account reset
+// before resets set the status (7o) is held too.
+function mustChangePassword(user: { status?: string; requirePasswordChange?: boolean } | null | undefined): boolean {
+  return !!user && (user.status === "Pending Password Change" || user.requirePasswordChange === true);
+}
+
 function authenticateToken(req: any, res: any, next: any) {
   const authHeader = req.headers["authorization"];
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -1766,7 +1776,7 @@ function authenticateToken(req: any, res: any, next: any) {
     }
     
     // Check pending password change
-    if (dbUser.status === "Pending Password Change") {
+    if (mustChangePassword(dbUser)) {
       const allowedPaths = ["/api/auth/change-password", "/api/auth/logout", "/api/sessions/current"];
       // If path is not allowed, reject
       if (!allowedPaths.includes(req.path)) {
@@ -1810,16 +1820,20 @@ function authenticateToken(req: any, res: any, next: any) {
 
 app.get("/api/sessions/current", authenticateToken, (req: any, res) => {
   const user = req.user;
+  const requirePasswordChange = mustChangePassword(user);
   let requirePdsUpload = false;
-  if (user.status !== "Pending Password Change" && user.employeeId) {
+  if (!requirePasswordChange && user.employeeId) {
     const emp = db.employees.find(e => e.employeeId === user.employeeId);
     if (emp && !emp.pdsFieldName) {
       requirePdsUpload = true;
     }
   }
-  const responseUser = { 
-    ...user, 
-    requirePasswordChange: user.status === "Pending Password Change",
+  // The account as the browser needs it, never its password hash (7n): it sat in memory on every page load, for any
+  // injected script or anyone at an unlocked shared PC to crack offline.
+  const { passwordHash, ...account } = user;
+  const responseUser = {
+    ...account,
+    requirePasswordChange,
     requirePdsUpload
   };
   res.json({ status: "success", data: responseUser });
@@ -2947,31 +2961,22 @@ app.put("/api/requests/:id/approve", authenticateToken, (req: any, res) => {
   });
 });
 // 6. Role-Based Dashboards & Analytics
+// The Administrator's dashboard alone reads it (App.tsx draws DashboardView for SUPER_ADMIN only; HR has its own,
+// `GET /api/dashboard/hr`), so nobody else is answered, and it sends only what that dashboard shows (the user's
+// approval of 2026-11-11, 12ag). Gone: the audit entries, the transactions and the asset, transaction, training and
+// request counts, which no screen had read since 12ag Part A. FastAPI's own summary still sends its older shape
+// (known-issues item 11).
 app.get("/api/dashboard/summary", authenticateToken, (req: any, res) => {
   const role = (req as any).user.role;
-  
-  // Total stats values (general overview). Staff are active unless marked inactive, as everywhere
-  // else: the five with logins carry no isActive flag, and `filter(e => e.isActive)` left them out.
+  if (role !== UserRole.SUPER_ADMIN) {
+    return res.status(403).json({ status: "error", message: "The dashboard summary is the Administrator's." });
+  }
+
+  // Staff are active unless marked inactive, as everywhere else: the five with logins carry no isActive flag, and
+  // `filter(e => e.isActive)` left them out.
   const activeStaff = db.employees.filter(e => e.isActive !== false);
-  const activeEmployees = activeStaff.length;
-  const totalEmployees = activeEmployees;
   // Permanent (or regular plantilla) appointments, by the employment status on each record.
   const permanentEmployees = activeStaff.filter(e => /^(permanent|regular)$/i.test(String(e.employmentStatus || "").trim())).length;
-  const listTrainings = db.trainings;
-  const totalAssetsVal = db.assets.reduce((sum, a) => sum + a.cost, 0);
-
-  const pendingValidations = db.financialTransactions.filter(t => t.status === TransactionStatus.PENDING_VALIDATION).length;
-  const validatedTransactions = db.financialTransactions.filter(t => t.status === TransactionStatus.VALIDATED).length;
-  const liquidatedTransactions = db.financialTransactions.filter(t => t.status === TransactionStatus.LIQUIDATED).length;
-  const totalExpenditure = db.financialTransactions.reduce((acc, t) => acc + t.amount, 0);
-
-  const totalAssets = db.assets.length;
-  const assignedAssets = db.assets.filter(a => a.status === AssetStatus.ASSIGNED).length;
-  const returnedAssets = db.assets.filter(a => a.status === AssetStatus.RETURNED).length;
-  const damagedAssets = db.assets.filter(a => a.status === AssetStatus.DAMAGED).length;
-
-  const totalRequests = db.requests.length;
-  const pendingRequests = db.requests.filter(r => r.status === RequestStatus.PENDING).length;
 
   res.json({
     status: "success",
@@ -2979,38 +2984,24 @@ app.get("/api/dashboard/summary", authenticateToken, (req: any, res) => {
       role,
       userFullName: (req as any).user.fullName,
       stats: {
-        totalEmployees,
-        activeEmployees,
+        totalEmployees: activeStaff.length,
+        activeEmployees: activeStaff.length,
         permanentEmployees,
-        trainingCount: listTrainings.length,
-        totalAssets,
-        assignedAssets,
-        returnedAssets,
-        damagedAssets,
-        totalAssetsVal,
-        totalTransactions: db.financialTransactions.length,
-        pendingValidations,
-        validatedTransactions,
-        liquidatedTransactions,
-        totalExpenditure,
-        totalRequests,
-        pendingRequests,
       },
-      // Only the Administrator's dashboard shows these lists (App.tsx renders DashboardView
-      // for SUPER_ADMIN only). Other roles get empty lists: the audit trail carries details
-      // such as why a signatory was deactivated, and the others are colleagues' records.
-      auditLogs: role === UserRole.SUPER_ADMIN ? db.auditLogs.slice(0, 8) : [],
       // The five newest requests still open (not yet approved or rejected), newest first (LIFO).
       // Requests are stored oldest first, so slice(0, 5) used to show the five oldest of any status.
-      recentRequests: role === UserRole.SUPER_ADMIN
-        ? db.requests
-            .map((r: any, i: number) => ({ r, i, t: firstTimestamp(r.dateRequested, r.createdAt) }))
-            .filter(x => x.r.status !== RequestStatus.APPROVED && x.r.status !== RequestStatus.REJECTED)
-            .sort((a, b) => b.t - a.t || b.i - a.i)
-            .slice(0, 5)
-            .map(x => x.r)
-        : [],
-      recentTransactions: role === UserRole.SUPER_ADMIN ? db.financialTransactions.slice(0, 5) : [],
+      // Only what the panel draws: a leave's reason (health data, RA 10173), a trip's passengers and the officers'
+      // remarks stay out (the reviews of the cleanups), and a date that isn't text (an older record, 12w) is left out.
+      recentRequests: db.requests
+        .map((r: any, i: number) => ({ r, i, t: firstTimestamp(r.dateRequested, r.createdAt) }))
+        .filter(x => x.r.status !== RequestStatus.APPROVED && x.r.status !== RequestStatus.REJECTED)
+        .sort((a, b) => b.t - a.t || b.i - a.i)
+        .slice(0, 5)
+        .map(({ r }) => ({
+          id: r.id, requestType: r.requestType, employeeName: r.employeeName, status: r.status,
+          dateRequested: typeof r.dateRequested === "string" ? r.dateRequested : undefined,
+          createdAt: typeof r.createdAt === "string" ? r.createdAt : undefined
+        })),
     }
   });
 });
@@ -3379,6 +3370,31 @@ function reportForClient<T extends LiquidationSubmission>(report: T): T {
   };
 }
 
+// The period a seminar seat's report covers: its seminar's own first and last days (12af), or null when the seat or its
+// seminar is gone, or the seminar's dates aren't real dates in order (src/reimbursement.ts `seminarPeriod`).
+function seminarPeriodFor(seat: any): { from: string; to: string } | null {
+  const program = seat ? (db.trainingPrograms || []).find((p: any) => p && p.id === seat.trainingProgramId) : null;
+  return program ? seminarPeriod(program.startDate, program.endDate) : null;
+}
+
+// A seminar report's period follows its seminar until Finance validates it (12af, from the reviews of 2026-11-10). It is
+// read again on every correction, at HR's verification and at Finance's validation, so a date HR corrects on the seminar
+// reaches the report before it is final; once validated, the report keeps the dates it has. Stamps them, and returns what
+// moved: null when nothing did, the report isn't a seminar report, or the seminar's dates aren't real dates.
+function followSeminarPeriod(sub: any): { from: string; to: string; was: string } | null {
+  if (!sub || !(sub.withinAdvance || sub.withinAllowance)) return null;
+  const dates = seminarPeriodFor((db.trainingParticipants || []).find((p: any) => p && p.id === sub.activityId));
+  if (!dates || (sub.periodCoveredFrom === dates.from && sub.periodCoveredTo === dates.to)) return null;
+  const shown = (d: unknown) => (isCalendarDate(d) ? String(d) : "none");
+  const was = `${shown(sub.periodCoveredFrom)} to ${shown(sub.periodCoveredTo)}`;
+  sub.periodCoveredFrom = dates.from;
+  sub.periodCoveredTo = dates.to;
+  return { ...dates, was };
+}
+/** An audit entry's note for a period that followed its seminar's dates (`followSeminarPeriod`). */
+const periodNoteText = (moved: { from: string; to: string; was: string } | null) =>
+  moved ? `; period covered ${moved.was} → the seminar's dates, ${moved.from} to ${moved.to}` : "";
+
 // The report's own text, as the claimant enters it at filing or in a correction. Only what
 // the request carries is checked; `stored` fills in the other end of the period.
 function reportHeaderProblem(body: any, stored: any = {}): string | null {
@@ -3663,7 +3679,8 @@ function notify(
   if ("role" in to) {
     audience = { targetRole: to.role };
   } else {
-    // Named by the staff record's internal id (see noticeIsFor).
+    // Named by the staff record's internal id (see noticeIsFor). An empty key names nobody.
+    if (!to.employee) return false;
     const emp = (db.employees || []).find(e => e.id === to.employee || e.employeeId === to.employee);
     if (!emp) return false;
     audience = { targetRole: UserRole.EMPLOYEE, targetEmployeeId: emp.id };
@@ -3798,6 +3815,10 @@ app.post("/api/admin/users", authenticateToken, async (req: any, res) => {
     fullName,
     role,
     status: "Pending Password Change" as "Pending Password Change",
+    // The first password must be changed even if the status is later overwritten: by a restore, or by the account
+    // form, which offers only Active and Archived (mustChangePassword reads either; the security review of 12ag's
+    // cleanups).
+    requirePasswordChange: true,
     employeeId,
     createdAt: new Date().toISOString(),
     passwordHash: `${salt}:${tempPasswordHash}`
@@ -3875,6 +3896,9 @@ app.post("/api/admin/employees/:id/reset-password", authenticateToken, (req: any
   const hash = crypto.pbkdf2Sync("password123", salt, 1000, 64, 'sha512').toString('hex');
   targetUser.passwordHash = `${salt}:${hash}`;
   targetUser.requirePasswordChange = true;
+  // Held at the password gate until it is changed: the account would otherwise keep working on the shared default
+  // password (7o). A reset never reopens an archived or deactivated account.
+  if (targetUser.status !== "Archived" && targetUser.status !== "Deactivated") targetUser.status = "Pending Password Change";
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Reset User Password", `Reset password for employee: ${targetEmployee.fullName} (${targetUser.username}) to temporary default`);
   saveDB();
@@ -3896,6 +3920,9 @@ app.post("/api/admin/users/:id/reset-password", authenticateToken, (req: any, re
   const hash = crypto.pbkdf2Sync("password123", salt, 1000, 64, 'sha512').toString('hex');
   targetUser.passwordHash = `${salt}:${hash}`;
   targetUser.requirePasswordChange = true;
+  // Held at the password gate until it is changed: the account would otherwise keep working on the shared default
+  // password (7o). A reset never reopens an archived or deactivated account.
+  if (targetUser.status !== "Archived" && targetUser.status !== "Deactivated") targetUser.status = "Pending Password Change";
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Reset User Password", `Reset password for user: ${targetUser.username} to temporary default`);
   saveDB();
@@ -4634,6 +4661,11 @@ function correctionRequestFrom(
     if (field === "claimType" && sub.withinAllowance) {
       return { error: "A seminar the employee paid for themselves is always a Reimbursement, so its claim type can't be returned for correction." };
     }
+    // A seminar report covers the seminar's own dates, set by HR (12af): a wrong date is corrected on the seminar, and
+    // reaches the report at its next step until Finance validates it (followSeminarPeriod).
+    if (field === "periodCovered" && (sub.withinAdvance || sub.withinAllowance)) {
+      return { error: "A seminar report's period is the seminar's own dates, set by HR, so it can't be returned for correction. HR corrects the dates on the seminar (Training Plan & Budget), and the report follows them until Finance validates it." };
+    }
     items.push(item);
   }
   // A Return the employee couldn't answer would leave the report stuck as "Returned" (no one
@@ -4779,12 +4811,17 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   if (invalidSupportingDocs(supportingDocs)) {
     return res.status(400).json({ status: "error", message: INVALID_DOCS_MESSAGE });
   }
-  const fileOrHeaderProblem = incomingFilesProblem(supportingDocs || []) || reportHeaderProblem(req.body);
+  // What the report settles: a seminar enrolment or a general activity.
+  const seminarEnrolment = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
+  // A seminar's report covers the seminar's own dates, which HR sets (the user's request of 2026-11-10, 12af), as the
+  // vehicle's destination is the venue: what is typed for its period isn't read. An older seminar without real dates
+  // keeps the typed period, checked as before.
+  const seminarDates = seminarEnrolment ? seminarPeriodFor(seminarEnrolment) : null;
+  const fileOrHeaderProblem = incomingFilesProblem(supportingDocs || [])
+    || reportHeaderProblem(seminarDates ? { ...req.body, periodCoveredFrom: undefined, periodCoveredTo: undefined } : req.body);
   if (fileOrHeaderProblem) {
     return res.status(400).json({ status: "error", message: fileOrHeaderProblem });
   }
-  // What the report settles: a seminar enrolment or a general activity.
-  const seminarEnrolment = (db.trainingParticipants || []).find((p: any) => p.id === activityId);
   if (!seminarEnrolment && !(db.activities || []).some((a: any) => a.id === activityId)) {
     return res.status(404).json({ status: "error", message: "That activity or seminar was not found." });
   }
@@ -4994,8 +5031,8 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
     serialNo: nextLiquidationSerialNo(now),
     entityName: LR_ENTITY_NAME,
     fundCluster: LR_FUND_CLUSTER,
-    periodCoveredFrom: periodCoveredFrom || "",
-    periodCoveredTo: periodCoveredTo || "",
+    periodCoveredFrom: seminarDates ? seminarDates.from : (periodCoveredFrom || ""),
+    periodCoveredTo: seminarDates ? seminarDates.to : (periodCoveredTo || ""),
     responsibilityCenterCode: responsibilityCenterCode || "",
     // Finance's own DV reference wins over anything typed into the form.
     cashAdvanceId: advance ? advance.id : undefined,
@@ -5093,19 +5130,33 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   res.json({ status: "success", data: reportForClient(newSub as any) });
 }));
 
+// The words a refused field is named by, and a time of day as a slip stores it ("HH:MM", 24-hour).
+const RESUBMIT_FIELD: Record<string, string> = {
+  startDate: "the first day", endDate: "the last day", dateNeeded: "the travel date", meetingDate: "the meeting date",
+  departureDate: "the departure date", arrivalDate: "the arrival date", departureTime: "the departure time", arrivalTime: "the arrival time"
+};
+const isSlipTime = (t: unknown): t is string => typeof t === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+
 app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
   const { id } = req.params;
+  // The request's own date isn't read from the body: the portal's form sends the stored one back unchanged, and a
+  // value of another kind (an object) stored here once blanked the Administrator's whole app (12w; 12ag's security
+  // review; the user's approval of 2026-11-11). The request keeps the date it was filed.
+  const body = req.body && typeof req.body === "object" ? req.body : {};
   const {
-    dateRequested, startDate, endDate, dateNeeded, meetingDate,
+    startDate, endDate, dateNeeded, meetingDate,
     departureDate, departureTime, arrivalDate, arrivalTime
-  } = req.body;
+  } = body;
 
   const request = db.requests.find((r: any) => r.id === id);
   if (!request) {
     return res.status(404).json({ status: "error", message: "Personnel Request not found" });
   }
 
-  if (request.employeeId !== req.user.employeeId && (req as any).user.role !== UserRole.SUPER_ADMIN) {
+  // The requester's own (an account with no staff code owns nothing: two empty codes don't match, the security review of
+  // the cleanups), or the Administrator.
+  const ownRequest = !!req.user.employeeId && request.employeeId === req.user.employeeId;
+  if (!ownRequest && (req as any).user.role !== UserRole.SUPER_ADMIN) {
     return res.status(403).json({ status: "error", message: "Forbidden: You cannot resubmit this request." });
   }
   // Only a request returned or rejected comes back, as the portal offers it. An approved one sent again
@@ -5131,30 +5182,59 @@ app.put("/api/requests/:id/resubmit", authenticateToken, (req: any, res) => {
       }
     }
   }
+  // Every date and time a resubmit writes is checked before anything is written (12w): a real YYYY-MM-DD date, and a
+  // time as HH:MM. One sent blank, or not at all, keeps what is stored.
+  const sent = (v: unknown) => v !== undefined && v !== null && v !== "";
+  for (const [name, v] of Object.entries({ startDate, endDate, dateNeeded, meetingDate, departureDate, arrivalDate })) {
+    if (sent(v) && !isCalendarDate(v)) {
+      return res.status(400).json({ status: "error", message: `Enter ${RESUBMIT_FIELD[name]} as a real date (YYYY-MM-DD).` });
+    }
+  }
+  for (const [name, v] of Object.entries({ departureTime, arrivalTime })) {
+    if (sent(v) && !isSlipTime(v)) {
+      return res.status(400).json({ status: "error", message: `Enter ${RESUBMIT_FIELD[name]} as a time (HH:MM).` });
+    }
+  }
+  if (request.requestType === RequestType.LEAVE) {
+    const first = sent(startDate) ? startDate : (request as any).startDate;
+    const last = sent(endDate) ? endDate : (request as any).endDate;
+    if (isCalendarDate(first) && isCalendarDate(last) && last < first) {
+      return res.status(400).json({ status: "error", message: "The leave's last day comes before its first." });
+    }
+  }
+  // A trip's arrival comes after its departure. Checked only when the resubmit changes the trip: the portal's form
+  // can't edit those fields, so an older record stored the other way round mustn't be stuck because of them.
+  if (request.requestType === RequestType.VEHICLE && [departureDate, departureTime, arrivalDate, arrivalTime].some(sent)) {
+    const v: any = request;
+    const leaves = { date: sent(departureDate) ? departureDate : v.departureDate, time: sent(departureTime) ? departureTime : v.departureTime };
+    const back = { date: sent(arrivalDate) ? arrivalDate : v.arrivalDate, time: sent(arrivalTime) ? arrivalTime : v.arrivalTime };
+    if (isCalendarDate(leaves.date) && isCalendarDate(back.date)
+      && (back.date < leaves.date || (back.date === leaves.date && isSlipTime(leaves.time) && isSlipTime(back.time) && back.time <= leaves.time))) {
+      return res.status(400).json({ status: "error", message: "The arrival must come after the departure." });
+    }
+  }
   delete (request as any).approvedBy;
 
-  if (dateRequested) request.dateRequested = dateRequested;
-  
   // Depending on request type update relevant date fields
   if (request.requestType === RequestType.LEAVE) {
     const leaveReq = request as any;
-    if (startDate) leaveReq.startDate = startDate;
-    if (endDate) leaveReq.endDate = endDate;
+    if (sent(startDate)) leaveReq.startDate = startDate;
+    if (sent(endDate)) leaveReq.endDate = endDate;
   } else if (request.requestType === RequestType.VEHICLE) {
     const vehicleReq = request as any;
-    if (dateNeeded) vehicleReq.dateNeeded = dateNeeded;
+    if (sent(dateNeeded)) vehicleReq.dateNeeded = dateNeeded;
     // Reservation slip times, only overwritten when the correction supplies them.
-    if (departureDate !== undefined) vehicleReq.departureDate = departureDate;
-    if (departureTime !== undefined) vehicleReq.departureTime = departureTime;
-    if (arrivalDate !== undefined) vehicleReq.arrivalDate = arrivalDate;
-    if (arrivalTime !== undefined) vehicleReq.arrivalTime = arrivalTime;
+    if (sent(departureDate)) vehicleReq.departureDate = departureDate;
+    if (sent(departureTime)) vehicleReq.departureTime = departureTime;
+    if (sent(arrivalDate)) vehicleReq.arrivalDate = arrivalDate;
+    if (sent(arrivalTime)) vehicleReq.arrivalTime = arrivalTime;
     // A slip filed before serials existed gets one on its first correction.
     if (!vehicleReq.vrsNo) vehicleReq.vrsNo = nextVrsNo(new Date());
   } else if (request.requestType === RequestType.ZOOM) {
     const zoomReq = request as any;
-    if (meetingDate) zoomReq.meetingDate = meetingDate;
+    if (sent(meetingDate)) zoomReq.meetingDate = meetingDate;
   }
-  
+
   request.status = request.requestType === RequestType.VEHICLE ? RequestStatus.ENDORSED_TO_CHIEF : RequestStatus.PENDING;
   request.remarks = "Resubmitted with modified dates.";
 
@@ -5194,7 +5274,12 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   const ticked = new Set<CorrectionField>((open?.items || []).map(i => i.field));
   const may = (f: CorrectionField) => !open || ticked.has(f);
   const body: any = { ...(req.body || {}) };
-  if (!may("periodCovered")) { delete body.periodCoveredFrom; delete body.periodCoveredTo; }
+  // A seminar report covers the seminar's own dates (12af): taken from the seminar again on every correction, so a date HR
+  // corrected on the seminar reaches the report, and never typed. (Reports from before the seminar budget flow, which
+  // aren't kept within an advance or an allowance, keep their typed period.)
+  const seminarDates = (sub.withinAdvance || sub.withinAllowance)
+    ? seminarPeriodFor((db.trainingParticipants || []).find((p: any) => p && p.id === sub.activityId)) : null;
+  if (!may("periodCovered") || seminarDates) { delete body.periodCoveredFrom; delete body.periodCoveredTo; }
   if (!may("responsibilityCenterCode")) delete body.responsibilityCenterCode;
   if (!may("particulars")) { delete body.particulars; delete body.totalSpent; }
   // The claim type decides whether there is an advance (and so a refund), so ticking it
@@ -5320,11 +5405,13 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   // claim type reopened, and Box B on a report filed before it existed. A change the server
   // makes itself (Finance's record replacing a typed advance) isn't credited to them.
   const hadRepresentative = !!sub.representativeId;
-  const claimantCouldChange = (f: CorrectionField) => may(f)
+  // (A seminar report's period is the seminar's, 12af: never the claimant's change, even under a Return from before that
+  // ticked it.)
+  const claimantCouldChange = (f: CorrectionField) => !(f === "periodCovered" && seminarDates) && (may(f)
     || ((f === "cashAdvance" || f === "refundOr") && may("claimType"))
     || (f === "refundOr" && !!sub.withinAdvance && may("particulars"))
     || (f === "representative" && !hadRepresentative)
-    || (f === "addDocument" && named);
+    || (f === "addDocument" && named));
 
   const lines = normalizeParticulars(particulars, sub.particulars || []);
   if (lines && lines.error) {
@@ -5505,9 +5592,13 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     sub.reimbursementStatus = sub.totalSpent > sub.totalReleased ? "Awaiting Reimbursement" : "Not Required";
   }
 
-  // Header fields are only overwritten when the correction actually supplies them.
-  if (typeof periodCoveredFrom === "string") sub.periodCoveredFrom = periodCoveredFrom;
-  if (typeof periodCoveredTo === "string") sub.periodCoveredTo = periodCoveredTo;
+  // Header fields are only overwritten when the correction actually supplies them; a seminar report's period is the
+  // seminar's own dates, as they are now (12af).
+  const periodMoved = seminarDates ? followSeminarPeriod(sub) : null;
+  if (!seminarDates) {
+    if (typeof periodCoveredFrom === "string") sub.periodCoveredFrom = periodCoveredFrom;
+    if (typeof periodCoveredTo === "string") sub.periodCoveredTo = periodCoveredTo;
+  }
   if (typeof responsibilityCenterCode === "string") sub.responsibilityCenterCode = responsibilityCenterCode;
   // The DV fields were set with the claim type above. Only an advance can be refunded.
   if (claimType === "Reimbursement") {
@@ -5593,7 +5684,8 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
   const toFinance = backTo === "Verified & Forwarded";
   notify({ role: toFinance ? UserRole.FINANCE_OFFICER : UserRole.HR_OFFICER }, {
     title: "Liquidation Report Resubmitted",
-    message: `${(req as any).user.fullName} corrected and resubmitted liquidation report ${sub.submissionNo}.${claimChanges.length ? ` Changed: ${claimChanges.join("; ")}.` : ""}`,
+    message: `${(req as any).user.fullName} corrected and resubmitted liquidation report ${sub.submissionNo}.${claimChanges.length ? ` Changed: ${claimChanges.join("; ")}.` : ""}${
+      periodMoved ? ` Its period covered now follows the seminar's corrected dates: ${periodMoved.from} to ${periodMoved.to} (was ${periodMoved.was}).` : ""}`,
     type: "info",
     link: toFinance ? reportOnDesk : { tab: "requests", record: { kind: "liquidationReport", id: sub.id } }
   });
@@ -5606,8 +5698,10 @@ app.put("/api/liquidation-submissions/:id/resubmit", authenticateToken, transact
     });
   }
 
+  // A seminar report's period follows its seminar's dates (12af): when HR corrected them since, the change reached it
+  // here, and the entry says so, with what it was (the claimant didn't make it).
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Resubmit Liquidation",
-    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}${sub.withinAdvance ? `; ${balanceText(sub.totalReleased, sub.totalSpent, sub.refundOrNo)}` : ""}${replacedCertificates.length ? `; certificate of attendance replaced: ${namesText(replacedCertificates)}` : ""}`);
+    `Resubmitted liquidation report: ${sub.submissionNo}${open ? ` (round ${open.round}, changed: ${changedFields.join(", ") || "nothing"}; back to ${backTo === "Verified & Forwarded" ? "Finance" : "HR"})` : ""}${boxBChange}${claimTypeChange}${periodNoteText(periodMoved)}${sub.withinAdvance ? `; ${balanceText(sub.totalReleased, sub.totalSpent, sub.refundOrNo)}` : ""}${replacedCertificates.length ? `; certificate of attendance replaced: ${namesText(replacedCertificates)}` : ""}`);
   saveDB();
   res.json({ status: "success", data: reportForClient(sub) });
 }));
@@ -5630,8 +5724,11 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, transac
     return res.status(409).json({ status: "error", message: `${sub.submissionNo} isn't waiting for HR verification (it is ${sub.status}).` });
   }
   let returnNote = "";
+  let periodNote = "";
 
   if (action === "Verify") {
+    // HR verifies the report with the seminar's dates as they are now (12af).
+    periodNote = periodNoteText(followSeminarPeriod(sub));
     sub.hrStatus = "Verified & Forwarded";
     sub.hrRemarks = remarks || "Relationship confirmed between employee, activity, and budget line.";
     sub.hrVerifiedBy = (req as any).user.fullName;
@@ -5661,7 +5758,7 @@ app.put("/api/liquidation-submissions/:id/hr-action", authenticateToken, transac
     returnNote = ` (round ${parsed.request.round}: ${parsed.request.items.map(i => i.field).join(", ")})`;
   }
 
-  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "HR Verify Liquidation", `HR evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}`);
+  logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "HR Verify Liquidation", `HR evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}${periodNote}`);
   saveDB();
   res.json({ status: "success", data: reportForClient(sub) });
 }));
@@ -5685,6 +5782,7 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
     return res.status(409).json({ status: "error", message: `${sub.submissionNo} isn't waiting for Finance validation (it is ${sub.status}).` });
   }
   let returnNote = "";
+  let periodNote = "";
 
   if (action === "Validate") {
     // Counted once: a report validated (or, under the old rules, approved by the Division
@@ -5747,6 +5845,8 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
     const seminarPart = (db.trainingParticipants || []).find((p: any) => p.id === sub.activityId);
     const seminar = seminarPart ? (db.trainingPrograms || []).find((p: any) => p.id === seminarPart.trainingProgramId) : null;
     const heldBefore = seminar ? seminarBudget(seminar, participantsForBudget()).committed : 0;
+    // The last time the period follows the seminar's dates (12af): validated, the report keeps them.
+    periodNote = periodNoteText(followSeminarPeriod(sub));
     // A copy, so appointing a new Accountant later never rewrites this report.
     sub.accountantSignatoryId = accountant.id;
     sub.accountantName = accountant.fullName;
@@ -5978,7 +6078,7 @@ app.put("/api/liquidation-submissions/:id/finance-action", authenticateToken, tr
   }
 
   logEvent((req as any).user.id, (req as any).user.username, (req as any).user.role, "Finance Validate Liquidation", `Finance evaluated liquidation ${sub.submissionNo} with action ${action}${returnNote}${
-    action === "Validate" && sub.withinAllowance ? ` (a reimbursement: ${pesoText(Number(sub.totalSpent))} owed to ${sub.employeeName}, to be paid from the Reimbursement Queue)` : ""}`);
+    action === "Validate" && sub.withinAllowance ? ` (a reimbursement: ${pesoText(Number(sub.totalSpent))} owed to ${sub.employeeName}, to be paid from the Reimbursement Queue)` : ""}${periodNote}`);
   saveDB();
   res.json({ status: "success", data: reportForClient(sub) });
 }));
@@ -7157,7 +7257,7 @@ function personnelLoginFor(emp: Employee | undefined): boolean {
 // One they can use now. A login still waiting for its first password change can't open the portal, and its
 // temporary password may never have reached them (7d), so HR uploads a certificate for them meanwhile.
 function usablePersonnelLogin(emp: Employee | undefined): boolean {
-  return personnelLoginsOf(emp).some((u: any) => u.status !== "Pending Password Change");
+  return personnelLoginsOf(emp).some((u: any) => !mustChangePassword(u));
 }
 
 // At least one training per year per employee (the user's rule, 2026-10-23; it replaced "at most
@@ -7167,8 +7267,14 @@ function trainingCoverageData() {
   return { enrolments: db.trainingParticipants || [], programs: db.trainingPrograms || [], records: db.trainings || [] };
 }
 
+// A fiscal year's label as text, "" when the record has none: String() of a stored object can throw (12ag's security
+// review). Labels are written only as text by POST /api/fiscal-years, so this guards a hand-damaged file.
+function fyLabel(f: any): string {
+  return f && (typeof f.label === "string" || typeof f.label === "number") ? String(f.label) : "";
+}
+
 function coverageFiscalYear(label: string) {
-  const fy: any = (db.fiscalYears || []).find((f: any) => String(f.label) === String(label));
+  const fy: any = (db.fiscalYears || []).find((f: any) => fyLabel(f) === String(label));
   return { label: String(label), start_date: fy?.start_date, end_date: fy?.end_date };
 }
 
@@ -7798,8 +7904,8 @@ function onOrBeforeAsOf(dateStr: string | null, asOf: string): boolean {
 // Whether an enrolment counts as attended (Plan D): HR's attendance record when there is
 // one; for an enrolment never marked, the older evidence of a filed or settled report.
 function participantAttended(p: any): boolean {
-  if (p.attendance) return p.attendance === "Attended";
-  return p.status === "Liquidated" || p.status === "Liquidation Pending" || p.status === "Completed";
+  // The shared rule (src/trainingCoverage.ts), which HR's dashboard reads too (12ag).
+  return seatAttended(p);
 }
 
 // Whether a dated record (a recorded training, a PDS entry) counts toward a need's plan year:
@@ -7998,6 +8104,8 @@ function sendEmployeeEmail(emp: Employee, subject: string, text: string) {
 // Bell notice (plus email) for one employee. Returns false when a notice with the
 // same dedupeKey already exists. Callers are responsible for saveDB().
 function notifyEmployee(employeeKey: string, notice: { title: string; message: string; type: Notification["type"]; link?: NotificationLink; dedupeKey?: string }): boolean {
+  // An empty key would match the first staff record with no staff code (the security review of 12ag's cleanups).
+  if (!employeeKey) return false;
   const emp = (db.employees || []).find(e => e.id === employeeKey || e.employeeId === employeeKey);
   if (!emp) return false;
   if (!notify({ employee: emp.employeeId || emp.id }, notice)) return false;
@@ -8091,51 +8199,96 @@ function enrollTrainingParticipants(program: TrainingProgram, employeeIds: strin
   return { created, skipped };
 }
 
-// Reminds participants who have not yet submitted a liquidation: once when 1-3 days
-// remain, once on the due date, once when overdue. The dedupeKey per stage keeps it
-// idempotent, so re-running (hourly, and on every restart) never repeats a notice.
+// What someone holding released cash for a seat is to do next, for the reminders below (12ag's cleanups, the user's
+// decisions of 2026-11-11). Only cash counts: with no advance there is nothing to liquidate (the 30-day rule is the
+// cash advance's, COA Circular No. 97-002, and a reimbursement stays open to them), and one still with Finance,
+// declined, or a colleague's group is no cash of theirs.
+//   - "liquidate": the report's form is open (seminarFormEligibility, the one function that opens it): their own advance
+//     with HR's "Attended", or a group's they hold once HR has recorded everyone it covers and someone attended (the
+//     holder files it even if they didn't attend, the user's decisions 5 and 6, 2026-10-26);
+//   - "refund": HR recorded "Did not attend" for everyone the advance covers (`nobodyCoveredAttended`, the refund
+//     route's own test), so the whole of it comes back;
+//   - "certificate": their own attendance isn't recorded and no certificate of attendance is on file, which HR records
+//     it on. A colleague a group covers is asked too: no cash of theirs, but the group's report waits for their
+//     attendance (the code review of round two). Only with a Personnel login they can use now, as the certificate sweep:
+//     HR uploads it for anyone without one, or whose first password is still to be set (7d, 7o).
+// Null otherwise: filed already (a report returned for correction too: its Return notice says what to fix), or the next
+// step is HR's (a certificate on file), which HR's dashboard lists.
+function cashReminderKind(p: any): "liquidate" | "refund" | "certificate" | null {
+  if (!p || p.status !== "Assigned") return null;
+  const held = advanceCovering(db.cashAdvances || [], p.id, ["Released"]);
+  if (!held) return null;
+  // (An absent holder stays "Assigned" while the group's report is reviewed.)
+  if (reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], p.id)) return null;
+  const certificateDue = !p.attendance && !currentCertificate(p.id) && usablePersonnelLogin(employeeByKey(p.employeeId));
+  if (held.activityId !== p.id) return certificateDue ? "certificate" : null;
+  if (seminarFormEligibility(p).canLiquidate) return "liquidate";
+  if (nobodyCoveredAttended(held, id => (db.trainingParticipants || []).find((x: any) => x && x.id === id))) return "refund";
+  return certificateDue ? "certificate" : null;
+}
+
+// Each kind's dedupe key prefix. A liquidation keeps the one it always had, so nothing already sent is sent again.
+const CASH_REMINDER_KEY = { liquidate: "liq-due", refund: "refund-due", certificate: "liq-cert" } as const;
+
+function cashReminderNotice(
+  kind: "liquidate" | "refund" | "certificate", stage: "overdue" | "due-today" | "due-soon", daysLeft: number,
+  title: string, dueText: string, group: boolean, participantId: string
+): { title: string; message: string; type: Notification["type"]; link: NotificationLink } {
+  const type = stage === "overdue" ? "urgent" as const : "warning" as const;
+  const heading = (what: string) => stage === "overdue" ? `${what} overdue: ${title}`
+    : stage === "due-today" ? `${what} due today: ${title}` : `${what} due in ${daysLeft} day${daysLeft === 1 ? "" : "s"}: ${title}`;
+  const when = stage === "overdue" ? `was due on ${dueText}` : stage === "due-today" ? `is due today, ${dueText}` : `is due on ${dueText}`;
+  const whose = group ? "Your group's" : "Your";
+  // The seminar's card: the advance, and the certificate's Upload button.
+  const card = { tab: "employee_portal", record: { kind: "assignment" as const, id: participantId } };
+  if (kind === "refund") {
+    return {
+      title: heading("Refund"),
+      message: (group
+        ? `Nobody your group's cash advance for "${title}" covers attended, so the whole advance comes back: hand it to the cashier, and Finance records the refund.`
+        : `HR recorded that you did not attend "${title}", so your cash advance comes back: hand it to the cashier, and Finance records the refund.`)
+        + ` It ${when}.`,
+      type, link: card
+    };
+  }
+  if (kind === "certificate") {
+    return {
+      title: heading("Liquidation"),
+      message: `${whose} liquidation for "${title}" ${when}. Upload your certificate of attendance from your seminar card first: HR records your attendance on it, and the report needs that.`
+        + (group ? " If you didn't attend, tell HR." : " If you didn't attend, tell HR, and hand the cash advance back."),
+      type, link: { ...card, focus: "certificateUpload" }
+    };
+  }
+  return {
+    title: heading("Liquidation"),
+    message: stage === "overdue" ? `${whose} liquidation for "${title}" was due on ${dueText}. Please submit it as soon as possible.`
+      : stage === "due-today" ? `${whose} liquidation for "${title}" is due today, ${dueText}.` : `${whose} liquidation for "${title}" is due on ${dueText}.`,
+    // Opens the seminar's liquidation form.
+    type, link: { tab: "employee_portal", liquidationActivityId: participantId }
+  };
+}
+
+// Reminds someone holding released cash of what is due, 30 days after the seminar: once when 1-3 days remain, once on
+// the due date, once when overdue (cashReminderKind says what). The dedupeKey per kind and stage keeps it idempotent,
+// so re-running (hourly, and on every restart) never repeats a notice.
 function runLiquidationReminderSweep() {
   try {
     const today = manilaToday();
     let sent = 0;
     for (const p of db.trainingParticipants || []) {
-      if (p.status !== "Assigned") continue;
-      // The holder of a group's advance files the group's one report, even if they didn't attend
-      // (the user's decision 5, 2026-10-26); someone it covers isn't reminded (HSAC RAB 1).
-      const held = advanceCovering(db.cashAdvances || [], p.id, ["Released"]);
-      const holdsGroup = !!held && isGroupAdvance(held) && held.activityId === p.id;
-      if (groupCoveringOthers(p.id)) continue;
-      // Filed already (an absent holder stays "Assigned" while the group's report is reviewed).
-      if (reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], p.id)) continue;
-      // Someone marked "Did not attend" dropped out (requirement 6) and gets no form, so they
-      // have nothing to liquidate; an advance they hold is refunded instead.
-      if (p.attendance === "Did not attend" && !holdsGroup) continue;
+      const kind = cashReminderKind(p);
+      if (!kind) continue;
       const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
-      const due = liquidationDueDateFor(prog);
+      // Read from the seminar's real dates, as HR's dashboard reads them, so both count from the same day.
+      const due = prog ? liquidationDueDateFor({ endDate: seminarSpan(prog)?.to }) : null;
       if (!prog || !due) continue;
 
       const daysLeft = daysBetween(today, due);
       const stage = daysLeft < 0 ? "overdue" : daysLeft === 0 ? "due-today" : daysLeft <= 3 ? "due-soon" : null;
       if (!stage) continue;
-
-      const dueText = formatLongDate(due);
-      const whose = holdsGroup ? "Your group's" : "Your";
-      const notice =
-        stage === "overdue" ? {
-          title: `Liquidation overdue: ${prog.title}`,
-          message: `${whose} liquidation for "${prog.title}" was due on ${dueText}. Please submit it as soon as possible.`,
-          type: "urgent" as const
-        } : stage === "due-today" ? {
-          title: `Liquidation due today: ${prog.title}`,
-          message: `${whose} liquidation for "${prog.title}" is due today, ${dueText}.`,
-          type: "warning" as const
-        } : {
-          title: `Liquidation due in ${daysLeft} day${daysLeft === 1 ? "" : "s"}: ${prog.title}`,
-          message: `${whose} liquidation for "${prog.title}" is due on ${dueText}.`,
-          type: "warning" as const
-        };
-      // Opens the seminar's liquidation form, or says why it isn't open yet.
-      if (notifyEmployee(p.employeeId, { ...notice, link: { tab: "employee_portal", liquidationActivityId: p.id }, dedupeKey: `liq-due:${p.id}:${stage}` })) sent++;
+      const group = isGroupAdvance(advanceCovering(db.cashAdvances || [], p.id, ["Released"]));
+      const notice = cashReminderNotice(kind, stage, daysLeft, String(prog.title || "").trim(), formatLongDate(due), group, p.id);
+      if (notifyEmployee(p.employeeId, { ...notice, dedupeKey: `${CASH_REMINDER_KEY[kind]}:${p.id}:${stage}` })) sent++;
     }
     if (sent > 0) {
       saveDB();
@@ -8158,7 +8311,9 @@ function runCertificateReminderSweep() {
       const prog = (db.trainingPrograms || []).find(tp => tp.id === p.trainingProgramId);
       const lastDay = seminarLastDay(prog);
       if (!prog || prog.archivedAt || !lastDay || lastDay >= today) continue;
-      if (!personnelLoginFor(employeeByKey(p.employeeId))) continue;
+      // Only a login they can use now: HR uploads for anyone whose first password is still to be set (7d, 7o), and the
+      // reminder comes once it is (the security review of 12ag's cleanups).
+      if (!usablePersonnelLogin(employeeByKey(p.employeeId))) continue;
       const title = String(prog.title || "").trim();
       if (notifyEmployee(p.employeeId, {
         title: "Upload your certificate of attendance",
@@ -8414,8 +8569,9 @@ function computeTrainingUsage(fiscalYearId: string) {
     committed,
     // Unallocated. (Field name kept: existing consumers read `remaining`.)
     remaining: round2(totalBudget - committed),
-    // What came back to Unallocated: from closed seminars (allocated − spent) and, while
-    // seminars are still open, the shares of participants who did not attend.
+    // What came back to Unallocated: from closed seminars (allocated − spent) and, while seminars are still open, the
+    // shares of participants who did not attend and, since 2026-10-19, what liquidated attendees didn't spend
+    // (`releasedForAbsent` holds both; its field name is kept for its consumers).
     returnedFromSettled: round2(seminars.reduce((s: number, b) => s + b.returned, 0)),
     settledReturning: seminars.filter(b => b.returned > 0).length,
     releasedForAbsent: round2(seminars.reduce((s: number, b) => s + b.released, 0)),
@@ -8535,6 +8691,22 @@ app.get("/api/training/programs", authenticateToken, (req: any, res: any) => {
   res.json({ status: "success", data: rows });
 });
 
+// The training schedule for the dashboards' calendars, upcoming lists and budget chart (12ag): each seminar's dates,
+// time, venue, seats and budget figures, priced as the year's figures are (participantsForBudget), and nothing more.
+// The dashboards had loaded the seminar and participant lists above, every enrolment's TDP justification and
+// certificate details included, only to count seats (the security review of 12ag Part A). HR's and the
+// Administrator's, as those lists are. Read-only: no audit entry, no write (item 9).
+app.get("/api/training/schedule", authenticateToken, (req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "The training schedule is for HR and the Administrator." });
+  }
+  const label = fyLabel((db.fiscalYears || []).find((f: any) => f && f.status === "Active"));
+  res.json({
+    status: "success",
+    data: { asOf: manilaToday(), activeFiscalYear: label || null, seminars: scheduleSeminars(db.trainingPrograms || [], participantsForBudget()) }
+  });
+});
+
 // Ranked participant suggestions for a seminar. Works for saved programs
 // (programId) and for unsaved draft rows; query values override stored ones so the
 // ranking follows whatever HR is currently editing.
@@ -8599,6 +8771,44 @@ app.get("/api/training/coverage", authenticateToken, (req: any, res: any) => {
   const logins = loginsByStaff();
   const staff = (db.employees || []).filter(e => staffStillWithOffice(e, logins));
   res.json({ status: "success", data: { ...trainingCoverage(staff, trainingCoverageData(), coverageFiscalYear(label)), asOf: manilaToday() } });
+});
+
+// HR's dashboard (12ag Part B; src/hrDashboard.ts): headcount, trainings attended, attendees by month, attendance by
+// seminar, and the attendees whose money isn't settled. HR's and the Administrator's, as the training records are;
+// the reply names attendees, as HR's attendance lists do. Read-only: no audit entry, no write (item 9). The fiscal
+// year is chosen as the coverage route chooses it (a label; the active one by default).
+app.get("/api/dashboard/hr", authenticateToken, (req: any, res: any) => {
+  if (!isTrainingRecordsRole((req as any).user.role)) {
+    return res.status(403).json({ status: "error", message: "HR's dashboard is for HR and the Administrator." });
+  }
+  // Cut before cleaning: cleanText gives "" for text past RAW_TEXT_MAX, which would quietly mean the active year.
+  const asked = typeof req.query.fiscalYear === "string" ? cleanText(req.query.fiscalYear.slice(0, 40)).slice(0, 20) : "";
+  const activeFy: any = (db.fiscalYears || []).find((f: any) => f && f.status === "Active");
+  const label = asked || fyLabel(activeFy);
+  if (!label) return res.status(400).json({ status: "error", message: "No fiscal year is active." });
+  if (!(db.fiscalYears || []).some((f: any) => fyLabel(f) === label)) {
+    return res.status(404).json({ status: "error", message: `There is no fiscal year ${label}.` });
+  }
+  // Staff still with the office (src/staffStatus.ts), read on the stored records (loginsByStaff keys by them).
+  const logins = loginsByStaff();
+  const withOffice = new Set((db.employees || []).filter(e => staffStillWithOffice(e, logins)));
+  const data = hrDashboard({
+    staff: [...withOffice].map(e => ({ id: e.id, employeeId: e.employeeId, division: e.division, employmentStatus: e.employmentStatus })),
+    seats: db.trainingParticipants || [],
+    programs: db.trainingPrograms || [],
+    records: db.trainings || [],
+    advances: db.cashAdvances || [],
+    reports: db.liquidationSubmissions || [],
+    expenses: db.trainingLiquidations || [],
+    fiscalYear: coverageFiscalYear(label),
+    today: manilaToday(),
+    dueDateOf: liquidationDueDateFor,
+    personOf: (key: string) => {
+      const e = employeeByKey(key);
+      return e ? { name: cleanText(e.fullName).slice(0, 200) || "Unnamed employee", withOffice: withOffice.has(e) } : null;
+    }
+  });
+  res.json({ status: "success", data });
 });
 
 // The training reports in Generated Reports (the instructor's review, R11): HR and the Administrator only, as the plan.
@@ -10316,6 +10526,24 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   if (body.venue !== undefined && cleanText(body.venue) !== cleanText(existingProgram.venue)) {
     logEvent(req.user.id, req.user.username, req.user.role, "Change Seminar Venue",
       `${req.user.fullName} changed the venue of ${JSON.stringify(cleanText(title))} from ${JSON.stringify(cleanText(existingProgram.venue))} to ${JSON.stringify(cleanText(body.venue))}.`);
+  }
+  // The dates, the allocation and the seats are on record too, with what they were (12j; 12af: a seminar report's period
+  // follows the seminar's dates until it is validated, and the allocation and seats price everyone's share).
+  const pricedChanges: string[] = [];
+  if (existingProgram.startDate !== edited.startDate || existingProgram.endDate !== edited.endDate) {
+    pricedChanges.push(`dates ${JSON.stringify(existingProgram.startDate ?? "")} to ${JSON.stringify(existingProgram.endDate ?? "")} → ${JSON.stringify(edited.startDate ?? "")} to ${JSON.stringify(edited.endDate ?? "")}`);
+  }
+  if (centavos(existingProgram.allocatedBudget) !== centavos(edited.allocatedBudget)) {
+    pricedChanges.push(`allocation ${pesoText(Number(existingProgram.allocatedBudget) || 0)} → ${pesoText(Number(edited.allocatedBudget) || 0)}`);
+  }
+  // (Seats as pricing reads them: an older seminar stored without any has 1.)
+  const seatsOf = (x: unknown) => Math.max(1, Number(x) || 1);
+  if (seatsOf(existingProgram.maxParticipants) !== seatsOf(edited.maxParticipants)) {
+    pricedChanges.push(`seats ${seatsOf(existingProgram.maxParticipants)} → ${seatsOf(edited.maxParticipants)}`);
+  }
+  if (pricedChanges.length) {
+    logEvent(req.user.id, req.user.username, req.user.role, "Change Seminar Dates or Budget",
+      `${req.user.fullName} changed ${JSON.stringify(cleanText(title))}: ${pricedChanges.join("; ")}.`);
   }
 
   // Budget or head-count edits re-price the allowances nobody has liquidated yet, whether or

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Plus } from "lucide-react";
+import { Lock, Plus } from "lucide-react";
 import { ActiveSignatory, CorrectionField, LiquidationParticular } from "../../../types";
 import { expenseTypeChoices, vehicleNoForLine } from "../../../expenseLines";
 import { newParticular, round2 } from "../particularLines";
@@ -66,6 +66,11 @@ interface LiquidationSheetFormProps {
   vehicleNo?: string | null;
   /** Who filed it, when that wasn't the claimant (a colleague's group request). */
   vehicleFiledBy?: string;
+  /** A seminar report covers the seminar's own dates, which HR sets (12af): the period is shown read-only, as the
+   * server stores it whatever is sent, on a correction too. */
+  periodFromSeminar?: boolean;
+  /** A new report whose seminar isn't chosen yet: every box stays locked until the seminar fills them in (12af). */
+  awaitingChoice?: boolean;
 }
 
 // Fillable boxes are tinted, like a fillable PDF, so the employee sees where to type while
@@ -112,6 +117,8 @@ export default function LiquidationSheetForm({
   groupAttendees,
   vehicleNo = null,
   vehicleFiledBy,
+  periodFromSeminar = false,
+  awaitingChoice = false,
 }: LiquidationSheetFormProps) {
   const set = (patch: Partial<CoaHeaderFields>) => onCoaChange({ ...coa, ...patch });
   const rows = particulars ?? [];
@@ -123,9 +130,19 @@ export default function LiquidationSheetForm({
   const note = (f: CorrectionField) => correction?.noteFor(f);
   const linesFree = can("particulars") && !correction?.lineIds;
   const lineOpen = (id: string) => can("particulars") && (!correction?.lineIds || correction.lineIds.includes(id));
-  const open = correction ? FIX : OPEN;
+  // Before the seminar is chosen nothing on the sheet can be filled in: every box is off and drawn locked.
+  const off = disabled || awaitingChoice;
+  const open = awaitingChoice ? LOCKED : correction ? FIX : OPEN;
   // Points a reopened part's inputs at the reviewer's note on it, for screen readers.
   const noteId = (f: CorrectionField) => (note(f) ? `note-${f}` : undefined);
+  // A seminar report's period is the seminar's (12af), even where an older Return reopened it.
+  const periodOpen = can("periodCovered") && !periodFromSeminar;
+  const periodDescribedBy = [periodFromSeminar && "sheet-period-note", noteId("periodCovered")].filter(Boolean).join(" ") || undefined;
+  // The DV boxes come from Finance's record, stay as filed on a correction that didn't reopen them, or wait for the
+  // seminar. Locked and empty, they show a dash rather than a made-up number.
+  const dvLocked = advanceOnRecord || !can("cashAdvance") || awaitingChoice;
+  const dvDash = (dvLocked || noAdvance) && !coa.cashAdvanceDvDate;
+  const advanceLocked = cashAdvance.locked || awaitingChoice;
 
   // Box B. A returned report keeps the copy made at filing ("as filed") unless another
   // representative is picked, so the sheet always shows what will print, even if that
@@ -194,28 +211,35 @@ export default function LiquidationSheetForm({
                 <input
                   type="date"
                   value={coa.periodCoveredFrom}
-                  disabled={disabled}
-                  readOnly={!can("periodCovered")}
+                  disabled={off}
+                  readOnly={!periodOpen}
                   onChange={(e) => set({ periodCoveredFrom: e.target.value })}
                   data-correction-target="periodCovered"
                   data-correction-control
                   aria-label="Period covered from"
-                  aria-describedby={noteId("periodCovered")}
-                  className={`${can("periodCovered") ? open : LOCKED} font-bold`}
+                  aria-describedby={periodDescribedBy}
+                  className={`${periodOpen ? open : LOCKED} font-bold`}
                 />
                 <span aria-hidden="true">-</span>
                 <input
                   type="date"
                   value={coa.periodCoveredTo}
-                  disabled={disabled}
-                  readOnly={!can("periodCovered")}
+                  disabled={off}
+                  readOnly={!periodOpen}
                   min={coa.periodCoveredFrom || undefined}
                   onChange={(e) => set({ periodCoveredTo: e.target.value })}
                   aria-label="Period covered to"
-                  aria-describedby={noteId("periodCovered")}
-                  className={`${can("periodCovered") ? open : LOCKED} font-bold`}
+                  aria-describedby={periodDescribedBy}
+                  className={`${periodOpen ? open : LOCKED} font-bold`}
                 />
               </p>
+              {/* Not on the printed form: where the dates come from. */}
+              {periodFromSeminar && (
+                <p id="sheet-period-note" data-period-note className="mt-1 flex items-center justify-center gap-1 font-sans text-[11px] text-slate-600">
+                  <Lock size={11} className="shrink-0" aria-hidden="true" />
+                  The seminar&rsquo;s dates, set by HR
+                </p>
+              )}
               <div className="flex justify-center"><CorrectionNote id={noteId("periodCovered")} note={note("periodCovered")} /></div>
               <div className="mt-5 font-bold">
                 <p>Entity Name : HSAC-RAB I</p>
@@ -237,7 +261,7 @@ export default function LiquidationSheetForm({
                 <input
                   type="text"
                   value={coa.responsibilityCenterCode}
-                  disabled={disabled}
+                  disabled={off}
                   readOnly={!can("responsibilityCenterCode")}
                   onChange={(e) => set({ responsibilityCenterCode: e.target.value })}
                   placeholder="09-001-01"
@@ -289,7 +313,7 @@ export default function LiquidationSheetForm({
                     <select
                       value={p.category ?? ""}
                       data-correction-control
-                      disabled={disabled || !lineOpen(p.id)}
+                      disabled={off || !lineOpen(p.id)}
                       onChange={(e) => update(p.id, { category: (e.target.value || undefined) as LiquidationParticular["category"] })}
                       aria-label={`Particular ${idx + 1} expense type`}
                       aria-invalid={rowError ? true : undefined}
@@ -306,7 +330,7 @@ export default function LiquidationSheetForm({
                         For
                         <select
                           value={p.participantId || ""}
-                          disabled={disabled || !lineOpen(p.id)}
+                          disabled={off || !lineOpen(p.id)}
                           onChange={(e) => update(p.id, { participantId: e.target.value || undefined })}
                           aria-label={`Particular ${idx + 1}: whom it was for`}
                           className={`${lineOpen(p.id) ? open : LOCKED} text-[11px]`}
@@ -326,7 +350,7 @@ export default function LiquidationSheetForm({
                         step="0.01"
                         inputMode="decimal"
                         value={amountValue(p)}
-                        disabled={disabled}
+                        disabled={off}
                         readOnly={!lineOpen(p.id)}
                         onChange={(e) => onAmountInput(p.id, e.target.value)}
                         onBlur={() => onAmountBlur(p.id)}
@@ -340,7 +364,7 @@ export default function LiquidationSheetForm({
                       <button
                         type="button"
                         onClick={() => removeRow(p.id)}
-                        disabled={disabled}
+                        disabled={off}
                         aria-label={`Remove particular ${idx + 1}`}
                         className="ml-auto cursor-pointer text-[11px] text-slate-500 underline hover:text-rose-700 disabled:cursor-not-allowed"
                       >
@@ -368,7 +392,7 @@ export default function LiquidationSheetForm({
                 <button
                   type="button"
                   onClick={() => onParticularsChange([...rows, newParticular()])}
-                  disabled={disabled}
+                  disabled={off}
                   className="inline-flex cursor-pointer items-center gap-1 border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Plus size={11} aria-hidden="true" /> Add particular
@@ -399,28 +423,31 @@ export default function LiquidationSheetForm({
                 <input
                   type="text"
                   value={coa.cashAdvanceDvNo}
-                  disabled={disabled || noAdvance}
-                  readOnly={advanceOnRecord || !can("cashAdvance")}
+                  disabled={off || noAdvance}
+                  readOnly={dvLocked}
                   onChange={(e) => set({ cashAdvanceDvNo: e.target.value })}
-                  placeholder={noAdvance ? "None" : "2026-08-336"}
+                  // Typed only on an older general activity's correction, in the current format (12q).
+                  placeholder={noAdvance ? "None" : dvLocked ? "—" : "YYYY-MM-NNNN"}
                   data-correction-target="cashAdvance"
                   data-correction-control
                   aria-label="Cash advance DV number"
                   aria-describedby={noteId("cashAdvance")}
-                  className={`${advanceOnRecord || !can("cashAdvance") ? LOCKED : open} w-24 font-bold`}
+                  className={`${dvLocked ? LOCKED : open} w-24 font-bold`}
                 />
                 {/* "DTD." stays with its date if the line has to wrap. */}
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   DTD.
                   <input
-                    type="date"
+                    // A date box can't show a dash, so one locked with no date is plain text, as wide as the number's.
+                    type={dvDash ? "text" : "date"}
                     value={coa.cashAdvanceDvDate}
-                    disabled={disabled || noAdvance}
-                    readOnly={advanceOnRecord || !can("cashAdvance")}
+                    disabled={off || noAdvance}
+                    readOnly={dvLocked}
                     onChange={(e) => set({ cashAdvanceDvDate: e.target.value })}
+                    placeholder={dvDash ? "—" : undefined}
                     aria-label="Cash advance DV date"
                     aria-describedby={noteId("cashAdvance")}
-                    className={`${advanceOnRecord || !can("cashAdvance") ? LOCKED : open} text-[12px] font-bold`}
+                    className={`${dvLocked ? LOCKED : open} ${dvDash ? "w-24" : ""} text-[12px] font-bold`}
                   />
                 </span>
                 {note("cashAdvance") && <span className="basis-full"><CorrectionNote id={noteId("cashAdvance")} note={note("cashAdvance")} /></span>}
@@ -428,17 +455,17 @@ export default function LiquidationSheetForm({
             }
             amount={
               <input
-                type={cashAdvance.locked ? "text" : "number"}
+                type={advanceLocked ? "text" : "number"}
                 min="0"
                 step="0.01"
-                disabled={disabled}
-                readOnly={cashAdvance.locked}
-                aria-label={cashAdvance.ariaLabel}
+                disabled={off}
+                readOnly={advanceLocked}
+                aria-label={awaitingChoice ? "Cash advance: fills in once you choose your seminar" : cashAdvance.ariaLabel}
                 aria-describedby={noteId("cashAdvance")}
-                value={cashAdvance.value}
+                value={awaitingChoice ? amountText(0) : cashAdvance.value}
                 onChange={(e) => cashAdvance.onChange(e.target.value)}
                 onBlur={cashAdvance.onBlur}
-                className={`${cashAdvance.locked ? LOCKED : open} w-36 text-right font-bold tabular-nums`}
+                className={`${advanceLocked ? LOCKED : open} w-36 text-right font-bold tabular-nums`}
               />
             }
           />
@@ -449,7 +476,7 @@ export default function LiquidationSheetForm({
                 <input
                   type="text"
                   value={coa.refundOrNo}
-                  disabled={disabled || !refundDue}
+                  disabled={off || !refundDue}
                   readOnly={!can("refundOr")}
                   onChange={(e) => set({ refundOrNo: e.target.value })}
                   placeholder={refundDue ? "0247983" : "No refund due"}
@@ -464,7 +491,7 @@ export default function LiquidationSheetForm({
                   <input
                     type="date"
                     value={coa.refundOrDate}
-                    disabled={disabled || !refundDue}
+                    disabled={off || !refundDue}
                     readOnly={!can("refundOr")}
                     // A seminar report's OR comes after the advance's DV, and no later than
                     // today (the server checks the same).
@@ -503,7 +530,7 @@ export default function LiquidationSheetForm({
                 <select
                   value={representativeId}
                   onChange={(e) => onRepresentativeChange(e.target.value)}
-                  disabled={disabled || !can("representative")}
+                  disabled={off || !can("representative")}
                   data-correction-target="representative"
                   data-correction-control
                   aria-label="Box B: Authorized Representative"
@@ -542,8 +569,8 @@ export default function LiquidationSheetForm({
       {note("representative") && <CorrectionNote id={noteId("representative")} note={`Box B: ${note("representative")}`} />}
 
       {/* What the figures mean, in words — the same three cases the old summary showed,
-          plus a Reimbursement, which has no advance to measure against. */}
-      <p className={`mt-2 text-[12px] ${
+          plus a Reimbursement, which has no advance to measure against. Nothing before the seminar is chosen. */}
+      {!awaitingChoice && <p className={`mt-2 text-[12px] ${
         withinAdvance && !(totalReleased > 0) ? "text-amber-700"
           : reimbursed > 0 ? (withinAdvance ? "text-rose-700" : "text-amber-700")
           : refunded > 0 ? "text-emerald-700" : "text-slate-600"
@@ -559,7 +586,7 @@ export default function LiquidationSheetForm({
             : refunded > 0
               ? "Return this balance and record the OR."
               : "Fully liquidated - nothing to refund."}
-      </p>
+      </p>}
     </div>
   );
 }

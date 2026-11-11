@@ -34,6 +34,18 @@ export function isGroupAdvance(a: CoverableAdvance | null | undefined): boolean 
   return !!a && Array.isArray(a.covers) && a.covers.length > 0;
 }
 
+/**
+ * Whether nobody an advance covers attended: HR recorded "Did not attend" on every enrolment it pays for, each found.
+ * Only then does the whole of it come back as a refund (the refund route's own test, 12v), so the employee's reminders
+ * and HR's dashboard ask this one question too (the code review of 12ag's cleanups).
+ */
+export function nobodyCoveredAttended(
+  a: CoverableAdvance | null | undefined, seatOf: (enrolmentId: string) => { attendance?: unknown } | null | undefined
+): boolean {
+  const ids = coveredEnrolmentIds(a);
+  return ids.length > 0 && ids.every((id) => seatOf(id)?.attendance === "Did not attend");
+}
+
 /** The enrolments an advance pays for: its covers, or the one it was released for. */
 export function coveredEnrolmentIds(a: CoverableAdvance | null | undefined): string[] {
   if (!a) return [];

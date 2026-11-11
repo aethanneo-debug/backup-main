@@ -4,7 +4,7 @@
 // functions, no data touched. Run with `npm test`.
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { seminarBudget, seminarCommitment, isSeminarSettled, allocationIncrease, commitmentAfterEdit } from "../src/trainingBudget";
+import { seminarBudget, seminarCommitment, isSeminarSettled, allocationIncrease, commitmentAfterEdit, budgetReturns } from "../src/trainingBudget";
 
 type Budget = ReturnType<typeof seminarBudget>;
 const pick = (b: Budget) => [b.stage, b.share, b.absent, b.released, b.committed, b.returned];
@@ -306,5 +306,44 @@ describe("a reimbursement filed and not yet validated stays held", () => {
   test("once validated, what was spent counts instead, as for any attendee", () => {
     const settled = { ...a, status: "Liquidated", claimPending: undefined, settledSpent: 5000 };
     assert.equal(seminarBudget({ ...two, usedBudget: 5000 }, [settled], 4000).committed, 5000);
+  });
+});
+
+// HR's "Returned to Unallocated" card (the user's request of 2026-11-10, known-issues 12af): what the year's seminars gave
+// back, and what some took beyond their allocation, so Total − Allocated + Returned − Over = Unallocated.
+describe("what the seminars gave back to Unallocated", () => {
+  test("returned and over, per seminar, in centavos", () => {
+    assert.deepEqual(budgetReturns([]), { returned: 0, over: 0 });
+    assert.deepEqual(budgetReturns(undefined), { returned: 0, over: 0 });
+    assert.deepEqual(budgetReturns([{ allocated: 10000, committed: 8300 }]), { returned: 1700, over: 0 }, "a settled seminar's ₱1,700");
+    assert.deepEqual(budgetReturns([{ allocated: 5000, committed: 6200 }]), { returned: 0, over: 1200 }, "an approved overspend takes ₱1,200");
+    assert.deepEqual(budgetReturns([{ allocated: 10000, committed: 8300 }, { allocated: 5000, committed: 6200 }, { allocated: 3000, committed: 3000 }]),
+      { returned: 1700, over: 1200 }, "kept apart: one seminar's overspend doesn't hide another's return");
+    assert.deepEqual(budgetReturns([{ allocated: 10000, committed: 6666.67 }, { allocated: 0.1, committed: 0 }, { allocated: 0.2, committed: 0 }]),
+      { returned: 3333.63, over: 0 }, "summed in centavos");
+    assert.deepEqual(budgetReturns([{ allocated: "4000", committed: "3500.5" }, null as never]), { returned: 499.5, over: 0 }, "stored text reads as a number; a damaged row is passed over");
+  });
+
+  test("with the seminars' own figures, Total − Allocated + Returned − Over is Unallocated", () => {
+    // The requirement 6 walkthrough's settled seminar (₱1,700 back), D's share released on an open one, and an overspend.
+    const settledParts = [
+      enrol("A", { attendance: "Attended", status: "Liquidated", settledSpent: 2800 }),
+      enrol("B", { attendance: "Attended", status: "Liquidated", settledSpent: 3000 }),
+      enrol("C", { attendance: "Attended", status: "Liquidated", settledSpent: 2500 }),
+      enrol("D", { attendance: "Did not attend" })
+    ];
+    const settled = { ...prog, usedBudget: 8300 };
+    const open = { id: "O", allocatedBudget: 6000, usedBudget: 0, maxParticipants: 3 };
+    const openParts = [{ trainingProgramId: "O", status: "Assigned", attendance: "Did not attend" }, { trainingProgramId: "O", status: "Assigned" }];
+    const over = { id: "R", allocatedBudget: 5000, usedBudget: 6200, maxParticipants: 2 };
+    const overParts = [{ trainingProgramId: "R", status: "Liquidated", attendance: "Attended" }, { trainingProgramId: "R", status: "Liquidated", attendance: "Attended" }];
+    const seminars: [any, any[]][] = [[settled, settledParts], [open, openParts], [over, overParts]];
+    const rows = seminars.map(([p, parts]) => ({ allocated: p.allocatedBudget, committed: seminarCommitment(p, parts) }));
+    const { returned, over: beyond } = budgetReturns(rows);
+    assert.deepEqual([returned, beyond], [3700, 1200], "₱1,700 settled plus one ₱2,000 share released; ₱1,200 overspent");
+    const total = 50000;
+    const allocated = rows.reduce((s, r) => s + Number(r.allocated), 0);
+    const unallocated = total - rows.reduce((s, r) => s + r.committed, 0);
+    assert.equal(round2(total - allocated + returned - beyond), round2(unallocated));
   });
 });

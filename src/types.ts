@@ -1414,6 +1414,103 @@ export interface TrainingCoverage {
   asOf?: string;
 }
 
+/** HR's dashboard (12ag Part B, `GET /api/dashboard/hr`, src/hrDashboard.ts). "Staff" means still with the office
+ * (src/staffStatus.ts); "attended" means HR recorded "Attended" on a seat of the year's seminars, or recorded a
+ * training dated in the year that still counts (12r). */
+export interface HrDashboard {
+  fiscalYear: string;
+  /** The Manila day it was drawn up. */
+  asOf: string;
+  headcount: {
+    total: number;
+    byDivision: HrCount[];
+    byStatus: HrCount[];
+  };
+  /** How many staff attended 0, 1, 2, or 3 or more trainings in the year. */
+  trainingsPerEmployee: { trainings: "0" | "1" | "2" | "3+"; employees: number }[];
+  /** By the month a training's first day fell in (YYYY-MM): how many staff attended one, and how many trainings. */
+  attendeesByMonth: { month: string; employees: number; trainings: number }[];
+  attendance: {
+    /** Staff who attended at least one training in the year, of all staff. */
+    attended: number;
+    total: number;
+    /** Trainings HR recorded that count toward the year (beside the seminars below). */
+    recordsCounted: number;
+    /** The year's seminars that have started, earliest first, with everyone seated on them. */
+    seminars: HrSeminarAttendance[];
+  };
+  followUp: {
+    /** Seats whose money isn't settled yet, from every fiscal year (cash doesn't wait for the year: the code review of
+     * 12ag Part B), the most pressing first. */
+    rows: HrFollowUpRow[];
+    /** The chosen year's attendees, still with the office, with no cash advance and no claim at all: they may still
+     * file a reimbursement, or never claim. */
+    noClaim: HrNoClaimRow[];
+  };
+}
+
+export interface HrCount {
+  name: string;
+  count: number;
+}
+
+export interface HrSeminarAttendance {
+  id: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  attended: number;
+  didNotAttend: number;
+  /** Seated, with no attendance recorded yet. */
+  toRecord: number;
+  /** Who attended, by name (for the chart's tooltip). */
+  attendees: string[];
+}
+
+/** Where a seat's money stands when it isn't settled. An attendee's: their cash advance still with Finance, released
+ * with no report filed, the report (a liquidation, or a reimbursement claim: `claim`) with HR, with Finance, or
+ * returned for correction, or a claim validated and not yet paid. Also cash out with no report possible yet: a seat
+ * whose attendance HR hasn't recorded after the seminar, or one HR recorded "Did not attend" whose own advance hasn't
+ * been refunded (the code review of 12ag Part B). */
+export type HrFollowUpStage =
+  | "requested" | "noReport" | "withHr" | "withFinance" | "returned" | "reimbursementUnpaid"
+  | "attendanceUnrecorded" | "refundDue";
+
+export interface HrFollowUpRow {
+  participantId: string;
+  employee: string;
+  /** false: no longer with the office (12ab), though their seat and its money are still open. */
+  withOffice: boolean;
+  seminarId: string;
+  seminarTitle: string;
+  /** The fiscal year the seminar was filed under ("2029"): the list holds every year's open money. */
+  fiscalYear: string;
+  endDate: string;
+  stage: HrFollowUpStage;
+  /** The report is a reimbursement claim (the office owes the employee; no cash is out), not a liquidation. */
+  claim: boolean;
+  /** The liquidation report's due date (30 days after the seminar), and whether it has passed with the report still
+   * to be filed or corrected, or with attendance still to be recorded. A claim is never overdue. */
+  dueDate: string | null;
+  overdue: boolean;
+  /** The report covering the seat, when one is filed (its own, or the group's). */
+  reportId?: string;
+  reportNo?: string;
+  /** Covered by a co-participant's group cash advance or report: the holder files the report. */
+  group: boolean;
+}
+
+export interface HrNoClaimRow {
+  participantId: string;
+  employee: string;
+  withOffice: boolean;
+  seminarId: string;
+  seminarTitle: string;
+  endDate: string;
+  /** HR entered expenses the office paid for them directly (so there may be nothing left to claim). */
+  officePaid: boolean;
+}
+
 export interface TrainingBudgetSplit {
   Meals: number;
   Transportation: number;

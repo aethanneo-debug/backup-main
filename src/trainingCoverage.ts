@@ -42,6 +42,8 @@ export interface CoverageProgram {
   id: string;
   title?: string;
   fiscalYear?: string | number;
+  /** Its first day: when it counts on HR's attendees-per-month chart (12ag). */
+  startDate?: string;
 }
 
 export interface CoverageRecord {
@@ -89,36 +91,53 @@ export function fiscalYearSpan(fy: CoverageFiscalYear): { start: string; end: st
 
 const UNCOUNTED_ENROLMENT = new Set(["Cancelled", "Archived"]);
 
+/**
+ * Whether a seat was attended: HR's attendance record when there is one; for a seat never marked (from before
+ * attendance was recorded), the older evidence of a filed or settled report. Plan D's rule (server.ts,
+ * participantAttended), shared with HR's dashboard (12ag).
+ */
+export function seatAttended(seat: { attendance?: unknown; status?: unknown } | null | undefined): boolean {
+  if (!seat) return false;
+  if (seat.attendance) return seat.attendance === "Attended";
+  return seat.status === "Liquidated" || seat.status === "Liquidation Pending" || seat.status === "Completed";
+}
+
 /** A title as compared: case, punctuation and spacing ignored (as the server's normalizeTitle). */
 const titleKey = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
+/** One training that counts toward an employee's year: a seat on one of its seminars, or a training HR recorded.
+ * `day` is the seminar's first day or the record's date (YYYY-MM-DD), null when it can't be read. */
+export interface YearTraining {
+  kind: "seminar" | "record";
+  title: string;
+  day: string | null;
+}
+
 /**
- * A counter for one fiscal year: give it an employee and it lists the trainings that count
- * toward that year. Both forms of the employee's id are matched (the record id enrolments
- * store, and the staff code older records use). `excludeProgramId` leaves out the seminar
- * being staffed, so the picker counts only their other trainings.
+ * The trainings that count toward one fiscal year, one entry each, for an employee: the rule `yearTrainingCounter`
+ * and HR's attendees-per-month chart share (12ag). Both forms of the employee's id are matched (the record id
+ * enrolments store, and the staff code older records use). `excludeProgramId` leaves out the seminar being staffed.
  */
-export function yearTrainingCounter(data: CoverageData, fy: CoverageFiscalYear, excludeProgramId?: string) {
+export function yearTrainingEntries(data: CoverageData, fy: CoverageFiscalYear, excludeProgramId?: string) {
   const label = String(fy.label);
   const span = fiscalYearSpan(fy);
   const yearPrograms = new Map(
     (data.programs ?? []).filter(p => p && String(p.fiscalYear) === label).map(p => [p.id, p] as const)
   );
 
-  return (employee: Pick<CoverageEmployee, "id" | "employeeId">): YearTrainings => {
+  return (employee: Pick<CoverageEmployee, "id" | "employeeId">): YearTraining[] => {
     const forms = [employee.id, employee.employeeId].filter(Boolean) as string[];
-    const seminars: string[] = [];
+    const found: YearTraining[] = [];
     for (const e of data.enrolments ?? []) {
       if (!e || !forms.includes(e.employeeId)) continue;
       if (UNCOUNTED_ENROLMENT.has(String(e.status)) || e.attendance === "Did not attend") continue;
       if (excludeProgramId && e.trainingProgramId === excludeProgramId) continue;
       const program = yearPrograms.get(e.trainingProgramId);
-      if (program) seminars.push(String(program.title || "Seminar"));
+      if (program) found.push({ kind: "seminar", title: String(program.title || "Seminar"), day: isoDay(program.startDate) });
     }
-    const records: string[] = [];
     if (span) {
       // HR's own record of a seminar already counted above is the same training, listed once.
-      const seen = new Set(seminars.map(titleKey));
+      const seen = new Set(found.map(t => titleKey(t.title)));
       for (const r of data.records ?? []) {
         if (!r || !forms.includes(r.employeeId) || !recordCounts(r)) continue;
         const day = isoDay(r.dateConducted);
@@ -126,10 +145,26 @@ export function yearTrainingCounter(data: CoverageData, fy: CoverageFiscalYear, 
         const title = String(r.title || "Training");
         if (seen.has(titleKey(title))) continue;
         seen.add(titleKey(title));
-        records.push(title);
+        found.push({ kind: "record", title, day });
       }
     }
-    return { seminars, records };
+    return found;
+  };
+}
+
+/**
+ * A counter for one fiscal year: give it an employee and it lists the trainings that count
+ * toward that year, by title (`yearTrainingEntries`). `excludeProgramId` leaves out the seminar
+ * being staffed, so the picker counts only their other trainings.
+ */
+export function yearTrainingCounter(data: CoverageData, fy: CoverageFiscalYear, excludeProgramId?: string) {
+  const entries = yearTrainingEntries(data, fy, excludeProgramId);
+  return (employee: Pick<CoverageEmployee, "id" | "employeeId">): YearTrainings => {
+    const found = entries(employee);
+    return {
+      seminars: found.filter(t => t.kind === "seminar").map(t => t.title),
+      records: found.filter(t => t.kind === "record").map(t => t.title)
+    };
   };
 }
 

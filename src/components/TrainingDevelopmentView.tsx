@@ -10,7 +10,7 @@ import { normalizeTitle, seminarTdpBadgeText, tdpBadgeText } from "../tdpRules";
 // which; HR may go ahead knowingly, and it is recorded.
 import { divisionGapQuestion } from "../divisionCoverage";
 import SeminarTdpForm from "./training/SeminarTdpForm";
-import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease } from "../trainingBudget";
+import { seminarBudget, seminarCommitment, commitmentAfterEdit, allocationIncrease, budgetReturns } from "../trainingBudget";
 import { BookOpen, Calendar, DollarSign, Users, Plus, Target, Building, FileText, CheckCircle2, ChevronRight, Edit2, Trash2, Save, X, AlertTriangle, PieChart, ClipboardCheck, CalendarCheck, Archive } from "lucide-react";
 import ParticipantPickerModal, { PickerProgram } from "./training/ParticipantPickerModal";
 import AttendanceModal from "./training/AttendanceModal";
@@ -22,6 +22,7 @@ import TrainingNeedsPlanA from "./training/TrainingNeedsPlanA";
 import TrainingMonitoringPlanD from "./training/TrainingMonitoringPlanD";
 import TrainingEvaluationsDesk from "./training/evaluation/TrainingEvaluationsDesk";
 import TrainingCoveragePanel from "./training/TrainingCoveragePanel";
+import BudgetSummaryCards from "./training/BudgetSummaryCards";
 import ArchivedSeminars from "./training/ArchivedSeminars";
 
 // Whether an enrolment is on a seminar's roster: not one archived with it (an unused seminar
@@ -317,6 +318,22 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     archivedCommitted +
     newRows.reduce((sum, nr) => sum + Number(nr.allocatedBudget || 0), 0);
   const remainingAnnualBudget = Math.round((activeBudget - draftCommitted) * 100) / 100;
+  // What the year's seminars gave back to Unallocated, and what some take beyond their allocation (12af), each row priced
+  // as the two figures above price it, an edit not yet saved included, so Total − Allocated + Returned − Over is the
+  // Unallocated shown. A new row takes exactly its allocation, so it adds to neither.
+  const { returned: budgetReturned, over: budgetOver } = budgetReturns([
+    ...activePrograms.map(p => {
+      const draft = editingRows[p.id];
+      const allocated = draft ? Number(draft.allocatedBudget || 0) : Number(p.allocatedBudget || 0);
+      return {
+        allocated,
+        committed: draft
+          ? commitmentAfterEdit(p, participants, allocated, draftAddsParticipants(p.id), draftSeats(draft))
+          : seminarCommitment(p, participants)
+      };
+    }),
+    ...archivedCounted.map(p => ({ allocated: Number(p.allocatedBudget || 0), committed: seminarCommitment(p, participants) }))
+  ]);
 
   const fyLabel = activeFy?.label || "2026";
 
@@ -1287,26 +1304,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center text-green-600">
-            <BookOpen size={24} />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-slate-500 mb-1">Total Allocated</p>
-            <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(draftTotalAllocated)}</h3>
-          </div>
-        </div>
-        <div className={`bg-white rounded-xl shadow-sm border p-6 flex items-center gap-4 ${remainingAnnualBudget < 0 ? 'border-red-500 bg-red-50' : (remainingAnnualBudget < 50000 ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}`}>
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${remainingAnnualBudget < 0 ? 'bg-red-100 text-red-600' : 'bg-purple-50 text-purple-600'}`}>
-            {remainingAnnualBudget < 0 ? <AlertTriangle size={24} /> : <Target size={24} />}
-          </div>
-          <div>
-            <p className={`text-sm font-medium mb-1 ${remainingAnnualBudget < 0 ? 'text-red-700' : 'text-slate-500'}`}>Unallocated</p>
-            <h3 className={`text-2xl font-bold ${remainingAnnualBudget < 0 ? 'text-red-700' : 'text-slate-800'}`}>{formatCurrency(remainingAnnualBudget)}</h3>
-          </div>
-        </div>
-      </div>
+      {/* Total Allocated, Unallocated, and what the seminars gave back to it (12af). */}
+      <BudgetSummaryCards
+        total={activeBudget}
+        allocated={draftTotalAllocated}
+        unallocated={remainingAnnualBudget}
+        returned={budgetReturned}
+        over={budgetOver}
+      />
 
       {/* At least one training per year per employee: who has one this fiscal year, and who
           still needs a seat. HR and the Administrator only (server-side, like the plan). */}

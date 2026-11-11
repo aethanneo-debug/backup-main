@@ -4,6 +4,7 @@ import { apiCall } from "./utils";
 import Sidebar, { tabsOpenTo } from "./components/Sidebar";
 import Header from "./components/Header";
 import DashboardView from "./components/DashboardView";
+import HrDashboardView from "./components/HrDashboardView";
 import FinanceView from "./components/FinanceView";
 import AssetsView from "./components/AssetsView";
 import RequestsView from "./components/RequestsView";
@@ -90,7 +91,8 @@ export default function App() {
       case UserRole.SUPER_ADMIN:
         return "dashboard";
       case UserRole.HR_OFFICER:
-        return "pds";
+        // HR lands on its own dashboard (12ag Part B); the Personal Data Sheet is a click away.
+        return "dashboard";
       case UserRole.FINANCE_OFFICER:
         return "finance";
       case UserRole.BUDGET_OFFICER:
@@ -165,6 +167,13 @@ export default function App() {
   }
 
   async function fetchSummary() {
+    // Only the Administrator's dashboard reads the summary, and the server answers nobody else (12ag). At a sign-in
+    // gate it isn't asked for either: the server refuses it there, which left two console errors at the PDS gate (12p).
+    // An earlier session's copy (its open requests carry leave reasons) is dropped, not kept for the next account.
+    if (user?.role !== UserRole.SUPER_ADMIN || user.requirePasswordChange || user.requirePdsUpload) {
+      setSummary(null);
+      return;
+    }
     try {
       const res = await apiCall("/api/dashboard/summary");
       if (res.status === "success") {
@@ -234,6 +243,8 @@ export default function App() {
       console.error(err);
     } finally {
       localStorage.removeItem("ipfms_token");
+      // The Administrator's summary goes with the session (its open requests are colleagues' records).
+      setSummary(null);
       setUser(null);
       setActiveTab("dashboard");
     }
@@ -274,6 +285,10 @@ export default function App() {
 
     switch (activeTab) {
       case "dashboard":
+        // HR's own dashboard (12ag Part B): its figures come from HR's route, never the Administrator's view.
+        if (user.role === UserRole.HR_OFFICER) {
+          return <HrDashboardView setActiveTab={setActiveTab} onOpenLink={openNotificationLink} />;
+        }
         if (user.role !== UserRole.SUPER_ADMIN) {
           return (
             <div className="p-12 text-center space-y-4">

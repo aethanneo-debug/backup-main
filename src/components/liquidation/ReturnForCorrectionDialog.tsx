@@ -49,6 +49,8 @@ function lockedBecause(field: CorrectionField, report: LiquidationSubmission, fi
   if (field === "refundOr" && report.claimType === "Reimbursement") return "A Reimbursement has no refund";
   if (field === "claimType" && report.withinAdvance) return "A seminar report always settles its cash advance";
   if (field === "claimType" && report.withinAllowance) return "A seminar the employee paid for is always a Reimbursement";
+  // A seminar report covers the seminar's own dates (12af): a wrong date is corrected on the seminar.
+  if (field === "periodCovered" && (report.withinAdvance || report.withinAllowance)) return "Taken from the seminar's dates, set by HR";
   if (field === "replaceDocuments" && files.length === 0) return "No files attached";
   return "";
 }

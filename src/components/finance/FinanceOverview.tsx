@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatDate, firstDateString } from "../../utils";
 import { overviewFigures, reportStatusBadgeClass as statusBadgeClass, REPORT_STAGES, type OverviewAdvance, type OverviewReport } from "./overviewFigures";
+import StatusByDate, { type StatusAdvance } from "./StatusByDate";
 
 /** What the overview reads from a GET /api/training/budgets row (the server derives these). */
 export interface OverviewTrainingBudget {
@@ -41,7 +42,9 @@ interface FinanceOverviewProps {
   /** The fiscal-year chooser, shared with Finance's other pages. */
   yearControl: React.ReactNode;
   submissions: OverviewReport[];
-  cashAdvances: OverviewAdvance[] | null;
+  cashAdvances: Array<OverviewAdvance & StatusAdvance> | null;
+  /** The fiscal year in view's first and last days, for "This fiscal year" in the figures by date. */
+  fiscalYearDates?: { start?: string; end?: string };
   /** The year's training budget, or null when none is set. */
   trainingBudget: OverviewTrainingBudget | null;
   status: OverviewLoadStatus;
@@ -161,6 +164,7 @@ export default function FinanceOverview({
   yearControl,
   submissions,
   cashAdvances,
+  fiscalYearDates,
   trainingBudget,
   status,
   canValidate,
@@ -260,6 +264,8 @@ export default function FinanceOverview({
           />
         </div>
       </section>
+
+      <StatusByDate reports={submissions} advances={cashAdvances} fiscalYear={fiscalYear} fiscalYearDates={fiscalYearDates} status={status} onOpenDesk={onOpenDesk} />
 
       <section aria-labelledby="overview-year">
         <SectionHeading id="overview-year" title={`Fiscal year ${fy}`} aside="Seminar reports count in their seminar's year" />

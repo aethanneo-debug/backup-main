@@ -447,6 +447,7 @@ export default function FinanceView({
             yearControl={fyButton}
             submissions={submissions}
             cashAdvances={overviewLoad?.advances ?? null}
+            fiscalYearDates={currentFy ? { start: currentFy.start_date, end: currentFy.end_date } : undefined}
             trainingBudget={currentFy ? trainingBudgets.find(b => b.fiscalYearId === currentFy.id) ?? null : null}
             status={{
               loading: !overviewLoad,
@@ -632,9 +633,11 @@ export default function FinanceView({
                                 Returned to Unallocated by {tb.settledReturning} seminar{tb.settledReturning === 1 ? "" : "s"}: {formatCurrency(Number(tb.returnedFromSettled))}
                               </span>
                             )}
+                            {/* `releasedForAbsent` also holds what liquidated attendees didn't spend, since 2026-10-19
+                                (server.ts keeps the field's name for its consumers), so the line names both (12af). */}
                             {Number(tb?.releasedForAbsent) > 0 && (
-                              <span className="text-[10px] font-semibold text-emerald-700 mt-0.5">
-                                Released for {tb.absentCount} participant{tb.absentCount === 1 ? "" : "s"} who did not attend: {formatCurrency(Number(tb.releasedForAbsent))}
+                              <span data-budget-line="released" className="text-[10px] font-semibold text-emerald-700 mt-0.5">
+                                Released while seminars are open (shares of those who didn&rsquo;t attend, and what liquidated attendees didn&rsquo;t spend): {formatCurrency(Number(tb.releasedForAbsent))}
                               </span>
                             )}
                             {Number(tb?.heldForAdvances) > 0 && (

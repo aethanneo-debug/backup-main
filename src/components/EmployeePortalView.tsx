@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { User, AnyRequest, RequestType, RequestStatus, LiquidationParticular, LiquidationSubmission, LiquidationSubmissionView, ActiveSignatory, ClaimType, CashAdvance, DocumentKind, LiquidationDocument, NotificationLink, ScreenFocus, TravelDeclaration } from "../types";
 import { useFocusTarget, useRecordHighlight } from "./ui/useRecordHighlight";
 import { correctionTarget as firstCorrectionTarget, correctionTargetSelectors } from "../correctionTarget";
-import { apiCall, getLocalTodayString, formatCurrency, formatDate, downloadBase64File as saveAttachedFile } from "../utils";
+import { apiCall, getLocalTodayString, formatCurrency, formatDate, firstDateString, downloadBase64File as saveAttachedFile } from "../utils";
 import { spendableCentavos } from "../advanceCoverage";
 import LiquidationDueBadge from "./training/LiquidationDueBadge";
 import {
@@ -23,9 +23,10 @@ import { canResubmit, correctionAccess, openCorrectionOf } from "./liquidation/r
 import SettlementLog from "./liquidation/SettlementLog";
 import VehicleReservationSlipModal from "./requests/VehicleReservationSlipModal";
 import AdvanceRequestPanel, { currentAdvanceOf } from "./liquidation/AdvanceRequestPanel";
-import BalanceCheck from "./liquidation/BalanceCheck";
+import BalanceCheck, { type SeminarBudgetMode } from "./liquidation/BalanceCheck";
+import ChooseSeminarPrompt from "./liquidation/ChooseSeminarPrompt";
 import { withinAdvanceSubmitProblem } from "./liquidation/withinAdvance";
-import { reimbursementProblem, seminarClaimMode } from "../reimbursement";
+import { reimbursementProblem, seminarClaimMode, seminarPeriod } from "../reimbursement";
 import { liquidationBalance } from "../liquidationMoney";
 import { DOCUMENT_SLOTS, correctionSlots, filedUnderDocuments, missingDocuments, missingDocumentsText, noTravelProblem, requiredDocuments } from "../reportDocuments";
 import RequiredDocuments from "./liquidation/RequiredDocuments";
@@ -87,6 +88,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const [myAdvances, setMyAdvances] = useState<any[]>([]);
   // The advances couldn't be loaded: a seminar's form then says so rather than "none released".
   const [advancesFailed, setAdvancesFailed] = useState(false);
+  // The employee's seminars couldn't be loaded: the form says so rather than "nothing to file" (12af).
+  const [seminarsFailed, setSeminarsFailed] = useState(false);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
 
@@ -136,7 +139,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const correctingId = useRef<string | null>(null);
   useEffect(() => { correctingId.current = resubmittingItem?.id ?? null; }, [resubmittingItem]);
   const [resubmitRequest, setResubmitRequest] = useState<any | null>(null);
-  const [resubmitDates, setResubmitDates] = useState({ dateRequested: "", startDate: "", endDate: "", dateNeeded: "", meetingDate: "" });
+  const [resubmitDates, setResubmitDates] = useState({ startDate: "", endDate: "", dateNeeded: "", meetingDate: "" });
 
   // Liquidation (settling a cash advance) or Reimbursement (paid out of pocket). No
   // default: the claimant has to say which (instructor's note 10).
@@ -253,6 +256,28 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     return spendableCentavos(a, id => attended.has(id)) / 100;
   }, [activeAdvance, groupAttendees]);
   const balance = liquidationBalance(releasedOnSheet, effectiveSpent);
+  // A seminar report covers the seminar's own dates, which HR sets (12af): the server stores them whatever is sent, on a
+  // correction too, so the sheet shows them read-only. (A new report on an older seminar without real dates keeps the
+  // typed period, as the server does.)
+  const seminarReport = withinAdvanceForm || allowanceForm;
+  const seminarDates = seminarReport && selectedItem?.source === "seminar" ? seminarPeriod(selectedItem.startDate, selectedItem.endDate) : null;
+  // What the sheet shows: those dates, and Finance's voucher once it is on record, even one that arrived after the form
+  // was filled (the server stores Finance's reference anyway).
+  const sheetCoa: CoaHeaderFields = {
+    ...coaFields,
+    ...(seminarDates ? { periodCoveredFrom: seminarDates.from, periodCoveredTo: seminarDates.to } : {}),
+    ...(activeAdvance ? { cashAdvanceDvNo: activeAdvance.dvNo || "", cashAdvanceDvDate: activeAdvance.dvDate || "" } : {})
+  };
+  // A new report before its seminar is chosen: the sheet waits for it, locked (12af). The dropdown offers what has no
+  // report yet, and the report being corrected.
+  const choosingFirst = !selectedActivityId && !resubmittingItem;
+  const reportChoices = (liquidatable ?? []).filter((a: any) =>
+    (resubmittingItem && resubmittingItem.activityId === a.id) || !(submissions ?? []).some((sub: any) => sub.activityId === a.id));
+  // HR's budget for the seat, under the sheet: released as the advance, claimed back, or a request still with Finance.
+  const budgetMode: SeminarBudgetMode | null = withinAdvanceForm && activeAdvance ? "liquidation"
+    : allowanceForm ? "reimbursement"
+    : withinAdvanceForm && seminarAdvance?.status === "Requested" ? "waiting"
+    : null;
 
   // The named documents (the instructor's review, R5): a seminar's report, or a returned one filed under
   // them. What it needs follows from the form as it stands, by the server's rules (src/reportDocuments.ts).
@@ -626,6 +651,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       if (superseded()) return;
       setMyAdvances(advRes.status === "success" ? ownAdvances(advRes.data) : []);
       setAdvancesFailed(advRes.status !== "success");
+      setSeminarsFailed(seminarRes.status !== "success");
 
       // /api/activities also lists the employee's seminars (type "training"); those come
       // from the seminar list below instead, so each seminar appears once.
@@ -652,6 +678,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               allocated: Number(s.allocatedBudget || 0),
               // What a reimbursement may claim back: their share less what the office paid for them.
               reimbursementLimit: Number(s.reimbursementLimit || 0),
+              // The period its report covers (12af).
+              startDate: s.dateConducted,
+              endDate: s.endDate,
               liquidationDueDate: s.liquidationDueDate,
               source: "seminar" as const
             }))
@@ -704,7 +733,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       setFileError("");
     }
     const wasSeminar = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId)?.source === "seminar";
+    const chosen = (liquidatable ?? []).find((a: any) => a.id === id);
     setSelectedActivityId(id);
+    // A seminar's report covers the seminar's own dates, set by HR (12af); one seminar's dates never carry over to
+    // another choice. (Empty for an older seminar without real dates, whose period is typed.)
+    if (chosen?.source === "seminar" || wasSeminar) {
+      const dates = chosen?.source === "seminar" ? seminarPeriod(chosen.startDate, chosen.endDate) : null;
+      setCoaFields(prev => ({ ...prev, periodCoveredFrom: dates?.from ?? "", periodCoveredTo: dates?.to ?? "" }));
+    }
     // What Finance released, if it is on record. Otherwise zero rather than HR's
     // allocation - an allocation is not money in hand, and seeding with it was what made
     // an unfunded assignment look funded.
@@ -713,7 +749,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     // released for the seat, claims back what the employee paid themselves (as allowanceForm reads
     // it). A general activity's claimant chooses, so a type set for a seminar isn't carried over to
     // one, and with an advance released it can only be a Liquidation.
-    if ((liquidatable ?? []).find((a: any) => a.id === id)?.source === "seminar") {
+    if (chosen?.source === "seminar") {
       if (!advancesFailed && seminarClaimMode(currentAdvanceOf(myAdvances, id)?.status) === "reimbursement") {
         chooseClaimType("Reimbursement");
       } else {
@@ -877,9 +913,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
     setError("");
     setSuccess("");
     try {
-      const payload: any = {
-        dateRequested: resubmitDates.dateRequested
-      };
+      // The request keeps the date it was filed: the server doesn't read one (12w, 2026-11-11).
+      const payload: any = {};
       
       if (resubmitRequest.requestType === RequestType.LEAVE) {
         payload.startDate = resubmitDates.startDate;
@@ -1078,8 +1113,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           // (Kept as filed on a correction.)
           ...(resubmittingItem ? {} : { travelDeclarations: declarations }),
           particulars: lines,
-          periodCoveredFrom: coaFields.periodCoveredFrom,
-          periodCoveredTo: coaFields.periodCoveredTo,
+          // As the sheet shows it: a seminar report's own dates (the server stores those anyway, 12af).
+          periodCoveredFrom: sheetCoa.periodCoveredFrom,
+          periodCoveredTo: sheetCoa.periodCoveredTo,
           responsibilityCenterCode: coaFields.responsibilityCenterCode,
           cashAdvanceDvNo: isReimbursement ? "" : coaFields.cashAdvanceDvNo,
           cashAdvanceDvDate: isReimbursement ? "" : coaFields.cashAdvanceDvDate,
@@ -1758,7 +1794,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                       <div>
                         <div className="flex items-center space-x-2">
                           <span className="font-semibold text-slate-800">{r.requestType}</span>
-                          <span className="text-[9px] text-slate-400 font-mono">Submitted: {r.dateRequested}</span>
+                          {/* Text only: a record stored before 2026-11-11 can hold a date of another kind (12w). */}
+                          <span className="text-[9px] text-slate-400 font-mono">Submitted: {firstDateString(r.dateRequested, r.createdAt)}</span>
                         </div>
                         <p className="text-slate-500 italic mt-0.5">"{r.reason || r.purpose || 'No purpose declared'}"</p>
                         
@@ -1795,7 +1832,6 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                             onClick={() => {
                               setResubmitRequest(r);
                               setResubmitDates({
-                                dateRequested: r.dateRequested || "",
                                 startDate: r.startDate || "",
                                 endDate: r.endDate || "",
                                 dateNeeded: r.dateNeeded || "",
@@ -1976,24 +2012,21 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">
+                  <label htmlFor="liq-activity" className="text-[10px] font-bold text-slate-400 uppercase font-mono">
                     Assigned Activity <span className="text-rose-600" aria-hidden="true">*</span>
                   </label>
                   <select
+                    id="liq-activity"
                     value={selectedActivityId}
                     onChange={e => chooseActivity(e.target.value)}
                     // A report's activity is never correctable; the server ignores any change.
                     disabled={!!resubmittingItem}
+                    aria-required="true"
+                    aria-describedby={choosingFirst ? "liq-choose-first" : undefined}
                     className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold disabled:cursor-not-allowed disabled:bg-slate-100"
                   >
                     <option value="">-- Choose Assigned Activity or Seminar --</option>
-                    {(liquidatable ?? [])
-                      .filter(a => {
-                        const isLinked = (submissions ?? []).some(sub => sub.activityId === a.id);
-                        if (resubmittingItem && resubmittingItem.activityId === a.id) return true;
-                        return !isLinked;
-                      })
-                      .map(a => (
+                    {reportChoices.map(a => (
                       <option key={a.id} value={a.id}>{a.label}</option>
                     ))}
                   </select>
@@ -2003,16 +2036,17 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     note 10). The server checks the choice against Finance's records. A seminar's
                     report settles its cash advance, or, with none for the seat, claims back what
                     the employee paid, so its type is fixed (the seminar budget flow, decision 4;
-                    reimbursements, 2026-10-30). */}
-                {withinAdvanceForm || allowanceForm ? (
+                    reimbursements, 2026-10-30). Before the seminar is chosen it is fixed too: the
+                    general activities' choice is only for correcting one of their older reports. */}
+                {withinAdvanceForm || allowanceForm || choosingFirst ? (
                   <div className="space-y-1">
                     <label htmlFor="liq-claim-type-fixed" className="block text-[10px] font-bold text-slate-400 uppercase font-mono">Claim Type</label>
                     <input
                       id="liq-claim-type-fixed"
                       type="text"
                       readOnly
-                      value={allowanceForm ? "Reimbursement: you paid for this seminar yourself" : "Liquidation: settles your cash advance"}
-                      aria-describedby="liq-claim-type-hint"
+                      value={choosingFirst ? "Comes from your seminar" : allowanceForm ? "Reimbursement: you paid for this seminar yourself" : "Liquidation: settles your cash advance"}
+                      aria-describedby={choosingFirst ? "liq-choose-first" : "liq-claim-type-hint"}
                       className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 font-semibold bg-slate-100"
                     />
                   </div>
@@ -2052,7 +2086,17 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
               </div>
 
               {/* The cash advance itself is entered on the sheet below, on its AMOUNT OF CASH
-                  ADVANCE line; this says where its figure comes from for the type chosen. */}
+                  ADVANCE line; this says where its figure comes from for the type chosen. Before the
+                  seminar is chosen, what choosing it does instead (12af). */}
+              {choosingFirst ? (
+                <ChooseSeminarPrompt
+                  id="liq-choose-first"
+                  loadFailed={seminarsFailed}
+                  nothingToFile={portalLoads > 0 && reportChoices.length === 0}
+                  onOpenSeminars={() => setActiveSubMenu("activities")}
+                  onRetry={() => fetchPortalData()}
+                />
+              ) : (
               <p
                 id="liq-claim-type-hint"
                 className={`text-[10px] font-mono leading-snug ${
@@ -2135,6 +2179,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   </>
                 )}
               </p>
+              )}
 
               {/* Who signs Boxes B and C comes from Utilities → Manage Signatories. */}
               {signatoryError ? (
@@ -2206,11 +2251,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   date={resubmittingItem ? (resubmittingItem.dateSubmitted || resubmittingItem.createdAt) : getLocalTodayString()}
                   // Box A: the official name from the staff record (the server stamps the same).
                   employeeName={resubmittingItem?.employeeName || profile?.fullName || user.fullName}
-                  // Finance's voucher shows in the DV boxes, even for an advance that arrived
-                  // after the form was filled (the server stores Finance's reference anyway).
-                  coa={activeAdvance
-                    ? { ...coaFields, cashAdvanceDvNo: activeAdvance.dvNo || "", cashAdvanceDvDate: activeAdvance.dvDate || "" }
-                    : coaFields}
+                  // The seminar's dates and Finance's voucher, as the server stores them (sheetCoa).
+                  coa={sheetCoa}
+                  periodFromSeminar={seminarReport && (!!seminarDates || !!resubmittingItem)}
+                  awaitingChoice={choosingFirst}
                   onCoaChange={next => { setCoaFields(next); clearMoneyError(); }}
                   // A seminar's advance only ever comes from Finance's record, never typed.
                   advanceOnRecord={!!activeAdvance || withinAdvanceForm}
@@ -2255,10 +2299,14 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 />
               </div>
 
-              {/* The seminar budget flow: the advance, the items so far and what is left, live. */}
-              {withinAdvanceForm && activeAdvance && (
+              {/* The seminar budget flow: HR's budget for the seat, the items so far and what is left, live (12af). */}
+              {budgetMode && (
                 <BalanceCheck
-                  advance={releasedOnSheet}
+                  mode={budgetMode}
+                  share={selectedItem ? Number(selectedItem.allocated) || 0 : null}
+                  advance={activeAdvance}
+                  seatId={selectedActivityId}
+                  limit={reimbursable}
                   itemsTotal={effectiveSpent}
                   orFilled={!!coaFields.refundOrNo.trim() && !!coaFields.refundOrDate}
                 />
@@ -2288,6 +2336,11 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{fileError}</p>
                   )}
                 </RequiredDocuments>
+              ) : choosingFirst ? (
+                // What a seminar's report needs follows from the seminar and its lines (12af: the form waits for it).
+                <p className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-[11px] text-slate-600">
+                  The documents your report needs are listed here once you choose your seminar.
+                </p>
               ) : (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center gap-2 bg-blue-600 px-3 py-2">
@@ -2366,6 +2419,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                     placeholder="Review or ledger statements for HR & Finance check..."
                     value={liqRemarks}
                     onChange={e => setLiqRemarks(e.target.value)}
+                    // Like the sheet, it waits for the seminar (12af).
+                    disabled={choosingFirst}
                     readOnly={!access.editable("remarks")}
                     maxLength={2000}
                     data-correction-target="remarks"
@@ -2389,10 +2444,10 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                 // A new report needs a Box B representative; with none set up it can't be filed.
                 // A seminar's report needs its advance, and items within it (the balance check
                 // above says why), and its required documents (the line above says which).
-                disabled={submittingLiq || (signatories !== null && boxBChoices.length === 0 && !resubmittingItem?.representativeId)
+                disabled={submittingLiq || choosingFirst || (signatories !== null && boxBChoices.length === 0 && !resubmittingItem?.representativeId)
                   || (withinAdvanceForm && (!activeAdvance || balance.status === "Over"))
                   || !!docsProblem}
-                aria-describedby={docsProblem ? "documents-still-needed" : undefined}
+                aria-describedby={docsProblem ? "documents-still-needed" : choosingFirst ? "liq-choose-first" : undefined}
                 className={`px-6 py-2 rounded-lg shadow-sm font-semibold text-xs cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:cursor-not-allowed disabled:opacity-60 ${
                   resubmittingItem
                     ? "bg-amber-600 hover:bg-amber-700 text-white"

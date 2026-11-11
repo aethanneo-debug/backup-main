@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { User, UserRole, RequestStatus, NotificationLink } from "../types";
+import { User, UserRole, RequestStatus, NotificationLink, type TrainingCoverage } from "../types";
 import {
   Users,
   ClipboardCheck,
   FileClock,
   Layers,
-  Package,
-  Activity,
   Clock,
   ArrowRight,
   RefreshCcw
@@ -20,7 +18,16 @@ import {
   type OverviewAdvance,
   type OverviewReport
 } from "./finance/overviewFigures";
+import { manilaDay } from "../trainingCalendar";
 import MonthlyLiquidationChart from "./dashboard/MonthlyLiquidationChart";
+import BudgetCharts from "./dashboard/BudgetCharts";
+import TrainingCalendar from "./dashboard/TrainingCalendar";
+import UpcomingTrainings from "./dashboard/UpcomingTrainings";
+import { PanelLink } from "./dashboard/LoadStates";
+import PanelBoundary from "./dashboard/PanelBoundary";
+import { useApiLoad } from "./dashboard/useApiLoad";
+import { useTrainingBudget } from "./dashboard/useTrainingBudget";
+import { useTrainingSchedule } from "./dashboard/useTrainingSchedule";
 
 interface DashboardViewProps {
   user: User;
@@ -40,16 +47,24 @@ interface LiquidationLoad {
   fiscalYear: string;
 }
 
-const MANILA_DAY = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Manila", month: "short", day: "numeric" });
-const MANILA_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Manila", hour: "numeric", minute: "2-digit" });
-
-/** An audit entry's moment in Manila ("Oct 22" and "4:05 PM"); null when it can't be read. */
-function manilaStamp(timestamp?: string): [string, string] | null {
-  const at = new Date(timestamp ?? "");
-  return Number.isNaN(at.getTime()) ? null : [MANILA_DAY.format(at), MANILA_TIME.format(at)];
+/** Who has at least one training this fiscal year (the coverage route: staff still with the office, src/staffStatus.ts). */
+async function loadCoverage(): Promise<TrainingCoverage> {
+  const res = await apiCall("/api/training/coverage");
+  if (res?.status !== "success" || !res.data) throw new Error(res?.message || "");
+  return res.data as TrainingCoverage;
 }
 
 export default function DashboardView({ user, summaryData, loading, setActiveTab, onOpenLink }: DashboardViewProps) {
+  // The training budget, the seminars (for its chart, the calendar and the upcoming list) and the coverage: each loads on
+  // its own, with its own "…", "—" and Retry (12ag).
+  const budget = useTrainingBudget();
+  const schedule = useTrainingSchedule();
+  const coverage = useApiLoad(loadCoverage);
+  // The server's day once the schedule has loaded (a PC's clock can be wrong), Manila's by the browser's until then.
+  const today = schedule.asOf ?? manilaDay();
+  const openSeminar = (id: string) => onOpenLink({ tab: "training_development", record: { kind: "seminar", id } });
+  const openPrograms = () => onOpenLink({ tab: "training_development", subTab: "programs" });
+
   // Liquidation figures come from the lists Finance's overview reads, by the same rules
   // (finance/overviewFigures.ts), so the two screens always agree.
   const [liq, setLiq] = useState<LiquidationLoad | undefined>(undefined);
@@ -74,23 +89,30 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
   }, [reloadKey]);
   const retryLiquidation = () => setReloadKey(k => k + 1);
 
-  if (loading || !summaryData) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-12 bg-slate-50">
-        <div className="h-10 w-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="mt-4 text-xs font-mono text-slate-500">Querying regional data indexes...</p>
-      </div>
-    );
-  }
+  // App's summary holds only the workforce counts and the outstanding requests. Until it arrives those show "…" and
+  // the rest of the page draws: it used to wait behind a spinner for the whole page, so a summary that never came hid
+  // the training panels too (the code review of 12ag). App keeps no failure for it, so it stays "…" if it never comes.
+  const summaryReady = !!summaryData && !loading;
+  const stats = summaryReady ? summaryData.stats : undefined;
+  const recentRequests: any[] | undefined = summaryReady && Array.isArray(summaryData.recentRequests) ? summaryData.recentRequests : undefined;
+  const count = (n: unknown) => (!stats ? "…" : typeof n === "number" ? n : "—");
 
-  const { stats, auditLogs, recentRequests } = summaryData;
+  // Who has a training this fiscal year (a seminar, or one HR recorded), of the staff still with the office: "…" while
+  // loading, "—" with the server's reason when it couldn't be loaded. It replaces the count of HR's hand-entered
+  // records, which missed seminars.
+  const cov = coverage.data;
+  const trained = coverage.loading
+    ? { value: "…", desc: "Loading…" }
+    : coverage.failed || !cov
+      ? { value: "—", desc: coverage.message ? `Couldn't be loaded: ${coverage.message}` : "Couldn't be loaded" }
+      : { value: `${cov.covered} of ${cov.total}`, desc: `Staff still with the office, FY ${cov.fiscalYear}` };
 
   // General executive charts mapping
-  const hrStatsList = [
-    { label: "Total Workforce", value: stats.totalEmployees, desc: "Active roster employees", color: "bg-blue-500", text: "text-blue-600" },
+  const hrStatsList: { label: string; value: React.ReactNode; desc: string; text: string; stat?: string }[] = [
+    { label: "Total Workforce", value: count(stats?.totalEmployees), desc: "Active roster employees", text: "text-blue-600" },
     // Counted from each staff record's employment status; "—" from a server that doesn't send it.
-    { label: "Permanent Staff", value: stats.permanentEmployees ?? "—", desc: "Permanent or regular appointment", color: "bg-emerald-500", text: "text-emerald-600" },
-    { label: "Professional Training", value: stats.trainingCount, desc: "Certificates compiled", color: "bg-amber-500", text: "text-amber-600" }
+    { label: "Permanent Staff", value: count(stats?.permanentEmployees), desc: "Permanent or regular appointment", text: "text-emerald-600" },
+    { label: "With a training this FY", ...trained, text: "text-slate-800", stat: "trained" }
   ];
 
   // Liquidation: "…" while loading, "—" when a list couldn't be loaded, never a false zero.
@@ -108,14 +130,11 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
   const liqFailed = !!liq && (liq.reportsFailed || liq.advances === null);
   const latest = liq ? latestReports(liq.reports, 5) : [];
 
-  const astStatsList = [
-    { label: "Total Registered Assets", value: stats.totalAssets, desc: "Hardware items in system", color: "bg-violet-500", text: "text-violet-600" },
-    { label: "Assigned to Employees", value: stats.assignedAssets, desc: "Active PAR accountability", color: "bg-teal-500", text: "text-teal-600" },
-    { label: "Damaged / Suspended", value: stats.damagedAssets, desc: "Require repair action", color: "bg-red-500", text: "text-red-600" }
-  ];
-
   return (
-    <div id="ipfms-dashboard-view" className="flex-1 overflow-y-auto p-6 bg-slate-50 space-y-6">
+    // min-w-0: as a flex item of <main> it may be narrower than its content, which then wraps instead of
+    // pushing the page sideways. On a phone the sidebar leaves about 100 px, so there a word or an amount
+    // too long for its box breaks rather than sticking out (overflow-wrap is inherited).
+    <div id="ipfms-dashboard-view" className="min-w-0 flex-1 overflow-y-auto p-2 sm:p-6 bg-slate-50 space-y-6 max-sm:[overflow-wrap:anywhere]">
       {/* WELCOME BANNER WITH USER PROFILE */}
       {user.role !== UserRole.SUPER_ADMIN && (
         <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-xl p-6 text-white shadow-md relative overflow-hidden">
@@ -149,159 +168,151 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
         </div>
       )}
 
+      {/* Each panel fails on its own (PanelBoundary): a record it can't draw shows a box in its place, and the rest of
+          the page, the sidebar included, keeps working (the security review of 12ag). */}
+
+      {/* THE TRAINING BUDGET (12ag): the year's figures, what is taken and free, and each seminar's allocation. */}
+      <PanelBoundary name="The training budget">
+        <BudgetCharts budget={budget} schedule={schedule} onOpenPrograms={openPrograms} />
+      </PanelBoundary>
+
+      {/* THE TRAINING CALENDAR AND WHAT IS COMING UP (12ag): side by side on a wide screen, one above the other below.
+          Only the active year's seminars open in Programs & Budget, which lists no other year's. */}
+      <section aria-label="Training schedule" className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <PanelBoundary name="The training calendar" className="xl:col-span-2">
+          <TrainingCalendar
+            className="xl:col-span-2"
+            seminars={schedule.seminars}
+            details={schedule.details}
+            today={today}
+            onOpenSeminar={openSeminar}
+            activeFiscalYear={schedule.activeFiscalYear}
+            loading={schedule.loading}
+            failed={schedule.failed}
+            message={schedule.message}
+            onRetry={schedule.retry}
+          />
+        </PanelBoundary>
+        <PanelBoundary name="Upcoming trainings">
+          <UpcomingTrainings
+            seminars={schedule.seminars}
+            details={schedule.details}
+            today={today}
+            loading={schedule.loading}
+            failed={schedule.failed}
+            message={schedule.message}
+            onRetry={schedule.retry}
+            quietFailure
+            onOpenSeminar={openSeminar}
+            activeFiscalYear={schedule.activeFiscalYear}
+            emptyAction={<PanelLink onClick={openPrograms}>Plan one in Programs &amp; Budget</PanelLink>}
+          />
+        </PanelBoundary>
+      </section>
+
       {/* DETAILED STATS WIDGET GRID (ADAPTIVE TO ROLES) */}
       <section className="space-y-4">
-        <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+        <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500">
           Core Module Metrics
         </h3>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* PERSONNEL SECTION */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <span className="text-xs font-semibold text-slate-800 flex items-center">
-                <Users size={16} className="text-blue-500 mr-1.5" />
-                HR & Workforce
-              </span>
-              {/* Staff records live in Personnel Information → Personal Data Sheet. */}
-              <button
-                onClick={() => setActiveTab("pds")}
-                className="text-[10px] text-blue-600 font-medium hover:underline flex items-center"
-              >
-                <span>Manage</span>
-                <ArrowRight size={10} className="ml-0.5" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              {hrStatsList.map((stat, idx) => (
-                <div key={idx} className="flex justify-between items-center">
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-500">{stat.label}</p>
-                    <p className="text-[9px] text-slate-400">{stat.desc}</p>
-                  </div>
-                  <span className={`text-md font-bold font-mono ${stat.text}`}>{stat.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* LIQUIDATION (the Liquidation Desk at a glance; details on Finance's overview) */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow" aria-busy={!liq}>
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <span className="text-xs font-semibold text-slate-800 flex items-center">
-                <ClipboardCheck size={16} className="text-emerald-500 mr-1.5" />
-                Liquidation
-              </span>
-              <button
-                onClick={() => onOpenLink({ tab: "finance", subTab: "dashboard" })}
-                className="text-[10px] text-emerald-600 font-medium hover:underline flex items-center"
-              >
-                <span>Overview</span>
-                <ArrowRight size={10} className="ml-0.5" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              {liqStatsList.map((stat, idx) => (
-                <div key={idx} className="flex justify-between items-center">
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-500">{stat.label}</p>
-                    <p className="text-[9px] text-slate-400">{stat.desc}</p>
-                  </div>
-                  <span className={`text-md font-bold font-mono ${stat.text}`}>{stat.value}</span>
-                </div>
-              ))}
-              {liqFailed && (
-                <button type="button" onClick={retryLiquidation} className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-rose-700 underline">
-                  <RefreshCcw size={10} aria-hidden="true" /> Retry
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          {/* The two cards: side by side on a tablet, one above the other beside the chart on a wide screen. */}
+          <div className="grid grid-cols-1 content-start gap-6 md:grid-cols-2 xl:grid-cols-1">
+            {/* PERSONNEL SECTION */}
+            <PanelBoundary name="HR & Workforce">
+            <div data-dash="workforce" aria-busy={coverage.loading || !stats} className="min-w-0 bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 border-b border-slate-100 pb-3">
+                <span className="text-xs font-semibold text-slate-800 flex items-center">
+                  <Users size={16} className="text-blue-500 mr-1.5" />
+                  HR & Workforce
+                </span>
+                {/* Staff records live in Personnel Information → Personal Data Sheet. */}
+                <button
+                  onClick={() => setActiveTab("pds")}
+                  className="text-[10px] text-blue-600 font-medium hover:underline flex items-center"
+                >
+                  <span>Manage</span>
+                  <ArrowRight size={10} className="ml-0.5" />
                 </button>
-              )}
-            </div>
-          </div>
-
-          {/* ASSET INVENTORY */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <span className="text-xs font-semibold text-slate-800 flex items-center">
-                <Package size={16} className="text-purple-500 mr-1.5" />
-                Accountability PAR
-              </span>
-              <button
-                onClick={() => setActiveTab("assets")}
-                className="text-[10px] text-purple-600 font-medium hover:underline flex items-center"
-              >
-                <span>Inventory</span>
-                <ArrowRight size={10} className="ml-0.5" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              {astStatsList.map((stat, idx) => (
-                <div key={idx} className="flex justify-between items-center">
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-500">{stat.label}</p>
-                    <p className="text-[9px] text-slate-400">{stat.desc}</p>
-                  </div>
-                  <span className={`text-md font-bold font-mono ${stat.text}`}>{stat.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CHARTS & COMPARATIV TELEMETRY */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* What validated reports spent, month by month (real figures). */}
-        <MonthlyLiquidationChart
-          months={liquidatedByMonth(liq?.reports)}
-          loading={!liq}
-          failed={!!liq?.reportsFailed}
-          onRetry={retryLiquidation}
-        />
-
-        {/* RECENT SECURIT ACTION STREAM */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-          <h4 className="text-xs font-bold font-sans text-slate-800 uppercase tracking-tight flex items-center justify-between pb-3 border-b border-slate-100">
-            <span className="flex items-center">
-              <Activity size={15} className="text-rose-500 mr-1.5 animate-pulse" />
-              Administrative Audits
-            </span>
-            {user.role === UserRole.SUPER_ADMIN && (
-              <button
-                onClick={() => setActiveTab("audit")}
-                className="text-[9px] text-rose-600 font-medium hover:underline"
-              >
-                View Logs
-              </button>
-            )}
-          </h4>
-          <div className="space-y-3.5 max-h-44 overflow-y-auto pr-1">
-            {auditLogs && auditLogs.length > 0 ? (
-              auditLogs.map((log: any) => {
-                // Stored in UTC; shown as the day and time in Manila.
-                const stamp = manilaStamp(log.timestamp);
-                return (
-                  <div key={log.id} className="flex gap-2 text-[11px] leading-relaxed select-none">
-                    <span className="text-[9px] text-slate-500 font-mono w-16 shrink-0 pt-0.5 leading-tight">
-                      {stamp ? <>{stamp[0]}<br />{stamp[1]}</> : "—"}
-                    </span>
-                    <div className="overflow-hidden">
-                      <span className="font-semibold text-slate-700 mr-1">{log.username}</span>
-                      <span className="text-slate-400">[{log.role}]</span>
-                      <p className="mt-0.5 text-slate-600 truncate">{log.action}: {log.details}</p>
+              </div>
+              <div className="space-y-3">
+                {hrStatsList.map((stat, idx) => (
+                  <div key={idx} className="flex flex-wrap justify-between items-center gap-x-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium text-slate-500">{stat.label}</p>
+                      <p className="text-[9px] text-slate-500">{stat.desc}</p>
                     </div>
+                    <span data-stat={stat.stat} className={`text-base font-bold font-mono ${stat.text}`}>{stat.value}</span>
                   </div>
-                );
-              })
-            ) : (
-              <p className="text-slate-400 font-mono text-[10px] text-center pt-8">No logins done</p>
-            )}
+                ))}
+                {coverage.failed && (
+                  <button type="button" onClick={coverage.retry} className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-rose-700 underline">
+                    <RefreshCcw size={10} aria-hidden="true" /> Retry
+                  </button>
+                )}
+              </div>
+            </div>
+            </PanelBoundary>
+
+            {/* LIQUIDATION (the Liquidation Desk at a glance; details on Finance's overview) */}
+            <PanelBoundary name="Liquidation">
+            <div className="min-w-0 bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow" aria-busy={!liq}>
+              <div className="flex flex-wrap items-center justify-between gap-x-2 border-b border-slate-100 pb-3">
+                <span className="text-xs font-semibold text-slate-800 flex items-center">
+                  <ClipboardCheck size={16} className="text-emerald-500 mr-1.5" />
+                  Liquidation
+                </span>
+                <button
+                  onClick={() => onOpenLink({ tab: "finance", subTab: "dashboard" })}
+                  className="text-[10px] text-emerald-600 font-medium hover:underline flex items-center"
+                >
+                  <span>Overview</span>
+                  <ArrowRight size={10} className="ml-0.5" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                {liqStatsList.map((stat, idx) => (
+                  <div key={idx} className="flex flex-wrap justify-between items-center gap-x-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium text-slate-500">{stat.label}</p>
+                      <p className="text-[9px] text-slate-500">{stat.desc}</p>
+                    </div>
+                    <span className={`text-base font-bold font-mono ${stat.text}`}>{stat.value}</span>
+                  </div>
+                ))}
+                {liqFailed && (
+                  <button type="button" onClick={retryLiquidation} className="inline-flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-rose-700 underline">
+                    <RefreshCcw size={10} aria-hidden="true" /> Retry
+                  </button>
+                )}
+              </div>
+            </div>
+            </PanelBoundary>
           </div>
+
+          {/* What validated reports spent, month by month (real figures). Wrapped, so the chart's own
+              lg:col-span-2 can't open a second column in this grid below xl; on a phone its six fixed
+              columns need 18rem, so there it scrolls sideways inside this box. */}
+          <PanelBoundary name="Liquidated per month" className="xl:col-span-2">
+          <div className="custom-scrollbar min-w-0 xl:col-span-2 max-sm:overflow-x-auto">
+            <div className="max-sm:min-w-[18rem]">
+              <MonthlyLiquidationChart
+                months={liquidatedByMonth(liq?.reports)}
+                loading={!liq}
+                failed={!!liq?.reportsFailed}
+                onRetry={retryLiquidation}
+              />
+            </div>
+          </div>
+          </PanelBoundary>
         </div>
       </section>
 
       {/* RECENT RECORDS QUICK TABLES */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* LATEST LIQUIDATION REPORTS (each opens its details in Request Management) */}
+        <PanelBoundary name="Latest Liquidation Reports">
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4" aria-busy={!liq}>
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold font-sans text-slate-800 uppercase tracking-tight flex items-center">
@@ -333,7 +344,7 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
                   <button
                     type="button"
                     onClick={() => onOpenLink({ tab: "requests", record: { kind: "liquidationReport", id: r.id } })}
-                    className="w-full flex justify-between items-center gap-3 p-3 border border-slate-100 rounded-lg text-left hover:border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    className="w-full flex justify-between items-center gap-3 p-3 border border-slate-100 rounded-lg text-left hover:border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 max-sm:flex-wrap"
                   >
                     <span className="min-w-0">
                       <span className="block text-[11px] font-semibold font-mono text-slate-800">{r.submissionNo || "Report"}</span>
@@ -341,7 +352,8 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
                         {r.employeeName || "—"} • Filed {formatDate(firstDateString(r.createdAt, r.dateSubmitted))}
                       </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-2">
+                    {/* On a phone the amount and the status wrap under the number instead of sticking out. */}
+                    <span className="flex min-w-0 items-center gap-2 max-sm:flex-wrap sm:shrink-0">
                       <span className="text-[11px] font-mono font-semibold text-slate-700">{formatCurrency(Number(r.totalSpent || 0))}</span>
                       <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${reportStatusBadgeClass(r.status)}`}>{r.status || "Unknown"}</span>
                     </span>
@@ -351,9 +363,11 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
             </ul>
           )}
         </div>
+        </PanelBoundary>
 
         {/* WORKFLOW PIPELINE (REQUESTS SUBMITTED) — the newest open ones, newest first */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+        <PanelBoundary name="Outstanding Regional Requests">
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4" aria-busy={!recentRequests}>
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold font-sans text-slate-800 uppercase tracking-tight flex items-center">
               <Clock size={15} className="text-slate-500 mr-1.5" />
@@ -367,12 +381,16 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
             </button>
           </div>
           <div className="space-y-2.5 max-h-56 overflow-y-auto">
-            {recentRequests && recentRequests.length > 0 ? (
+            {!recentRequests ? (
+              <p className="text-slate-500 font-mono text-[10px] text-center py-8">Loading…</p>
+            ) : recentRequests.length > 0 ? (
               recentRequests.map((req: any) => (
                 <div key={req.id} className="flex justify-between items-center p-3 border border-slate-100 rounded-lg hover:border-slate-200 transition-colors">
                   <div>
                     <p className="text-[11px] font-semibold text-slate-800">{req.requestType}</p>
-                    <p className="text-[9px] text-slate-400">{req.employeeName} • {formatDate(req.dateRequested)}</p>
+                    {/* Read as text only, as the reports list above reads its dates: a record stored before 2026-11-11 can
+                        hold a date of another kind (12w), though the server now sends only text. */}
+                    <p className="text-[9px] text-slate-500">{req.employeeName} • {formatDate(firstDateString(req.dateRequested, req.createdAt))}</p>
                   </div>
                   <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
                     req.status === RequestStatus.APPROVED
@@ -390,6 +408,7 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
             )}
           </div>
         </div>
+        </PanelBoundary>
       </section>
     </div>
   );

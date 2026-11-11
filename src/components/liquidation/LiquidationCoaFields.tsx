@@ -132,7 +132,7 @@ export default function LiquidationCoaFields({
               disabled={disabled}
               readOnly={advanceOnRecord}
               onChange={(e) => set({ cashAdvanceDvNo: e.target.value })}
-              placeholder="2026-08-336"
+              placeholder="YYYY-MM-NNNN"
               className={advanceOnRecord ? `${inputClass} bg-slate-100 text-slate-600` : inputClass}
             />
           </Field>

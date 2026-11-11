@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { seminarBudget } from "../src/trainingBudget";
 import { enrolmentsForBudget } from "../src/server/budgetEnrolments";
 import {
-  advanceCovering, advancesCovering, coveredEnrolmentIds, isGroupAdvance, portionCentavos, releasedByEnrolment, reportCovering,
-  spendableCentavos
+  advanceCovering, advancesCovering, coveredEnrolmentIds, isGroupAdvance, nobodyCoveredAttended, portionCentavos, releasedByEnrolment,
+  reportCovering, spendableCentavos
 } from "../src/advanceCoverage";
 
 // ₱10,000 for 4 seats (a ₱2,500 share each). A holds a group advance for A, B and C; D is apart.
@@ -153,4 +153,17 @@ describe("a group advance in the training budget: each share held once, spending
     const after = budget(settled, [{ ...g, status: "Liquidated" }], { program: three, rows: [reportRow("A", 9000)], used: 9000 });
     assert.deepEqual([after.stage, after.committed, after.returned], ["settled", 9000, 1000]);
   });
+});
+
+test("nobody an advance covers attended: every enrolment it pays for recorded \"Did not attend\", each found (the refund route's test, 12ag's cleanups)", () => {
+  const seats: Record<string, { attendance?: string }> = { a: { attendance: "Did not attend" }, b: { attendance: "Did not attend" }, c: { attendance: "Attended" }, d: {} };
+  const seatOf = (id: string) => seats[id];
+  const group = (...ids: string[]) => ({ id: "g", activityId: ids[0], status: "Released", amount: 1000 * ids.length, covers: ids.map((participantId) => ({ participantId, amount: 1000 })) });
+  assert.equal(nobodyCoveredAttended(group("a", "b"), seatOf), true, "everyone recorded absent");
+  assert.equal(nobodyCoveredAttended(group("a", "c"), seatOf), false, "someone attended");
+  assert.equal(nobodyCoveredAttended(group("a", "d"), seatOf), false, "someone not recorded yet");
+  assert.equal(nobodyCoveredAttended(group("a", "gone"), seatOf), false, "an enrolment that can't be found isn't taken as absent");
+  assert.equal(nobodyCoveredAttended({ id: "own", activityId: "a", status: "Released", amount: 1000 }, seatOf), true, "their own advance: the one enrolment");
+  assert.equal(nobodyCoveredAttended({ id: "own", activityId: "c", status: "Released", amount: 1000 }, seatOf), false);
+  assert.equal(nobodyCoveredAttended(null, seatOf), false, "no advance");
 });

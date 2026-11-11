@@ -2,7 +2,17 @@
 // Pure functions, no data touched. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reimbursementLimit, reimbursementProblem, seminarClaimMode } from "../src/reimbursement";
+import { reimbursementLimit, reimbursementProblem, seminarClaimMode, seminarPeriod } from "../src/reimbursement";
+
+test("a seminar report covers the seminar's own dates, when they are real dates in order (12af)", () => {
+  assert.deepEqual(seminarPeriod("2026-03-07", "2026-03-08"), { from: "2026-03-07", to: "2026-03-08" });
+  assert.deepEqual(seminarPeriod("2026-03-07", "2026-03-07"), { from: "2026-03-07", to: "2026-03-07" }, "a one-day seminar");
+  assert.equal(seminarPeriod("2026-03-08", "2026-03-07"), null, "out of order: the typed period stands");
+  assert.equal(seminarPeriod("2026-02-30", "2026-03-01"), null, "not a real date");
+  assert.equal(seminarPeriod("", "2026-03-01"), null);
+  assert.equal(seminarPeriod(undefined, undefined), null, "an older seminar with no dates");
+  assert.equal(seminarPeriod(20260307 as never, "2026-03-08"), null, "not text");
+});
 
 const money = (n: number) => `PHP ${n.toFixed(2)}`;
 

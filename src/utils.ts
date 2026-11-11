@@ -8,9 +8,11 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-// Formatting utility for human-readable dates
-export function formatDate(dateString: string): string {
-  if (!dateString) return "N/A";
+// Formatting utility for human-readable dates. Always text: a stored value that is neither text nor a number (a
+// crafted resubmit can store an object, known-issues 12w) is "N/A", never handed back, since React can't draw an
+// object and, with no error boundary, the whole app would go blank (the security review of 12ag, 2026-11-11).
+export function formatDate(dateString: unknown): string {
+  if (!dateString || (typeof dateString !== "string" && typeof dateString !== "number" && !(dateString instanceof Date))) return "N/A";
   try {
     const d = new Date(dateString);
     return d.toLocaleDateString("en-US", {
@@ -19,7 +21,7 @@ export function formatDate(dateString: string): string {
       day: "numeric",
     });
   } catch {
-    return dateString;
+    return "N/A";
   }
 }
 

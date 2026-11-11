@@ -210,3 +210,22 @@ export function allocationIncrease(program: SeminarAmounts | undefined, particip
   const after = program ? commitmentAfterEdit(program, participants, newAmount, addsParticipants, newSeats) : round2(newAmount);
   return round2(Math.max(0, after - before));
 }
+
+/**
+ * What the year's seminars have given back to Unallocated, and what some take beyond their allocation (the user's request
+ * of 2026-11-10, known-issues 12af: HR's "Returned to Unallocated" card). Each row is one seminar: its allocation and
+ * what it takes (`committed`, as `seminarBudget` works it out). One that takes less gave the rest back: shares of those
+ * who didn't attend, what liquidated attendees didn't spend, or what a closed seminar didn't use. One that takes more (an
+ * approved overspend, or cash out after its allocation was cut) took it from Unallocated. So, over the same rows,
+ * Unallocated = total budget − Σ allocated + returned − over. Summed in centavos.
+ */
+export function budgetReturns(rows: { allocated: number | string; committed: number | string }[] | null | undefined): { returned: number; over: number } {
+  let returned = 0, over = 0;
+  for (const row of rows ?? []) {
+    if (!row) continue;
+    const diff = Math.round((Number(row.allocated) || 0) * 100) - Math.round((Number(row.committed) || 0) * 100);
+    if (diff > 0) returned += diff;
+    else over -= diff;
+  }
+  return { returned: returned / 100, over: over / 100 };
+}
