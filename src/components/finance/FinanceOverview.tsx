@@ -17,15 +17,20 @@ import {
 import { formatCurrency, formatDate, firstDateString } from "../../utils";
 import { overviewFigures, reportStatusBadgeClass as statusBadgeClass, REPORT_STAGES, type OverviewAdvance, type OverviewReport } from "./overviewFigures";
 import StatusByDate, { type StatusAdvance } from "./StatusByDate";
+import { allocatedLine, budgetFigures, percentOfTotal } from "../dashboard/budgetRows";
 
 /** What the overview reads from a GET /api/training/budgets row (the server derives these). */
 export interface OverviewTrainingBudget {
   totalBudget?: number;
   allocated?: number;
-  percentAllocated?: number;
+  /** What the seminars hold now: shown as Allocated (2026-11-12). */
+  committed?: number;
   spent?: number;
   percentSpent?: number;
   remaining?: number;
+  returnedFromSettled?: number;
+  releasedForAbsent?: number;
+  programCount?: number;
 }
 
 /** Where the overview's own load stands. A list that failed is shown as such, never as 0. */
@@ -175,8 +180,12 @@ export default function FinanceOverview({
   const f = overviewFigures(submissions, cashAdvances, fiscalYear);
   const fy = fiscalYear || "…";
   const tb = trainingBudget;
+  // The year's figures as the Administrator's dashboard reads them (budgetFigures), so the two agree to the centavo.
+  // Allocated is what the seminars still hold: money they gave back leaves it, and Allocated + Unallocated is the total
+  // (the user's decision of 2026-11-12).
+  const budget = tb ? budgetFigures(tb as Record<string, unknown>) : null;
   const total = Number(tb?.totalBudget || 0);
-  const allocated = Number(tb?.allocated || 0);
+  const allocated = budget?.committed ?? 0;
   const spent = Number(tb?.spent || 0);
   const unallocated = Number(tb?.remaining ?? total);
 
@@ -322,9 +331,12 @@ export default function FinanceOverview({
                   <dt className="text-slate-500">Total budget</dt>
                   <dd className="font-mono font-bold text-slate-900">{formatCurrency(total)}</dd>
                 </div>
-                <div className="flex justify-between gap-3">
+                {/* A grid, so the amount stays on the label's row and at the right at any width, as the other rows'
+                    do, with the line under both (a wrapping flex row moved the amount under the label at 1024 px). */}
+                <div className="grid grid-cols-[1fr_auto] gap-x-3">
                   <dt className="text-slate-500">Allocated by HR</dt>
-                  <dd className="font-mono font-semibold text-indigo-700">{formatCurrency(allocated)} <span className="text-[10px] text-slate-500">({tb.percentAllocated || 0}%)</span></dd>
+                  <dd className="text-right font-mono font-semibold text-indigo-700">{formatCurrency(allocated)} <span className="text-[10px] text-slate-500">({percentOfTotal(allocated, total)}%)</span></dd>
+                  {budget && <dd data-budget-line="allocated" className="col-span-2 mt-0.5 text-[10px] text-slate-500">{allocatedLine(budget, fiscalYear)}</dd>}
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-slate-500">Actually spent</dt>
@@ -335,6 +347,10 @@ export default function FinanceOverview({
                   <dd className={`font-mono font-extrabold ${unallocated < 0 ? "text-rose-700" : "text-slate-900"}`}>{formatCurrency(unallocated)}</dd>
                 </div>
               </dl>
+              {/* What the seminars hold and what is free make up the total. */}
+              <p data-budget-sum className="mt-2 text-[10px] text-slate-500">
+                Allocated {formatCurrency(allocated)} + Unallocated {formatCurrency(unallocated)} = Total budget {formatCurrency(total)}
+              </p>
               <div
                 className="relative mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100"
                 role="img"

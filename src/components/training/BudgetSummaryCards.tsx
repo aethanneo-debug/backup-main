@@ -1,32 +1,45 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, BookOpen, PiggyBank, Target, type LucideIcon } from "lucide-react";
 import { formatCurrency } from "../../utils";
+import { allocatedLine } from "../dashboard/budgetRows";
 
 /**
- * Programs & Budget's figures for the year's training budget: what HR allocated, what is free, and what the seminars
- * gave back to it (the user's request of 2026-11-10, known-issues 12af), with the sum that joins them. Every figure comes
- * from the page, priced as it prices its rows (src/trainingBudget.ts), an edit not yet saved included.
+ * Programs & Budget's figures for the year's training budget: what the seminars hold, what is free, and what they gave
+ * back (the user's request of 2026-11-10, known-issues 12af), with the sum that joins them. Every figure comes from the
+ * page, priced as it prices its rows (src/trainingBudget.ts), an edit not yet saved included.
+ *
+ * Total Allocated is what the seminars still hold, so money they gave back leaves it and Total Allocated + Unallocated is
+ * the total (the user's decision of 2026-11-12, as on the other three screens that show the budget). Its line says what
+ * HR allocated, which each row of the table still shows as HR typed it.
  *
  * Three across from 1024 px, a size smaller until 1280 px so the amounts fit beside the sidebar; on a tablet two, with
  * the third under them; on a phone one, without the icons.
  */
-export default function BudgetSummaryCards({ total, allocated, unallocated, returned, over }: {
+export default function BudgetSummaryCards({ total, allocated, committed, unallocated, returned, over, seminars, fiscalYear }: {
   /** The year's Overall Total Budget. */
   total: number;
-  /** What the seminars are allocated, rows being added or edited included. */
+  /** What HR allocated the seminars, rows being added or edited included. */
   allocated: number;
+  /** What the seminars hold now, priced as Unallocated is: shown as Total Allocated. */
+  committed: number;
   /** The total less what the seminars take. */
   unallocated: number;
   /** What the seminars gave back to Unallocated (`budgetReturns`). */
   returned: number;
   /** What some take beyond their allocations, out of Unallocated (`budgetReturns`). */
   over: number;
+  /** How many seminars the figures cover, new rows included. */
+  seminars: number;
+  /** The fiscal year's label ("2029"), for the line under Total Allocated; blank until the year has loaded. */
+  fiscalYear: string;
 }) {
   const short = unallocated < 0;
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 xl:gap-6">
-        <Card icon={BookOpen} iconTone="bg-green-50 text-green-600" label="Total Allocated" value={formatCurrency(allocated)} />
+        <Card name="allocated" icon={BookOpen} iconTone="bg-green-50 text-green-600" label="Total Allocated" value={formatCurrency(committed)}>
+          <p className="mt-1 text-[11px] leading-snug text-slate-500">{allocatedLine({ allocated, returned, over, seminars }, fiscalYear)}</p>
+        </Card>
         <Card
           icon={short ? AlertTriangle : Target}
           iconTone={short ? "bg-red-100 text-red-600" : "bg-purple-50 text-purple-600"}
@@ -58,12 +71,10 @@ export default function BudgetSummaryCards({ total, allocated, unallocated, retu
           )}
         </Card>
       </div>
-      {/* The figures as one sum, so it is plain why Unallocated isn't just the total less what is allocated. */}
+      {/* The figures as one sum: what the seminars hold and what is free make up the total. */}
       <p data-budget-card="sum" className="text-[11px] leading-snug text-slate-500">
-        Unallocated = Overall Total Budget {formatCurrency(total)} − Total Allocated {formatCurrency(allocated)} + Returned{" "}
-        {formatCurrency(returned)}
-        {over > 0 ? ` − taken beyond allocations ${formatCurrency(over)}` : ""} ={" "}
-        <span className="font-semibold text-slate-700">{formatCurrency(unallocated)}</span>
+        Total Allocated {formatCurrency(committed)} + Unallocated {formatCurrency(unallocated)} ={" "}
+        <span className="font-semibold text-slate-700">Overall Total Budget {formatCurrency(total)}</span>
       </p>
     </div>
   );

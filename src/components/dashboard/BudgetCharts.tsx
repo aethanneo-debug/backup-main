@@ -19,7 +19,7 @@ interface BudgetChartsProps {
 /**
  * The Administrator's view of the year's training budget (the instructor's suggestion of 2026-11-11, 12ag): the figures,
  * a ring of what is taken and what is free, and each seminar's allocation beside what it takes now. The figures are the
- * server's (Budget Monitoring's and Programs & Budget's), so the three screens agree.
+ * server's (Programs & Budget's, Finance's overview's and Budget Monitoring's), so the four screens agree.
  */
 export default function BudgetCharts({ budget, schedule, onOpenPrograms }: BudgetChartsProps) {
   const titleId = useId();

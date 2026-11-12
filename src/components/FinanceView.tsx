@@ -29,6 +29,7 @@ import { reportFiscalYear } from "./finance/overviewFigures";
 import { manilaDay } from "./finance/claimChecks";
 import { peso } from "./liquidation/reportColumns";
 import { apiCall, csvCell, formatCurrency } from "../utils";
+import { allocatedLine, budgetFigures, percentOfTotal } from "./dashboard/budgetRows";
 
 interface FinanceViewProps {
   user: User;
@@ -543,6 +544,10 @@ export default function FinanceView({
                 {(() => {
                   const tb = currentFy ? trainingBudgets.find(b => b.fiscalYearId === currentFy.id) : null;
                   const approved = tb ? tb.totalBudget : 0;
+                  // Allocated is what the seminars still hold, read as the other three screens read it (budgetFigures):
+                  // money they gave back leaves it, and Allocated + Unallocated is the total (the user's decision of
+                  // 2026-11-12).
+                  const figures = tb ? budgetFigures(tb) : null;
                   
                   return (
                     <div className="bg-white border rounded-2xl p-5 shadow-sm mb-6 flex flex-col md:flex-row gap-6">
@@ -611,8 +616,11 @@ export default function FinanceView({
                               programs themselves, so they always match HR's planner. */}
                           <div className="flex flex-col bg-slate-50 p-3 rounded-lg border">
                             <span className="text-[10px] uppercase font-bold text-slate-500 mb-1">Allocated by HR</span>
-                            <span className="text-xl font-bold text-indigo-700 tracking-tight">{formatCurrency(tb?.allocated || 0)}</span>
-                            <span className="text-[9px] font-mono text-slate-400 mt-0.5">{tb?.percentAllocated || 0}% of total</span>
+                            <span className="text-xl font-bold text-indigo-700 tracking-tight">{formatCurrency(figures?.committed ?? 0)}</span>
+                            <span className="text-[9px] font-mono text-slate-400 mt-0.5">{percentOfTotal(figures?.committed ?? 0, figures?.total ?? 0)}% of total</span>
+                            {figures && (
+                              <span data-budget-line="allocated" className="text-[10px] text-slate-500 mt-1">{allocatedLine(figures, activeFiscalYear)}</span>
+                            )}
                           </div>
                           <div className="flex flex-col bg-slate-50 p-3 rounded-lg border">
                             <span className="text-[10px] uppercase font-bold text-slate-500 mb-1">Actually Spent</span>
@@ -647,6 +655,12 @@ export default function FinanceView({
                             )}
                           </div>
                         </div>
+                        {/* What the seminars hold and what is free make up the total. */}
+                        {figures && (
+                          <p data-budget-sum className="text-[11px] text-slate-500">
+                            Allocated {formatCurrency(figures.committed)} + Unallocated {formatCurrency(figures.unallocated)} = Total budget {formatCurrency(figures.total)}
+                          </p>
+                        )}
                         <p className="text-xs text-slate-500">
                           This budget is set by the Budget Officer. HR allocates portions of it to Training and Development Plans; program and participant details are managed by HR in Training Plan &amp; Budget.
                         </p>

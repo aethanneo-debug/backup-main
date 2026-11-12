@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   ARCHIVED_TONE, dateRange, dayDiff, longDate, scheduleDetails, seatsText, seminarStanding, seminarTone, timeRange, whenText
 } from "../src/components/dashboard/schedule";
-import { budgetFigures } from "../src/components/dashboard/budgetRows";
+import { allocatedLine, budgetFigures, percentOfTotal } from "../src/components/dashboard/budgetRows";
 import { compactPeso } from "../src/components/dashboard/chartFormat";
 import type { CalendarSeminar } from "../src/trainingCalendar";
 import { scheduleSeminars } from "../src/trainingSchedule";
@@ -84,6 +84,30 @@ test("the budget's figures are the server's, and the sum shown adds up", () => {
   // Seminars taking more than the budget: Unallocated is negative, and nothing is over unless a seminar is.
   const short = budgetFigures({ totalBudget: 1000, allocated: 3000, committed: 3000, remaining: -2000, returnedFromSettled: 0, releasedForAbsent: 0 });
   assert.deepEqual([short.unallocated, short.over, short.returned], [-2000, 0, 0]);
+});
+
+test("Allocated is what the seminars still hold: money they gave back leaves it, and the four screens say so alike", () => {
+  // FY 2029 as the user saw it (2026-11-12): ₱102,400 in all, ₱14,200 allocated to 3 seminars, ₱1,800 back.
+  const f = budgetFigures({
+    totalBudget: 102400, allocated: 14200, committed: 12400, remaining: 90000,
+    returnedFromSettled: 1300, releasedForAbsent: 500, programCount: 3
+  });
+  // Shown as Allocated: what they hold, which with Unallocated makes up the total.
+  assert.equal(f.committed, 12400);
+  assert.equal(f.committed + f.unallocated, f.total);
+  assert.equal(allocatedLine(f, "2029"), "₱14,200.00 allocated to 3 seminars of FY 2029; ₱1,800.00 of it came back");
+  assert.equal(percentOfTotal(f.committed, f.total), 12);
+  // Nothing back and nothing over: the line just says where it went (the dashboard's wording before the change).
+  assert.equal(allocatedLine({ allocated: 5000, returned: 0, over: 0, seminars: 1 }, "2029"), "To 1 seminar of FY 2029");
+  assert.equal(allocatedLine({ allocated: 0, returned: 0, over: 0, seminars: 0 }), "To 0 seminars");
+  // A seminar taking more than its allocation: named, beside what came back from another.
+  assert.equal(
+    allocatedLine({ allocated: 15000, returned: 1500, over: 250.5, seminars: 2 }, "2029"),
+    "₱15,000.00 allocated to 2 seminars of FY 2029; ₱1,500.00 of it came back; ₱250.50 taken beyond allocations"
+  );
+  assert.equal(allocatedLine({ allocated: 3000, returned: 0, over: 200, seminars: 1 }), "₱3,000.00 allocated to 1 seminar; ₱200.00 taken beyond allocations");
+  // A percent of no total is 0, never NaN or Infinity; rounded as the server rounds percentAllocated.
+  assert.deepEqual([percentOfTotal(500, 0), percentOfTotal(0, 1000), percentOfTotal(125, 1000), percentOfTotal(3000, 1000)], [0, 0, 13, 300]);
 });
 
 test("an axis amount never reads as a thousand of the smaller unit", () => {

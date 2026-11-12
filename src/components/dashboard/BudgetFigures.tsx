@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
 import { formatCurrency } from "../../utils";
-import type { TrainingBudgetFigures } from "./budgetRows";
+import { allocatedLine, type TrainingBudgetFigures } from "./budgetRows";
 
 /** Unallocated under this reads as running low (as Programs & Budget tints its card, 12af). */
 const LOW = 50_000;
 
 /**
- * The year's training budget in four figures, with the sum that joins them (Programs & Budget's wording, 12af):
- * Unallocated = Overall Total Budget − Total Allocated + Returned − what is taken beyond allocations. "…" while loading,
- * "—" when the budget couldn't be loaded; never a zero that isn't known.
+ * The year's training budget in four figures, with the sum that joins them: Total Allocated + Unallocated = Overall
+ * Total Budget. Total Allocated is what the seminars still hold, so money they gave back leaves it (the user's decision
+ * of 2026-11-12, as on Programs & Budget, Finance's overview and Budget Monitoring); its line says what HR allocated and
+ * what came back. "…" while loading, "—" when the budget couldn't be loaded; never a zero that isn't known.
  */
 export default function BudgetFigures({ figures, fiscalYear, loading, failed }: {
   figures: TrainingBudgetFigures | null;
@@ -30,8 +31,8 @@ export default function BudgetFigures({ figures, fiscalYear, loading, failed }: 
             ? `Carry-over ${formatCurrency(f!.carryOver)} + new annual budget ${formatCurrency(f!.newAnnual)}`
             : `FY ${fiscalYear}'s annual training budget; no carry-over`)}
         </Figure>
-        <Figure name="allocated" label="Total Allocated" value={shown(f?.allocated)}>
-          {pending ?? `To ${f!.seminars} seminar${f!.seminars === 1 ? "" : "s"} of FY ${fiscalYear}`}
+        <Figure name="allocated" label="Total Allocated" value={shown(f?.committed)}>
+          {pending ?? allocatedLine(f!, fiscalYear)}
         </Figure>
         <Figure
           name="unallocated"
@@ -50,12 +51,10 @@ export default function BudgetFigures({ figures, fiscalYear, loading, failed }: 
       </div>
       {f && !loading && !failed && (
         <>
-          {/* The figures as one sum, so it is plain why Unallocated isn't just the total less what is allocated. */}
+          {/* The figures as one sum: what the seminars hold and what is free make up the total. */}
           <p data-budget-sum className="break-words text-[11px] leading-snug text-slate-500">
-            Unallocated = Overall Total Budget {formatCurrency(f.total)} − Total Allocated {formatCurrency(f.allocated)} + Returned{" "}
-            {formatCurrency(f.returned)}
-            {f.over > 0 ? ` − taken beyond allocations ${formatCurrency(f.over)}` : ""} ={" "}
-            <span className="font-semibold text-slate-700">{formatCurrency(f.unallocated)}</span>
+            Total Allocated {formatCurrency(f.committed)} + Unallocated {formatCurrency(f.unallocated)} ={" "}
+            <span className="font-semibold text-slate-700">Overall Total Budget {formatCurrency(f.total)}</span>
           </p>
           {f.over > 0 && (
             <p data-budget-over className="break-words text-[11px] font-semibold leading-snug text-amber-700">

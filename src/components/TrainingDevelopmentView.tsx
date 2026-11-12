@@ -317,10 +317,14 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     ), 0) +
     archivedCommitted +
     newRows.reduce((sum, nr) => sum + Number(nr.allocatedBudget || 0), 0);
-  const remainingAnnualBudget = Math.round((activeBudget - draftCommitted) * 100) / 100;
+  // What the seminars hold, shown as Total Allocated (2026-11-12), and Unallocated worked out from it, so the two shown
+  // always make up the total to the centavo, even while a draft holds a third decimal.
+  const shownCommitted = Math.round(draftCommitted * 100) / 100;
+  const remainingAnnualBudget = Math.round((activeBudget - shownCommitted) * 100) / 100;
   // What the year's seminars gave back to Unallocated, and what some take beyond their allocation (12af), each row priced
-  // as the two figures above price it, an edit not yet saved included, so Total − Allocated + Returned − Over is the
-  // Unallocated shown. A new row takes exactly its allocation, so it adds to neither.
+  // as the figures above price it, an edit not yet saved included: the Returned card, and the line under Total Allocated
+  // (HR's allocation − Returned + Over is what the seminars hold). A new row takes exactly its allocation, so it adds to
+  // neither.
   const { returned: budgetReturned, over: budgetOver } = budgetReturns([
     ...activePrograms.map(p => {
       const draft = editingRows[p.id];
@@ -1304,13 +1308,16 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
         </div>
       </div>
 
-      {/* Total Allocated, Unallocated, and what the seminars gave back to it (12af). */}
+      {/* Total Allocated (what the seminars hold, 2026-11-12), Unallocated, and what the seminars gave back (12af). */}
       <BudgetSummaryCards
         total={activeBudget}
         allocated={draftTotalAllocated}
+        committed={shownCommitted}
         unallocated={remainingAnnualBudget}
         returned={budgetReturned}
         over={budgetOver}
+        seminars={activePrograms.length + archivedCounted.length + newRows.length}
+        fiscalYear={activeFy?.label || ""}
       />
 
       {/* At least one training per year per employee: who has one this fiscal year, and who

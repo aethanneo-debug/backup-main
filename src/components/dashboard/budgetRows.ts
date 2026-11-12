@@ -3,6 +3,7 @@
 // (`GET /api/training/schedule`, src/trainingSchedule.ts, with `seminarBudget` as Programs & Budget and Budget
 // Monitoring price them), so the "allocated vs taken" chart can't disagree with them. Pure (no React); tested.
 import type { ScheduleSeminar } from "../../trainingSchedule";
+import { formatCurrency } from "../../utils";
 
 /** The year's training budget as `GET /api/training/budgets` works it out (server.ts, computeTrainingUsage). Pesos. */
 export interface TrainingBudgetFigures {
@@ -12,14 +13,16 @@ export interface TrainingBudgetFigures {
   newAnnual: number;
   /** What HR allocated the year's seminars (none archived before use). */
   allocated: number;
-  /** What the seminars take now: their allocations while open, less what went back; their spending once closed. */
+  /** What the seminars take now: their allocations while open, less what went back; their spending once closed. The
+   * screens show this as Allocated (2026-11-12), with `allocatedLine` under it. */
   committed: number;
   /** The total less what the seminars take. */
   unallocated: number;
   /** What the seminars gave back to Unallocated (closed seminars' leftovers, non-attendees' shares, liquidated
    * attendees' leftovers). */
   returned: number;
-  /** What some take beyond their allocations, out of Unallocated: Total − Allocated + Returned − Over = Unallocated. */
+  /** What some take beyond their allocations, out of Unallocated: committed = allocated − returned + over, so
+   * Total − allocated + Returned − Over = Unallocated. */
   over: number;
   /** How many seminars the figures cover. */
   seminars: number;
@@ -47,6 +50,27 @@ export function budgetFigures(row: Record<string, unknown>): TrainingBudgetFigur
     over: Math.max(0, round2(committed - allocated + returned)),
     seminars: Math.max(0, Math.trunc(Number(row.programCount) || 0))
   };
+}
+
+/**
+ * The line under the Allocated figure, the same on the four screens that show it: the Administrator's dashboard,
+ * Programs & Budget, Finance's overview and Budget Monitoring (the user's decision of 2026-11-12). The figure itself is
+ * what the seminars still hold (`committed`), so money they gave back leaves it, and Allocated + Unallocated is the
+ * total. This line says what HR allocated, and what came back or was taken beyond the allocations.
+ */
+export function allocatedLine(f: Pick<TrainingBudgetFigures, "allocated" | "returned" | "over" | "seminars">, fiscalYear = ""): string {
+  const where = `${f.seminars} seminar${f.seminars === 1 ? "" : "s"}${fiscalYear ? ` of FY ${fiscalYear}` : ""}`;
+  if (!(f.returned > 0) && !(f.over > 0)) return `To ${where}`;
+  return [
+    `${formatCurrency(f.allocated)} allocated to ${where}`,
+    f.returned > 0 ? `${formatCurrency(f.returned)} of it came back` : "",
+    f.over > 0 ? `${formatCurrency(f.over)} taken beyond allocations` : ""
+  ].filter(Boolean).join("; ");
+}
+
+/** A part of the total as a whole percent, rounded as the server rounds `percentAllocated`; 0 with no total. */
+export function percentOfTotal(part: number, total: number): number {
+  return total > 0 ? Math.round((part / total) * 100) : 0;
 }
 
 /**
