@@ -2,7 +2,24 @@
 // Pure functions, no data touched. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reimbursementLimit, reimbursementProblem, seminarClaimMode, seminarPeriod } from "../src/reimbursement";
+import { advanceRequestWindow, CLOSED_BY_ATTENDANCE, closedByAttendance, LATE_RELEASE_DAYS, lateReleaseUntil, reimbursementLimit, reimbursementProblem, seminarClaimMode, seminarPeriod } from "../src/reimbursement";
+
+test("a cash advance is asked for before the seminar: from its last day, a certificate or HR's \"Attended\" closes it (12ai)", () => {
+  const seat = (over: Partial<Parameters<typeof advanceRequestWindow>[0]> = {}) =>
+    advanceRequestWindow({ attendance: null, hasCertificate: false, lastDay: "2026-11-20", today: "2026-11-19", ...over });
+  assert.equal(seat(), null, "the day before the last day: open");
+  assert.equal(seat({ today: "2026-11-20" }), "lastDay", "on the last day, the day a certificate can first be uploaded");
+  assert.equal(seat({ today: "2026-12-31" }), "lastDay");
+  assert.equal(seat({ hasCertificate: true }), "certificate", "a certificate on file, even if the dates moved later");
+  assert.equal(seat({ attendance: "Attended", today: "2026-11-01" }), "attended");
+  assert.equal(seat({ attendance: "Attended", hasCertificate: true, today: "2026-11-25" }), "attended", "HR's record first");
+  assert.equal(seat({ hasCertificate: true, today: "2026-11-25" }), "certificate", "then the certificate, then the date");
+  // "Did not attend" is the caller's own refusal; the window says nothing about it.
+  assert.equal(seat({ attendance: "Did not attend" }), null);
+  // A seminar with no real dates stays open, as the certificate's own rule can't open on it either.
+  assert.equal(seat({ lastDay: "" , today: "2030-01-01" }), null);
+  assert.equal(seat({ lastDay: "2026-02-30", today: "2030-01-01" }), null);
+});
 
 test("a seminar report covers the seminar's own dates, when they are real dates in order (12af)", () => {
   assert.deepEqual(seminarPeriod("2026-03-07", "2026-03-08"), { from: "2026-03-07", to: "2026-03-08" });
@@ -48,4 +65,21 @@ test("a claim is refused with nothing left, nothing spent, more than the limit, 
   assert.equal(reimbursementProblem({ spent: 2000, limit: 2000, files: 1 }, money), "", "exactly the limit");
   assert.equal(reimbursementProblem({ spent: 0.1 + 0.2, limit: 0.3, files: 2 }, money), "", "0.1 + 0.2 is 0.30 in centavos");
   assert.equal(reimbursementProblem({ spent: 500, limit: 2000 }, money), "", "files not counted where none can be added");
+});
+
+test("a request HR's \"Attended\" closed is told from one Finance declined (12ai)", () => {
+  assert.equal(closedByAttendance({ status: "Declined", declineReason: CLOSED_BY_ATTENDANCE }), true);
+  assert.equal(closedByAttendance({ status: "Declined", declineReason: "No funds yet." }), false, "Finance's own decline");
+  assert.equal(closedByAttendance({ status: "Requested", declineReason: CLOSED_BY_ATTENDANCE }), false);
+  assert.equal(closedByAttendance(null), false);
+});
+
+test("a closed request's release can be recorded for 30 days after the closure (12ai, 2026-11-13)", () => {
+  assert.equal(LATE_RELEASE_DAYS, 30);
+  assert.equal(lateReleaseUntil("2026-11-13"), "2026-12-13");
+  assert.equal(lateReleaseUntil("2026-12-15"), "2027-01-14", "across a year");
+  assert.equal(lateReleaseUntil("2028-02-10"), "2028-03-11", "across a leap day");
+  assert.equal(lateReleaseUntil(""), "");
+  assert.equal(lateReleaseUntil("2026-02-30"), "", "not a real date");
+  assert.equal(lateReleaseUntil(undefined), "");
 });

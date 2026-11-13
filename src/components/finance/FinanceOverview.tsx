@@ -17,7 +17,7 @@ import {
 import { formatCurrency, formatDate, firstDateString } from "../../utils";
 import { overviewFigures, reportStatusBadgeClass as statusBadgeClass, REPORT_STAGES, type OverviewAdvance, type OverviewReport } from "./overviewFigures";
 import StatusByDate, { type StatusAdvance } from "./StatusByDate";
-import { allocatedLine, budgetFigures, percentOfTotal } from "../dashboard/budgetRows";
+import { allocatedLine, budgetFigures, percentOfTotal, returnedSplit, unallocatedLine } from "../dashboard/budgetRows";
 
 /** What the overview reads from a GET /api/training/budgets row (the server derives these). */
 export interface OverviewTrainingBudget {
@@ -291,10 +291,15 @@ export default function FinanceOverview({
             icon={FileClock}
             onClick={onOpenDesk}
           />
+          {/* What came back to the training budget, the figure HR's and the Administrator's screens show (the user's report
+              of 2026-11-13: only cash handed back was counted here, so a reimbursement's unclaimed share was missing). Split
+              into what was handed back with an OR and what was never paid out. */}
           <FigureCard
-            label="Leftover returned"
-            {...shown("reports", formatCurrency(f.year.leftoverReturned), "Handed back with an OR at validation",
-              f.year.leftoverReturned > 0 ? "emerald" : "none")}
+            label="Returned to Unallocated"
+            {...shown(budget ? "budget" : "reports", budget ? formatCurrency(budget.returned) : formatCurrency(f.year.leftoverReturned),
+              !reportsReady ? "Handed back with an OR at validation, and shares never paid out"
+                : budget ? returnedSplit(f.year.leftoverReturned, budget.returned) : "Handed back with an OR at validation",
+              (budget?.returned ?? f.year.leftoverReturned) > 0 ? "emerald" : "none")}
             icon={PiggyBank}
             onClick={onOpenDesk}
           />
@@ -309,7 +314,7 @@ export default function FinanceOverview({
           <FigureCard
             label="Training budget unallocated"
             {...shown("budget", tb ? formatCurrency(unallocated) : "Not set",
-              tb ? `of ${formatCurrency(total)} for FY ${fy}` : "Set by the Budget Officer",
+              tb ? `of ${formatCurrency(total)} for FY ${fy}${budget && budget.returned > 0 ? `, including the ${formatCurrency(budget.returned)} returned` : ""}` : "Set by the Budget Officer",
               tb && unallocated < 0 ? "rose" : "none")}
             icon={Wallet}
           />
@@ -342,9 +347,13 @@ export default function FinanceOverview({
                   <dt className="text-slate-500">Actually spent</dt>
                   <dd className="font-mono font-semibold text-amber-700">{formatCurrency(spent)} <span className="text-[10px] text-slate-500">({tb.percentSpent || 0}%)</span></dd>
                 </div>
-                <div className="flex justify-between gap-3 border-t border-slate-100 pt-2">
+                <div className="grid grid-cols-[1fr_auto] gap-x-3 border-t border-slate-100 pt-2">
                   <dt className="font-semibold text-slate-700">Unallocated</dt>
-                  <dd className={`font-mono font-extrabold ${unallocated < 0 ? "text-rose-700" : "text-slate-900"}`}>{formatCurrency(unallocated)}</dd>
+                  <dd className={`text-right font-mono font-extrabold ${unallocated < 0 ? "text-rose-700" : "text-slate-900"}`}>{formatCurrency(unallocated)}</dd>
+                  {/* How it is made up, so what came back is seen added to it (the user's report of 2026-11-13). */}
+                  {budget && unallocatedLine(budget) && (
+                    <dd data-budget-line="unallocated" className="col-span-2 mt-0.5 text-[10px] text-slate-500">{unallocatedLine(budget)}</dd>
+                  )}
                 </div>
               </dl>
               {/* What the seminars hold and what is free make up the total. */}

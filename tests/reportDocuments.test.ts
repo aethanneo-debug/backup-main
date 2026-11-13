@@ -5,6 +5,9 @@ import assert from "node:assert/strict";
 import type { DocumentKind } from "../src/types";
 import {
   DOCUMENT_SLOTS,
+  EMPLOYEE_KINDS,
+  employeeAskedKinds,
+  FINANCE_KINDS,
   UPLOAD_KINDS,
   correctionSlots,
   documentPlate,
@@ -26,7 +29,7 @@ import {
   type CertificateSeat
 } from "../src/attendanceCertificate";
 
-const report = (over: Partial<ReportFacts> = {}): ReportFacts => ({ reimbursement: false, expenseTypes: [], handsBack: false, declarations: [], ...over });
+const report = (over: Partial<ReportFacts> = {}): ReportFacts => ({ reimbursement: false, expenseTypes: [], declarations: [], ...over });
 const kinds = (facts: ReportFacts) => requiredDocuments(facts).map(r => r.kind);
 
 test("every report of a cash advance needs the certificate and the two travel documents", () => {
@@ -35,7 +38,7 @@ test("every report of a cash advance needs the certificate and the two travel do
 
 test("no travel takes the two travel documents off, and nothing else", () => {
   assert.deepEqual(kinds(report({ declarations: ["noTravel"] })), ["certificate"]);
-  assert.deepEqual(kinds(report({ declarations: ["noTravel"], expenseTypes: ["Meals", "Registration Fee"], handsBack: true })), ["certificate", "refundOr"]);
+  assert.deepEqual(kinds(report({ declarations: ["noTravel"], expenseTypes: ["Meals", "Registration Fee"] })), ["certificate"]);
 });
 
 test("a Transportation or Accommodation line brings the travel documents back, whatever was ticked", () => {
@@ -44,8 +47,8 @@ test("a Transportation or Accommodation line brings the travel documents back, w
   assert.deepEqual(fare.map(r => r.kind), ["certificate", "itinerary", "travelCompleted", "tickets"]);
   assert.equal(fare.find(r => r.kind === "itinerary")!.why, "You claimed Transportation");
   assert.equal(fare.find(r => r.kind === "travelCompleted")!.why, "You claimed Transportation");
-  const lodging = requiredDocuments(report({ declarations: ["noTravel"], expenseTypes: ["Meals", "Accommodation"], handsBack: true }));
-  assert.deepEqual(lodging.map(r => r.kind), ["certificate", "itinerary", "travelCompleted", "hotelBills", "refundOr"]);
+  const lodging = requiredDocuments(report({ declarations: ["noTravel"], expenseTypes: ["Meals", "Accommodation"] }));
+  assert.deepEqual(lodging.map(r => r.kind), ["certificate", "itinerary", "travelCompleted", "hotelBills"]);
   assert.equal(lodging.find(r => r.kind === "itinerary")!.why, "You claimed Accommodation");
   assert.equal(requiredDocuments(report()).find(r => r.kind === "itinerary")!.why, "Required on every report");
 });
@@ -59,11 +62,21 @@ test("\"No travel\" has to agree with the trip", () => {
   assert.match(noTravelProblem({ vehicleRequest: true, expenseTypes: ["Transportation"] }), /vehicle request/, "the vehicle is named first");
 });
 
-test("the report's own lines and balance bring their documents", () => {
+test("the report's own lines bring their documents", () => {
   assert.ok(kinds(report({ expenseTypes: ["Meals", "Transportation"] })).includes("tickets"));
   assert.ok(kinds(report({ expenseTypes: ["Accommodation"] })).includes("hotelBills"));
-  assert.ok(kinds(report({ handsBack: true })).includes("refundOr"));
   assert.deepEqual(kinds(report({ expenseTypes: ["Meals", "Registration Fee", "Materials", "Miscellaneous"] })), ["certificate", "itinerary", "travelCompleted"]);
+});
+
+test("the OR for cash handed back is the Finance Officer's: never the employee's to attach, nor to be asked for (12ai)", () => {
+  // HSAC RAB 1 has no cashier: Finance issues the OR and attaches it when validating, and validation waits for it.
+  assert.deepEqual(FINANCE_KINDS, ["refundOr"]);
+  assert.ok(!kinds(report({ expenseTypes: ["Transportation", "Accommodation"], declarations: ["overRate", "scheduleChanged"] })).includes("refundOr"));
+  assert.ok(!EMPLOYEE_KINDS.includes("refundOr") && !EMPLOYEE_KINDS.includes("certificate"));
+  assert.deepEqual(EMPLOYEE_KINDS, UPLOAD_KINDS.filter(k => k !== "refundOr"));
+  // A stored one keeps its slot and name plate, wherever the file is listed.
+  assert.equal(readDocumentKind("refundOr"), "refundOr");
+  assert.equal(documentPlate("refundOr"), "OR, Excess Cash Advance");
 });
 
 test("each tick brings its document", () => {
@@ -74,20 +87,20 @@ test("each tick brings its document", () => {
 });
 
 test("a Reimbursement needs only its certificate and official receipts", () => {
-  assert.deepEqual(kinds(report({ reimbursement: true, expenseTypes: ["Accommodation", "Transportation"], handsBack: true, declarations: ["overRate"] })), ["certificate", "receipts"]);
+  assert.deepEqual(kinds(report({ reimbursement: true, expenseTypes: ["Accommodation", "Transportation"], declarations: ["overRate"] })), ["certificate", "receipts"]);
 });
 
 test("each required document says why, in the form's order", () => {
-  const all = requiredDocuments(report({ expenseTypes: ["Transportation", "Accommodation"], handsBack: true, declarations: ["overRate"] }));
+  const all = requiredDocuments(report({ expenseTypes: ["Transportation", "Accommodation"], declarations: ["overRate"] }));
   assert.deepEqual(all.map(r => r.kind), DOCUMENT_SLOTS.map(s => s.kind).filter(k => all.some(r => r.kind === k)));
   assert.ok(all.every(r => r.why));
   assert.match(all.find(r => r.kind === "headCertification")!.why, /prescribed rate/);
 });
 
 test("what is missing, and how it reads", () => {
-  const required = requiredDocuments(report({ handsBack: true }));
-  assert.deepEqual(missingDocuments(required, ["certificate", "itinerary"]), ["travelCompleted", "refundOr"]);
-  assert.deepEqual(missingDocuments(required, ["certificate", "itinerary", "travelCompleted", "refundOr", "refundOr"]), []);
+  const required = requiredDocuments(report({ expenseTypes: ["Transportation"] }));
+  assert.deepEqual(missingDocuments(required, ["certificate", "itinerary"]), ["travelCompleted", "tickets"]);
+  assert.deepEqual(missingDocuments(required, ["certificate", "itinerary", "travelCompleted", "tickets", "tickets"]), []);
   assert.equal(missingDocumentsText([]), "");
   assert.equal(missingDocumentsText(["itinerary"]), "Still needed: Itinerary of Travel.");
   assert.equal(missingDocumentsText(["itinerary", "tickets", "rer"]), "Still needed: Itinerary of Travel, Tickets and RER.");
@@ -206,4 +219,12 @@ test("on a report a certificate goes by the server's words, with its real extens
   assert.equal(certificateDocumentName("Ana Reyes", "image/jpeg"), "Certificate of Attendance - Ana Reyes.jpg");
   assert.equal(certificateDocumentName(" ", "image/png"), "Certificate of Attendance.png");
   assert.equal(certificateDocumentName("Ana‮Reyes", "image/png"), "Certificate of Attendance - AnaReyes.png", "no direction marks");
+});
+
+test("a Return made before 12ai that asked for the OR's scan asks the employee for nothing there (the code review of 12ai)", () => {
+  assert.deepEqual(employeeAskedKinds(["refundOr"]), [], "only the Finance Officer's OR: nothing for the employee");
+  assert.deepEqual(employeeAskedKinds(["rer", "refundOr", "tickets"]), ["rer", "tickets"], "the rest stays asked, in its order");
+  assert.deepEqual(employeeAskedKinds(["certificate", "madeUp"]), [], "never the certificate, nor anything unknown");
+  assert.deepEqual(employeeAskedKinds(undefined), []);
+  assert.deepEqual(employeeAskedKinds({ some: 1 }), [], "a list or nothing");
 });

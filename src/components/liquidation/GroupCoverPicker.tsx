@@ -135,8 +135,8 @@ export default function GroupCoverPicker({ activityId, seminar, selfName, offerV
         <Users size={12} className="text-blue-700" aria-hidden="true" /> One cash advance for your group
       </p>
       <p className="text-[10px] leading-snug text-slate-600">
-        You receive the cash for everyone you tick, file the group&rsquo;s one liquidation report, and hand back
-        what is left with one OR. Each person&rsquo;s share is their allowance.
+        You receive the cash for everyone you tick, file the group&rsquo;s one liquidation report, and hand what is
+        left back to the Finance Officer, who issues one OR for it. Each person&rsquo;s share is their allowance.
       </p>
 
       {loading ? (

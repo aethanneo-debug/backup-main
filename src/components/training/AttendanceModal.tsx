@@ -156,8 +156,11 @@ export default function AttendanceModal({ program, participants, employees, canR
     >
       <div className="space-y-3 text-xs text-slate-700">
         <p className="text-[11px] text-slate-500">
-          Only participants marked <strong>Attended</strong> get a liquidation form. Marking someone attended opens
-          their form and notifies them, and needs their certificate of attendance on file. <strong>Did not attend</strong> needs no file.
+          Only participants marked <strong>Attended</strong> get a form. Marking someone attended needs their
+          certificate of attendance on file, opens their form and notifies them, and decides how they settle: with a cash
+          advance released, a liquidation report; with none, a reimbursement claim, and a request still with Finance
+          closes.{" "}
+          <strong>Did not attend</strong> needs no file.
         </p>
         {!started && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">

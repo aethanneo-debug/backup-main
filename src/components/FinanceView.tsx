@@ -29,7 +29,8 @@ import { reportFiscalYear } from "./finance/overviewFigures";
 import { manilaDay } from "./finance/claimChecks";
 import { peso } from "./liquidation/reportColumns";
 import { apiCall, csvCell, formatCurrency } from "../utils";
-import { allocatedLine, budgetFigures, percentOfTotal } from "./dashboard/budgetRows";
+import { allocatedLine, budgetFigures, percentOfTotal, unallocatedLine } from "./dashboard/budgetRows";
+import type { ValidateReceipt } from "./finance/OrNumberFields";
 
 interface FinanceViewProps {
   user: User;
@@ -282,12 +283,13 @@ export default function FinanceView({
 
   // Validate a liquidation report (Finance officer). It throws the server's reason, which the report's
   // View shows and stays open on. Either way the lists reload: a refusal can mean the report was acted
-  // on elsewhere. A Return goes through its checklist dialog on the Liquidation Desk instead.
-  async function handleFinanceValidate(subId: string, remarks: string) {
+  // on elsewhere. A Return goes through its checklist dialog on the Liquidation Desk instead. A report that hands money
+  // back goes with the OR the Finance Officer issued for it, and its scan (12ai).
+  async function handleFinanceValidate(subId: string, remarks: string, receipt?: ValidateReceipt) {
     try {
       const res = await apiCall(`/api/liquidation-submissions/${encodeURIComponent(subId)}/finance-action`, {
         method: "PUT",
-        body: JSON.stringify({ action: "Validate", remarks: remarks || "Financial documentations validated & finalized." })
+        body: JSON.stringify({ action: "Validate", remarks: remarks || "Financial documentations validated & finalized.", ...(receipt ?? {}) })
       });
       if (res?.status !== "success") throw new Error(res?.message || "The report could not be validated.");
     } finally {
@@ -635,6 +637,10 @@ export default function FinanceView({
                             <span className="text-[10px] uppercase font-bold text-blue-800 mb-1">Unallocated</span>
                             <span className={`text-2xl font-extrabold tracking-tight ${(tb?.remaining ?? approved) < 0 ? "text-red-600" : "text-slate-900"}`}>{formatCurrency(tb?.remaining ?? approved)}</span>
                             <span className="text-[9px] font-mono text-slate-400 mt-0.5">of {formatCurrency(approved)} total</span>
+                            {/* How it is made up, the same line as on the other three screens (the user's report of 2026-11-13). */}
+                            {figures && unallocatedLine(figures) && (
+                              <span data-budget-line="unallocated" className="text-[10px] text-slate-500 mt-1">{unallocatedLine(figures)}</span>
+                            )}
                             {/* What came back to it this year (requirement 6). */}
                             {Number(tb?.returnedFromSettled) > 0 && (
                               <span className="text-[10px] font-semibold text-emerald-700 mt-1">

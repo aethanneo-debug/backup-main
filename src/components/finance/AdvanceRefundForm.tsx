@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Banknote, Loader2 } from "lucide-react";
 import { apiCall, formatCurrency } from "../../utils";
 import ModalDialog from "../ui/ModalDialog";
+import { manilaDay } from "../../trainingCalendar";
+import OrNumberFields from "./OrNumberFields";
 
 interface Props {
   advanceId: string;
@@ -18,13 +20,6 @@ interface Props {
   onCancel: () => void;
 }
 
-// Today in Manila, as YYYY-MM-DD: the server refuses an OR dated later than that.
-const manilaToday = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
-
-const LABEL = "text-[10px] font-bold text-slate-500 uppercase font-mono";
-const INPUT =
-  "w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-350 disabled:bg-slate-100";
-
 /**
  * Recording that someone who did not attend gave their cash advance back in full
  * (requirement 6). Until it is recorded, their share of the seminar stays held in the
@@ -34,7 +29,7 @@ const INPUT =
  */
 export default function AdvanceRefundForm({ advanceId, advanceNo, employeeName, amount, groupNames, beforeSeminar = false, onRecorded, onCancel }: Props) {
   const [orNo, setOrNo] = useState("");
-  const [orDate, setOrDate] = useState(manilaToday());
+  const [orDate, setOrDate] = useState(manilaDay());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const submitRef = useRef<HTMLButtonElement>(null);
@@ -115,36 +110,17 @@ export default function AdvanceRefundForm({ advanceId, advanceNo, employeeName, 
             <>. Recording it closes the advance and returns {groupNames ? "everyone’s share" : "their share"} of the seminar to Unallocated.</>
           )}
         </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label htmlFor={ids.orNo} className={LABEL}>Official Receipt No.</label>
-            <input
-              id={ids.orNo}
-              type="text"
-              value={orNo}
-              maxLength={50}
-              disabled={saving}
-              onChange={e => { setOrNo(e.target.value); setError(""); }}
-              aria-invalid={error && !orNo.trim() ? true : undefined}
-              aria-describedby={error ? ids.error : undefined}
-              placeholder="0247983"
-              className={INPUT}
-            />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor={ids.orDate} className={LABEL}>OR Date</label>
-            <input
-              id={ids.orDate}
-              type="date"
-              value={orDate}
-              max={manilaToday()}
-              disabled={saving}
-              onChange={e => { setOrDate(e.target.value); setError(""); }}
-              aria-describedby={error ? ids.error : undefined}
-              className={INPUT}
-            />
-          </div>
-        </div>
+        {/* The OR the Finance Officer issued for it (the boxes Validate uses too, for a report's leftover, 12ai). */}
+        <OrNumberFields
+          ids={{ no: ids.orNo, date: ids.orDate }}
+          orNo={orNo}
+          orDate={orDate}
+          onOrNo={v => { setOrNo(v); setError(""); }}
+          onOrDate={v => { setOrDate(v); setError(""); }}
+          disabled={saving}
+          invalid={!!error && !orNo.trim()}
+          describedBy={error ? ids.error : undefined}
+        />
 
         {error && (
           <p id={ids.error} role="alert" className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">

@@ -11,14 +11,17 @@ import { answeredCorrectionSummary } from "../liquidation/resubmit/correctionMod
 import { changedOnCorrection, coversOfficer, isOwnReport, reportText, type Report } from "../liquidation/reportColumns";
 import { flagged, isPayableClaim, manilaDay, mismatch } from "./claimChecks";
 import DvNumberFields from "./DvNumberFields";
+import DeskFigure, { WhoValidatesNote } from "./DeskFigure";
+import { HandBackReceipt, type ValidateReceipt } from "./OrNumberFields";
+import { useHandBackReceipt } from "./useHandBackReceipt";
 
 interface Props {
   user: User;
   report: Report;
   /** No active Accountant to print in Box C, so validation waits. */
   noAccountant: boolean;
-  /** Throws with the server's reason. */
-  onValidate: (id: string, remarks: string) => Promise<void>;
+  /** Throws with the server's reason. `receipt`: the OR for what the report hands back (12ai). */
+  onValidate: (id: string, remarks: string, receipt?: ValidateReceipt) => Promise<void>;
   /** Re-runs the parent's fetches after money moves. */
   onQueueRefresh: () => void;
   onPrint: (report: LiquidationSubmission) => void;
@@ -29,18 +32,6 @@ interface Props {
 
 const NOTE = "rounded-lg border p-2.5 text-[11px]";
 
-function Figure({ label, tone = "plain", children }: { label: string; tone?: "plain" | "amber" | "rose"; children: string }) {
-  const box = tone === "rose" ? "border-rose-200 bg-rose-50" : tone === "amber" ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white";
-  const word = tone === "rose" ? "text-rose-700" : tone === "amber" ? "text-amber-700" : "text-slate-500";
-  const figure = tone === "rose" ? "text-rose-800" : tone === "amber" ? "text-amber-800" : "text-slate-700";
-  return (
-    <div className={`rounded border p-2 ${box}`}>
-      <span className={`block font-mono text-[9px] font-semibold ${word}`}>{label}</span>
-      <strong className={`font-mono text-xs ${figure}`}>{children}</strong>
-    </div>
-  );
-}
-
 /**
  * A report's View on the Liquidation Desk: what Finance has to look at first, then what the report's stage allows.
  * Validate and Return wait for Finance's turn; a validated claim is paid from here. Every list on the desk opens
@@ -48,7 +39,11 @@ function Figure({ label, tone = "plain", children }: { label: string; tone?: "pl
  */
 export default function DeskReportView({ user, report, noAccountant, onValidate, onQueueRefresh, onPrint, onClose, onDone }: Props) {
   const atFinance = report.status === "Verified & Forwarded";
-  const canValidate = user.role === UserRole.FINANCE_OFFICER && atFinance;
+  // What the server allows the one viewing at Finance's stage (financeAction, 12ai): nobody records the OR for cash they
+  // hand back themselves, and the Administrator acts here only on a Financial Officer's handed-back cash.
+  const may = report.financeAction ?? { act: user.role === UserRole.FINANCE_OFFICER, validate: user.role === UserRole.FINANCE_OFFICER };
+  const canValidate = atFinance && may.validate;
+  const canReturn = atFinance && may.act;
   const payable = isPayableClaim(report);
   const canRecordPayment = payable && (user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN);
   // Nobody records the payment of their own claim: the server refuses it (403).
@@ -57,6 +52,12 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
   // The claimant's own report, or a group's that covers them: validating either is flagged as self-approved.
   const covers = coversOfficer(report, user.employeeId);
   const own = isOwnReport(report, user.employeeId);
+  const { leftover } = liquidationBalance(report.totalReleased ?? 0, report.totalSpent ?? 0);
+  // What a seminar report hands back comes with the OR the Finance Officer issues for it, recorded here with its scan
+  // when validating (12ai: HSAC RAB 1 has no cashier). A report filed under the older rule carries the employee's.
+  const orReceipt = useHandBackReceipt(report, leftover, canValidate);
+  const { handsBack, scanOnFile } = orReceipt;
+  const errorId = `desk-error-${report.id}`;
 
   const [remarks, setRemarks] = useState("");
   const [returning, setReturning] = useState(false);
@@ -66,6 +67,8 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
   // The voucher's serial; its year and month are the voucher date's (YYYY-MM-NNNN, as on a release).
   const [dvSerial, setDvSerial] = useState("");
   const [payDate, setPayDate] = useState("");
+  // Bumped after a refusal, so the voucher fields suggest a fresh serial.
+  const [dvRefresh, setDvRefresh] = useState(0);
   // Answers a second click before the button has re-rendered disabled.
   const inFlight = useRef(false);
   const validateRef = useRef<HTMLButtonElement>(null);
@@ -92,13 +95,22 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
 
   async function validate() {
     if (inFlight.current) return;
-    if (own && !window.confirm(`${report.submissionNo} ${covers ? "is a group's report that covers you" : "is your own report"}. Validating it will be marked as self-approved in the audit log. Validate it anyway?`)) return;
+    setError("");
+    // The OR for what is handed back: its number, date and scan, as the server reads them. The box at fault is marked,
+    // tied to the message and focused.
+    const wrong = orReceipt.check();
+    orReceipt.setInvalid(wrong?.field ?? null);
+    if (wrong) {
+      setError(wrong.problem);
+      document.getElementById(`or-${report.id}-${wrong.field === "scan" ? "scan-attach" : wrong.field}`)?.focus();
+      return;
+    }
+    if ((own || may.fallback) && !window.confirm(`${report.submissionNo} ${covers || (may.fallback && !own) ? "is a group's report that covers you" : "is your own report"}. Validating it will be marked as self-approved in the audit log${may.fallback ? ", and Finance and HR are told" : ""}. Validate it anyway?`)) return;
     inFlight.current = true;
     setSaving(true);
-    setError("");
     try {
-      await onValidate(report.id, remarks);
-      onDone(`${report.submissionNo} was validated.`);
+      await onValidate(report.id, remarks, orReceipt.receipt());
+      onDone(`${report.submissionNo} was validated${handsBack ? `, with OR ${orReceipt.handBack.orNo.trim()} for the ${formatCurrency(leftover)} handed back` : ""}.`);
     } catch (err: any) {
       // The server's reason. The lists reload either way, so the buttons follow what it found.
       setError(err?.message || "The report could not be validated.");
@@ -144,6 +156,7 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
     } catch (err: any) {
       // apiCall throws on a non-2xx, so the server's message only surfaces here.
       setError(err?.message || "Could not record the reimbursement.");
+      setDvRefresh(n => n + 1);
       onQueueRefresh();
     } finally {
       inFlight.current = false;
@@ -154,18 +167,19 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
   const before = report.claimBeforeCorrection;
   const answered = answeredCorrectionSummary(report);
   const over = overspendOf(report);
-  const { leftover } = liquidationBalance(report.totalReleased ?? 0, report.totalSpent ?? 0);
 
   const notes = (
     <>
       {/* Officers may act on their own report, but it is flagged (the user's decision, 2026-10-20):
           they're told here, and asked again on Validate. */}
-      {canValidate && own && (
+      {canValidate && own && !may.fallback && (
         <p className={`${NOTE} border-amber-200 bg-amber-50 text-amber-900`}>
           <strong>{covers ? "This group's report covers you." : "This is your own report."}</strong> You can validate it, but it will be marked as
           self-approved in the audit log.
         </p>
       )}
+
+      {atFinance && <WhoValidatesNote may={may} administrator={user.role === UserRole.SUPER_ADMIN} />}
 
       {canValidate && noAccountant && (
         <p className={`${NOTE} border-amber-200 bg-amber-50 text-amber-800`}>
@@ -196,14 +210,19 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
       {atFinance && over && <OverspendNotice over={over} />}
 
       {/* A seminar report kept within its advance (the seminar budget flow): what validating returns to the
-          training budget, with the employee's OR. */}
+          training budget. What it hands back comes to the Finance Officer, who issues the OR and records it here with
+          its scan (12ai); a report filed under the older rule shows the employee's. */}
       {atFinance && report.withinAdvance && (
         <p className={`${NOTE} ${leftover > 0 ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
           {leftover > 0 ? (
             <>
-              <strong>{formatCurrency(leftover)}</strong> of the advance was handed back
-              {reportText(report.refundOrNo) ? ` (OR ${reportText(report.refundOrNo)}${reportText(report.refundOrDate) ? `, ${formatDate(reportText(report.refundOrDate))}` : ""})` : ""}. Check
-              the receipt: validating returns it to the training budget.
+              <strong>{formatCurrency(leftover)}</strong> of the advance is handed back
+              {reportText(report.refundOrNo) ? ` (OR ${reportText(report.refundOrNo)}${reportText(report.refundOrDate) ? `, ${formatDate(reportText(report.refundOrDate))}` : ""})` : ""}.{" "}
+              {canValidate
+                ? "Receive it, issue the official receipt, and record it below with its scan: validating returns it to the training budget."
+                : may.own
+                  ? "Someone else receives it and records the official receipt when validating; it then returns to the training budget."
+                  : "The Finance Officer receives it and records the official receipt when validating; it then returns to the training budget."}
             </>
           ) : (
             <>Balanced: the items use up the cash advance exactly, so nothing is handed back.</>
@@ -243,12 +262,12 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
 
       {payable && (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Figure label={report.withinAllowance ? "Their Share" : "HR Allocated"}>
+          <DeskFigure label={report.withinAllowance ? "Their Share" : "HR Allocated"}>
             {report.allocatedAtFiling === undefined ? "Not on record" : formatCurrency(Number(report.allocatedAtFiling))}
-          </Figure>
-          <Figure label="Claimant States Received" tone={flagged(report) ? "rose" : "plain"}>{formatCurrency(Number(report.totalReleased || 0))}</Figure>
-          <Figure label="Total Spent">{formatCurrency(Number(report.totalSpent || 0))}</Figure>
-          <Figure label="Owed to Employee" tone="amber">{formatCurrency(owed)}</Figure>
+          </DeskFigure>
+          <DeskFigure label="Claimant States Received" tone={flagged(report) ? "rose" : "plain"}>{formatCurrency(Number(report.totalReleased || 0))}</DeskFigure>
+          <DeskFigure label="Total Spent">{formatCurrency(Number(report.totalSpent || 0))}</DeskFigure>
+          <DeskFigure label="Owed to Employee" tone="amber">{formatCurrency(owed)}</DeskFigure>
         </div>
       )}
 
@@ -262,6 +281,22 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
 
   const form = canValidate ? (
     <div className="space-y-1">
+      {handsBack && (
+        <div className="mb-2">
+          <HandBackReceipt
+            id={`or-${report.id}`}
+            amount={formatCurrency(leftover)}
+            minDate={reportText(report.cashAdvanceDvDate) || undefined}
+            value={orReceipt.handBack}
+            onChange={orReceipt.setHandBack}
+            onFile={scanOnFile ? { name: reportText(scanOnFile.name) } : null}
+            onProblem={message => { setError(message); if (!message) orReceipt.setInvalid(null); }}
+            invalid={error ? orReceipt.invalid : null}
+            describedBy={errorId}
+            disabled={saving}
+          />
+        </div>
+      )}
       <label htmlFor={`liq-remarks-${report.id}`} className="block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
         Validation Remarks (the employee sees these)
       </label>
@@ -280,7 +315,7 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
       <p className="text-[11px] font-semibold text-slate-700">The voucher {formatCurrency(owed)} is paid on</p>
       {/* Its date, then only the serial (DvNumberFields.tsx). It can't be dated before the report was validated. */}
       <DvNumberFields prefix="rb" recordId={report.id} dvDate={payDate} onDvDate={setPayDate} serial={dvSerial} onSerial={setDvSerial}
-        onWarning={setError} disabled={saving} minDate={manilaDay(report.financeValidatedAt)} />
+        onWarning={setError} disabled={saving} minDate={manilaDay(report.financeValidatedAt)} refresh={dvRefresh} />
     </div>
   ) : null;
 
@@ -289,7 +324,7 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
       {/* The server's reason beside the buttons, which never scroll away. They stack in reverse on a
           narrow screen, so order-last puts it above them there. */}
       {error && (
-        <p role="alert" className="order-last flex items-start gap-1.5 text-[11px] leading-snug text-rose-700 sm:order-first sm:mr-auto sm:max-w-md sm:self-center">
+        <p id={errorId} role="alert" className="order-last flex items-start gap-1.5 text-[11px] leading-snug text-rose-700 sm:order-first sm:mr-auto sm:max-w-md sm:self-center">
           <AlertTriangle size={13} className="mt-px shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </p>
@@ -298,18 +333,20 @@ export default function DeskReportView({ user, report, noAccountant, onValidate,
         <Printer size={12} aria-hidden="true" />
         Print<span className="sr-only"> {report.submissionNo}</span>
       </button>
+      {canReturn && (
+        <button
+          type="button"
+          // A Return names what to correct; only those parts reopen for the employee.
+          onClick={() => { setError(""); setReturning(true); }}
+          disabled={saving}
+          className={VIEW_AMBER}
+        >
+          <CornerUpLeft size={12} aria-hidden="true" />
+          Return<span className="sr-only"> {report.submissionNo} for correction</span>
+        </button>
+      )}
       {canValidate && (
         <>
-          <button
-            type="button"
-            // A Return names what to correct; only those parts reopen for the employee.
-            onClick={() => { setError(""); setReturning(true); }}
-            disabled={saving}
-            className={VIEW_AMBER}
-          >
-            <CornerUpLeft size={12} aria-hidden="true" />
-            Return<span className="sr-only"> {report.submissionNo} for correction</span>
-          </button>
           <button
             ref={validateRef}
             type="button"

@@ -151,7 +151,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const [moneyError, setMoneyError] = useState("");
   // The seminar budget flow: a seminar's report (a new one, or one filed under the flow)
   // settles the advance Finance released. Its claim type is fixed, its items stay within the
-  // advance, and a leftover is handed back with an OR. The server enforces the same.
+  // advance, and a leftover is handed back to the Finance Officer, who records its OR when
+  // validating (12ai). The server enforces the same.
   const selectedItem = (liquidatable ?? []).find((a: any) => a.id === selectedActivityId);
   // With no advance waiting or released for the seat, a seminar's report claims back what the employee
   // paid themselves instead (HSAC RAB 1 allows it, 2026-10-30): a Reimbursement, within their share
@@ -285,10 +286,9 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
   const lineTypes = filledParticulars(particulars).map(p => p.category);
   const requiredDocs = namedForm
     ? requiredDocuments({
+        // (The OR for what is handed back isn't one: the Finance Officer attaches it when validating, 12ai.)
         reimbursement: isReimbursement,
         expenseTypes: lineTypes,
-        // (Nothing is handed back until there is a line to measure: a blank form isn't a refund.)
-        handsBack: hasParticularLines && balance.leftover > 0,
         declarations
       })
     : [];
@@ -952,8 +952,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
       return;
     }
 
-    // A seminar's report, mirroring the server: Finance's advance is out, the items stay
-    // within it, and a leftover has its OR (where the OR can still be entered).
+    // A seminar's report, mirroring the server: Finance's advance is out, and the items stay
+    // within it. (A leftover's OR is the Finance Officer's, recorded when validating, 12ai.)
     if (withinAdvanceForm) {
       const problem = withinAdvanceSubmitProblem({
         advance: activeAdvance,
@@ -963,9 +963,6 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
         itemsEditable: access.editable("particulars"),
         balance,
         itemsTotal: effectiveSpent,
-        orEditable: access.editable("refundOr"),
-        orNo: coaFields.refundOrNo,
-        orDate: coaFields.refundOrDate,
         spendCap: groupSpendCap
       });
       if (problem) {
@@ -1119,9 +1116,12 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           responsibilityCenterCode: coaFields.responsibilityCenterCode,
           cashAdvanceDvNo: isReimbursement ? "" : coaFields.cashAdvanceDvNo,
           cashAdvanceDvDate: isReimbursement ? "" : coaFields.cashAdvanceDvDate,
-          // An OR only exists when money was actually returned.
-          refundOrNo: refundDue ? coaFields.refundOrNo : "",
-          refundOrDate: refundDue ? coaFields.refundOrDate : "",
+          // An OR only exists when money was actually returned, and on a seminar report it is the Finance Officer's,
+          // recorded when validating (12ai), so the form sends none.
+          ...(withinAdvanceForm ? {} : {
+            refundOrNo: refundDue ? coaFields.refundOrNo : "",
+            refundOrDate: refundDue ? coaFields.refundOrDate : ""
+          }),
           // Sent only when chosen or changed: the server copies the person's name and
           // position, and a returned report otherwise keeps the one it was filed with.
           ...(keptRepresentative ? {} : { representativeId }),
@@ -1857,7 +1857,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           <div className="space-y-6">
             <div className="border-b border-slate-100 pb-4">
               <h1 className="text-base font-bold text-slate-800">My Assigned Activities</h1>
-              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here, upload your certificate of attendance once the seminar ends, then file the liquidation report when HR has recorded your attendance.</p>
+              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here before the seminar&rsquo;s last day, upload your certificate of attendance from that day, then file your report when HR has recorded your attendance: a liquidation of the cash advance released to you, or, if none was, a reimbursement of what you paid.</p>
             </div>
 
             {activities.length === 0 ? (
@@ -2107,7 +2107,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   <>
                     Cash advance <strong>{formatCurrency(Number(activeAdvance.amount))}</strong> from{" "}
                     <strong>{activeAdvance.advanceNo}</strong>, DV {activeAdvance.dvNo} dated {formatDate(activeAdvance.dvDate)}, as
-                    Finance released it. Your items can&rsquo;t go past it, and what you don&rsquo;t spend is handed back with an OR.
+                    Finance released it. Your items can&rsquo;t go past it, and what you don&rsquo;t spend is handed back to the Finance
+                    Officer, who issues the official receipt (OR) and records it when validating your report.
                   </>
                 ) : withinAdvanceForm ? (
                   advancesFailed ? (
@@ -2219,7 +2220,8 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   This is your group&rsquo;s one report for cash advance <span className="font-mono">{activeAdvance.advanceNo}</span>, covering{" "}
                   {((activeAdvance as any).covers ?? []).map((c: any) => c.employeeName).join(", ")}. Its items can spend the shares of
                   those who attended{groupSpendCap !== null ? ` (${formatCurrency(groupSpendCap)})` : ""}; what the group didn&rsquo;t spend,
-                  an absent member&rsquo;s share included, is handed back with one OR. You may say whom each line was for
+                  an absent member&rsquo;s share included, is handed back in one go to the Finance Officer, who records one OR for it.
+                  You may say whom each line was for
                   {groupAttendees.length > 0 ? ` (${groupAttendees.map(m => m.employeeName).join(", ")} attended)` : ""}.
                 </p>
               )}
@@ -2308,7 +2310,6 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
                   seatId={selectedActivityId}
                   limit={reimbursable}
                   itemsTotal={effectiveSpent}
-                  orFilled={!!coaFields.refundOrNo.trim() && !!coaFields.refundOrDate}
                 />
               )}
 

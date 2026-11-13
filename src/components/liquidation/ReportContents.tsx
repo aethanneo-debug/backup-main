@@ -7,6 +7,7 @@ import FileViewer, { type ReportFile } from "../ui/FileViewer";
 import { BalanceStatusBadge, FundReturnNote } from "./BalanceCheck";
 import ReportHistory from "./ReportHistory";
 import { coversOf, peso, reportText } from "./reportColumns";
+import { olderDv } from "../../dvNumber";
 
 /** A liquidation report as GET /api/liquidation-submissions returns it. */
 type ReportProps = { report: LiquidationSubmissionView };
@@ -68,6 +69,8 @@ export function ReportAdvance({ report }: ReportProps) {
       {dvNo && (
         <p className="mt-0.5 font-mono text-[10px] text-slate-500">
           DV No. {dvNo}{dvDate ? ` · dated ${formatDate(dvDate)}` : ""}
+          {/* Typed as free text before the voucher format (2026-10-29), and kept as typed. */}
+          {olderDv(dvNo) && <span data-dv-older className="block font-sans">Entered before the voucher number format</span>}
         </p>
       )}
     </div>
@@ -236,7 +239,7 @@ export function ReportFiles({ report, canOpenFile }: ReportProps & { canOpenFile
                     setNoContent(doc?.hasFile ? "" : name);
                     if (doc?.hasFile) setViewing({ reportId: report.id, docId: doc.id, name });
                   }}
-                  title={doc?.supersededAt ? "Replaced on correction; the old copy is kept for the record" : openable ? "View this file" : "Only its owner can open this file"}
+                  title={doc?.supersededAt ? (doc.kind === "refundOr" ? "Replaced by a newer scan of the OR; the old copy is kept for the record" : "Replaced on correction; the old copy is kept for the record") : openable ? "View this file" : "Only its owner can open this file"}
                   className={`flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 font-mono text-[10px] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                     openable ? "cursor-pointer hover:border-blue-300 hover:bg-blue-50" : "cursor-default bg-slate-50"
                   } ${doc?.supersededAt ? "text-slate-400" : openable ? "text-slate-600" : "text-slate-500"}`}

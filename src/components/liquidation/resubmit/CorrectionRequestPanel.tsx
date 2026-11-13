@@ -1,7 +1,7 @@
 import { ClipboardList } from "lucide-react";
 import { CorrectionRequest, LiquidationSubmissionView, UserRole } from "../../../types";
 import { expenseLineLabel } from "../../../expenseLines";
-import { documentPlate } from "../../../reportDocuments";
+import { documentPlate, FINANCE_KINDS } from "../../../reportDocuments";
 import { formatCurrency, formatDate } from "../../../utils";
 import { correctionLabel } from "./correctionModel";
 
@@ -57,7 +57,9 @@ export default function CorrectionRequestPanel({
                 <span className="text-slate-500">: {(item.documentIds ?? []).map(fileName).join(", ")}</span>
               )}
               {item.field === "addDocument" && (item.documentKinds?.length ?? 0) > 0 && (
-                <span className="text-slate-500">: {item.documentKinds!.map(documentPlate).join(", ")}</span>
+                <span className="text-slate-500">: {item.documentKinds!.map(k => FINANCE_KINDS.includes(k)
+                  ? `${documentPlate(k)} (the Finance Officer attaches it when validating: nothing to add)`
+                  : documentPlate(k)).join(", ")}</span>
               )}
               {item.remark && <span className="block text-amber-800">&ldquo;{item.remark}&rdquo;</span>}
             </li>

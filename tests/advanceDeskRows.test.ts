@@ -1,7 +1,7 @@
 // The Cash Advance Desk's table (the instructor's review, R8). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advanceRowDate, advanceStage, filedWithoutAdvance, refundDue, type FundableRow } from "../src/components/finance/advanceDeskRows";
+import { advanceRowDate, advanceStage, filedWithoutAdvance, noAdvanceNow, refundDue, type FundableRow } from "../src/components/finance/advanceDeskRows";
 
 const row = (fields: Partial<FundableRow> = {}): FundableRow => ({
   activityId: "tp-1", activityTitle: "A seminar", employeeId: "E1", employeeName: "Someone", allocated: 5000,
@@ -33,8 +33,28 @@ test("someone with nothing to fund or bring back isn't listed", () => {
   assert.equal(advanceStage(row({ liquidationFiled: true })), null, "a reimbursement: no advance can be released now");
 });
 
-test("HR correcting someone back to Attended after their refund can fund them again", () => {
+test("a refund stands once no request can come: corrected back to Attended, the seat is a reimbursement (12ai)", () => {
+  // Since 2026-11-12 HR's "Attended" closes asking (as do a certificate on file and the seminar's last day).
+  assert.equal(advanceStage(row({ advanceStatus: "Refunded", requestClosed: "HR recorded the attendance" })), "refunded");
+  // While asking is still open (before the seminar's last day, nothing recorded) a refunded seat can ask again.
   assert.equal(advanceStage(row({ advanceStatus: "Refunded" })), "unfunded");
+});
+
+test("a seat no request can come for any more has no place among those to fund, unless one is waiting (12ai)", () => {
+  const closed = "The seminar's last day has come";
+  assert.equal(advanceStage(row({ requestClosed: closed })), null, "claimed back as a reimbursement");
+  assert.equal(advanceStage(row({ requestClosed: closed, advanceStatus: "Declined" })), null);
+  assert.equal(advanceStage(row({ requestClosed: closed, pendingRequestId: "ca-1" })), "unfunded", "Finance may still release it");
+  assert.equal(advanceStage(row({ requestClosed: closed, funded: true, advanceStatus: "Released" })), "released");
+  assert.equal(advanceStage(row({ requestClosed: closed, advanceStatus: "Liquidated" })), "settled");
+  // Counted apart, once: not with a request waiting, an advance out or settled, or a report filed (counted as filed).
+  assert.equal(noAdvanceNow(row({ requestClosed: closed })), true);
+  assert.equal(noAdvanceNow(row({ requestClosed: closed, pendingRequestId: "ca-1" })), false);
+  assert.equal(noAdvanceNow(row({ requestClosed: closed, funded: true, advanceStatus: "Released" })), false);
+  assert.equal(noAdvanceNow(row({ requestClosed: closed, liquidationFiled: true })), false);
+  assert.equal(noAdvanceNow(row({ requestClosed: closed, advanceStatus: "Refunded" })), false);
+  assert.equal(noAdvanceNow(row({ requestClosed: closed, didNotAttend: true })), false);
+  assert.equal(noAdvanceNow(row()), false, "asking still open");
 });
 
 test("a report filed with no advance on record is counted apart", () => {

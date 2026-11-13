@@ -1,4 +1,5 @@
 import { CORRECTION_FIELDS, CorrectionField, CorrectionItem, CorrectionRequest, DocumentKind, LiquidationSubmission } from "../../../types";
+import { employeeAskedKinds } from "../../../reportDocuments";
 
 /**
  * Whether the claimant can correct and resubmit the report, by the server's rule: returned,
@@ -44,9 +45,8 @@ export interface CorrectionAccess {
  * Which parts of a returned report reopen. The same rule as the server's /resubmit, which
  * ignores anything else the form sends: ticking the claim type reopens the cash advance and
  * its refund OR too (a new type can mean a new advance), and a report filed before Box B
- * existed must name a representative either way. On a seminar report kept within its advance,
- * reopened particulars reopen the refund OR as well: new items can change what is left to
- * hand back.
+ * existed must name a representative either way. On a seminar report kept within its advance
+ * the refund OR never reopens: the Finance Officer records it when validating (12ai).
  */
 export function correctionAccess(report: Partial<LiquidationSubmission> | null | undefined): CorrectionAccess {
   const open = openCorrectionOf(report);
@@ -54,14 +54,14 @@ export function correctionAccess(report: Partial<LiquidationSubmission> | null |
   const ticked = new Set(items.map(i => i.field));
   return {
     open,
-    editable: (field) => !open || ticked.has(field)
+    editable: (field) => !(field === "refundOr" && !!report?.withinAdvance) && (!open || ticked.has(field)
       || ((field === "cashAdvance" || field === "refundOr") && ticked.has("claimType"))
-      || (field === "refundOr" && !!report?.withinAdvance && ticked.has("particulars"))
-      || (field === "representative" && !report?.representativeId),
+      || (field === "representative" && !report?.representativeId)),
     noteFor: (field) => items.find(i => i.field === field)?.remark,
     lineIds: items.find(i => i.field === "particulars")?.lineIds,
     replaceIds: items.find(i => i.field === "replaceDocuments")?.documentIds ?? [],
-    addKinds: items.find(i => i.field === "addDocument")?.documentKinds ?? []
+    // (Never the Finance Officer's OR, which a Return made before 12ai could ask for.)
+    addKinds: employeeAskedKinds(items.find(i => i.field === "addDocument")?.documentKinds)
   };
 }
 

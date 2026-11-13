@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 import { CircleAlert, Lock, Paperclip } from "lucide-react";
 import { DocumentKind, LiquidationDocument, LiquidationParticular } from "../../../types";
 import { expenseLineLabel } from "../../../expenseLines";
-import { UPLOAD_KINDS, documentPlate } from "../../../reportDocuments";
+import { EMPLOYEE_KINDS, documentPlate } from "../../../reportDocuments";
 import { formatCurrency, formatDate } from "../../../utils";
 import { HINT } from "../../utilities/signatoryFormParts";
 
@@ -182,7 +182,8 @@ export function KindPicker({ id, chosen, missing, onToggle }: {
         <span className="sr-only"> (choose at least one)</span>
       </legend>
       <ul className={`${SUB_LIST} max-h-48 overflow-y-auto custom-scrollbar`}>
-        {UPLOAD_KINDS.map(kind => (
+        {/* (Never the OR for cash handed back: the Finance Officer attaches it when validating, 12ai.) */}
+        {EMPLOYEE_KINDS.map(kind => (
           <li key={kind}>
             <label className={SUB_OPTION}>
               <input type="checkbox" id={`${id}-${kind}`} checked={chosen.includes(kind)} onChange={() => onToggle(kind)} className={CHECKBOX} />

@@ -9,7 +9,7 @@ import {
   LiquidationSubmission,
   LiquidationSubmissionView
 } from "../../types";
-import { UPLOAD_KINDS, filedUnderDocuments } from "../../reportDocuments";
+import { EMPLOYEE_KINDS, filedUnderDocuments } from "../../reportDocuments";
 import { cleanText } from "../../inputText";
 import ModalDialog from "../ui/ModalDialog";
 import { ACTION_BUTTON, CANCEL_BUTTON, CONTROL, LABEL, Notice } from "../utilities/signatoryFormParts";
@@ -47,6 +47,8 @@ function lockedBecause(field: CorrectionField, report: LiquidationSubmission, fi
   if (field === "cashAdvance" && report.withinAllowance) return "Paid by the employee: no cash advance was released for this seminar";
   if (field === "cashAdvance" && report.claimType === "Reimbursement") return "A Reimbursement has no cash advance (tick Claim type if one was received)";
   if (field === "refundOr" && report.claimType === "Reimbursement") return "A Reimbursement has no refund";
+  // The OR for what a seminar report hands back is the Finance Officer's, recorded when validating (12ai).
+  if (field === "refundOr" && report.withinAdvance) return "The Finance Officer records this OR when validating";
   if (field === "claimType" && report.withinAdvance) return "A seminar report always settles its cash advance";
   if (field === "claimType" && report.withinAllowance) return "A seminar the employee paid for is always a Reimbursement";
   // A seminar report covers the seminar's own dates (12af): a wrong date is corrected on the seminar.
@@ -96,7 +98,8 @@ export default function ReturnForCorrectionDialog({ report, reviewer, onCancel, 
   const filesMissing = chosen.some(c => c.field === "replaceDocuments") && chosenFiles.length === 0;
   // On a report under the named documents, the reviewer says which one is missing (R5).
   const named = filedUnderDocuments(report);
-  const chosenKinds = UPLOAD_KINDS.filter(k => documentKinds.includes(k));
+  // (Never the OR for cash handed back: the Finance Officer attaches it when validating, 12ai.)
+  const chosenKinds = EMPLOYEE_KINDS.filter(k => documentKinds.includes(k));
   const kindsMissing = named && chosen.some(c => c.field === "addDocument") && chosenKinds.length === 0;
   // (As the server reads it: invisible characters alone say nothing.)
   const remarksBlank = cleanText(remarks) === "";

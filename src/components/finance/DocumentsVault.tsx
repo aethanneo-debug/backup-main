@@ -305,7 +305,7 @@ export default function DocumentsVault({ fiscalYear, yearControl, onOpenReport }
                                 <span className="rounded border border-slate-200 bg-slate-100 px-1 py-0.5 text-[9px] font-bold uppercase text-slate-600">
                                   Replaced
                                 </span>{" "}
-                                on {formatDate(row.supersededAt)}, by a corrected copy
+                                on {formatDate(row.supersededAt)}, {row.kind === "refundOr" ? "by a newer scan of the OR" : "by a corrected copy"}
                               </p>
                             )}
                           </div>

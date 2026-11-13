@@ -2,7 +2,7 @@
 // Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dvKey, dvNumberFrom, dvPrefix, dvPrefixIn, dvSerialInput, readDvNumber } from "../src/dvNumber";
+import { dvKey, dvNumberFrom, dvPrefix, dvPrefixIn, dvSerialInput, nextDvSerial, olderDv, readDvNumber } from "../src/dvNumber";
 
 test("the year and month come from the voucher date; Finance types only the serial", () => {
   assert.equal(dvPrefix("2026-10-29"), "2026-10");
@@ -48,4 +48,23 @@ test("one voucher however it was typed: an earlier free-text number still counts
   assert.notEqual(dvKey("2026-10-0102"), dvKey("2026-10-0101"));
   assert.equal(dvKey("TRN-2026-1792135965246"), "trn-2026-1792135965246", "not a year, month and serial: compared as typed");
   assert.equal(dvKey(""), "");
+});
+
+test("the next voucher serial in a month: one past the highest used, however earlier numbers were typed (2026-11-13)", () => {
+  assert.equal(nextDvSerial([], "2026-11"), "0001", "a month with none");
+  assert.equal(nextDvSerial(["2026-11-0016", "2026-11-0101", "2026-10-0400"], "2026-11"), "0102", "the month's highest, not another month's");
+  assert.equal(nextDvSerial(["2026-11-16", "DV 2026-11-0020"], "2026-11"), "0021", "older spellings count as dvKey reads them");
+  assert.equal(nextDvSerial(["TRN-2026-1792135965246", "", null, 42], "2026-11"), "0001", "free text and non-text are passed over");
+  assert.equal(nextDvSerial(["2026-11-9999"], "2026-11"), "", "none left after 9999");
+  assert.equal(nextDvSerial(["2026-11-0001"], "2026-13"), "", "not a month");
+  assert.equal(nextDvSerial(["2026-11-0001"], undefined), "");
+  assert.equal(nextDvSerial(["2026-11-12345", "2026-11-1e3", "2026-11-0007"], "2026-11"), "0008", "free text that isn't a serial is passed over (the code review)");
+});
+
+test("a DV number typed before the format is told apart, to be labelled (2026-11-13)", () => {
+  assert.equal(olderDv("TRN-2026-1792135965246"), true, "a seminar's reference typed into the DV box in October");
+  assert.equal(olderDv("2026-10-101"), true, "three digits: typed before the format");
+  assert.equal(olderDv("2026-11-0016"), false);
+  assert.equal(olderDv(""), false, "none at all isn't an older one");
+  assert.equal(olderDv(undefined), false);
 });

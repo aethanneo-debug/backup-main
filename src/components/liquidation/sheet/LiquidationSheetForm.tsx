@@ -5,7 +5,6 @@ import { expenseTypeChoices, vehicleNoForLine } from "../../../expenseLines";
 import { newParticular, round2 } from "../particularLines";
 import { CoaHeaderFields } from "../LiquidationCoaFields";
 import { SHEET_FONT, amountText, longDate } from "./sheetFormat";
-import { getLocalTodayString } from "../../../utils";
 import { CertificationCell, SheetTotalRow } from "./SheetParts";
 import CorrectionNote from "../resubmit/CorrectionNote";
 import { CorrectionAccess } from "../resubmit/correctionModel";
@@ -473,18 +472,20 @@ export default function LiquidationSheetForm({
             label={
               <span className="flex flex-wrap items-center gap-1">
                 AMOUNT REFUNDED PER OR NO.
+                {/* On a seminar report the OR is the Finance Officer's: HSAC RAB 1 has no cashier, so Finance receives
+                    what is handed back, issues the OR and records it when validating (12ai). The boxes show it then. */}
                 <input
                   type="text"
                   value={coa.refundOrNo}
                   disabled={off || !refundDue}
-                  readOnly={!can("refundOr")}
+                  readOnly={withinAdvance || !can("refundOr")}
                   onChange={(e) => set({ refundOrNo: e.target.value })}
-                  placeholder={refundDue ? "0247983" : "No refund due"}
+                  placeholder={refundDue ? (withinAdvance ? "Finance records it" : "0247983") : "No refund due"}
                   data-correction-target="refundOr"
                   data-correction-control
-                  aria-label="Refund OR number"
+                  aria-label={withinAdvance ? "Refund OR number, recorded by the Finance Officer when validating" : "Refund OR number"}
                   aria-describedby={noteId("refundOr")}
-                  className={`${can("refundOr") ? open : LOCKED} w-24`}
+                  className={`${can("refundOr") && !withinAdvance ? open : LOCKED} w-28`}
                 />
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   DTD.
@@ -492,15 +493,11 @@ export default function LiquidationSheetForm({
                     type="date"
                     value={coa.refundOrDate}
                     disabled={off || !refundDue}
-                    readOnly={!can("refundOr")}
-                    // A seminar report's OR comes after the advance's DV, and no later than
-                    // today (the server checks the same).
-                    min={withinAdvance ? coa.cashAdvanceDvDate || undefined : undefined}
-                    max={withinAdvance ? getLocalTodayString() : undefined}
+                    readOnly={withinAdvance || !can("refundOr")}
                     onChange={(e) => set({ refundOrDate: e.target.value })}
-                    aria-label="Refund OR date"
+                    aria-label={withinAdvance ? "Refund OR date, recorded by the Finance Officer when validating" : "Refund OR date"}
                     aria-describedby={noteId("refundOr")}
-                    className={`${can("refundOr") ? open : LOCKED} text-[12px]`}
+                    className={`${can("refundOr") && !withinAdvance ? open : LOCKED} text-[12px]`}
                   />
                 </span>
                 {note("refundOr") && <span className="basis-full"><CorrectionNote id={noteId("refundOr")} note={note("refundOr")} /></span>}
@@ -584,7 +581,9 @@ export default function LiquidationSheetForm({
               ? "Your items come to more than the cash advance. Lower or remove an item: a seminar report can't go past its advance."
               : "You spent more than the cash advance."
             : refunded > 0
-              ? "Return this balance and record the OR."
+              ? withinAdvance
+                ? "Hand this balance back to the Finance Officer, who records the OR when validating your report."
+                : "Return this balance and record the OR."
               : "Fully liquidated - nothing to refund."}
       </p>}
     </div>

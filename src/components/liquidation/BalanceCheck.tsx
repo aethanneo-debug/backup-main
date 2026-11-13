@@ -7,8 +7,9 @@ import { portionCentavos } from "../../advanceCoverage";
 
 // The seminar budget flow (2026-10-19): a seminar's liquidation report settles the cash advance
 // Finance released. Its items may not come to more than the advance, and what is left is handed
-// back with an OR; it returns to the training budget when Finance validates the report. The
-// figures come from src/liquidationMoney.ts, the same sums in centavos the server checks.
+// back to the Finance Officer, who issues the OR and records it when validating the report (12ai:
+// HSAC RAB 1 has no cashier); it then returns to the training budget. The figures come from
+// src/liquidationMoney.ts, the same sums in centavos the server checks.
 //
 // The check starts from the budget HR set for the seat (the user's request of 2026-11-10, known-issues 12af): released
 // as the cash advance, claimed back by an employee who paid for the seminar themselves (src/reimbursement.ts), or still
@@ -30,8 +31,6 @@ interface BalanceCheckProps {
   limit?: number | null;
   /** The items' total so far. */
   itemsTotal: number;
-  /** Whether the OR number and date for a leftover are filled in on the sheet. */
-  orFilled: boolean;
 }
 
 const TONE = {
@@ -41,12 +40,12 @@ const TONE = {
 } as const;
 
 /** The live check under a seminar's report form: HR's budget for the seat, what is spent so far, what is left. */
-export default function BalanceCheck({ mode, share, advance, seatId, limit, itemsTotal, orFilled }: BalanceCheckProps) {
+export default function BalanceCheck({ mode, share, advance, seatId, limit, itemsTotal }: BalanceCheckProps) {
   if (mode === "waiting") return share === null ? null : <WaitingForRelease share={share} />;
   if (mode === "reimbursement") {
     return limit === null || limit === undefined ? null : <ClaimBalance share={share} limit={limit} itemsTotal={itemsTotal} />;
   }
-  return advance ? <AdvanceBalance advance={advance} share={share} seatId={seatId} itemsTotal={itemsTotal} orFilled={orFilled} /> : null;
+  return advance ? <AdvanceBalance advance={advance} share={share} seatId={seatId} itemsTotal={itemsTotal} /> : null;
 }
 
 /** The panel around a check: its heading and the one line read out as the figures change. */
@@ -87,12 +86,11 @@ function Figure({ label, value, name, over = false }: { label: string; value: nu
 }
 
 /** A Liquidation: the advance Finance released is the budget HR set, and the items stay within it. */
-function AdvanceBalance({ advance, share, seatId, itemsTotal, orFilled }: {
+function AdvanceBalance({ advance, share, seatId, itemsTotal }: {
   advance: CashAdvance;
   share: number | null;
   seatId?: string;
   itemsTotal: number;
-  orFilled: boolean;
 }) {
   const released = pesos(Math.max(0, centavos(advance.amount)));
   const b = liquidationBalance(released, itemsTotal);
@@ -149,10 +147,8 @@ function AdvanceBalance({ advance, share, seatId, itemsTotal, orFilled }: {
           : b.status === "Over"
             ? <>A seminar report can&rsquo;t go past its cash advance. Lower or remove an item to submit.</>
             : <>
-                What&rsquo;s left goes back to the training budget (Unallocated) when Finance validates your report, with
-                the refund OR: hand the {formatCurrency(b.leftover)} back to the cashier and enter the OR number and date on
-                the sheet (AMOUNT REFUNDED).
-                {!orFilled && <strong className="font-semibold"> The OR is still missing.</strong>}
+                Hand the {formatCurrency(b.leftover)} back to the Finance Officer, who issues the official receipt (OR) and
+                records it when validating your report; it then returns to the training budget (Unallocated).
               </>}
       </p>
     </CheckPanel>

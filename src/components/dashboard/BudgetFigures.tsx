@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { formatCurrency } from "../../utils";
-import { allocatedLine, type TrainingBudgetFigures } from "./budgetRows";
+import { allocatedLine, RETURNED_NOTE, unallocatedLine, type TrainingBudgetFigures } from "./budgetRows";
 
 /** Unallocated under this reads as running low (as Programs & Budget tints its card, 12af). */
 const LOW = 50_000;
@@ -41,12 +41,18 @@ export default function BudgetFigures({ figures, fiscalYear, loading, failed }: 
           tone={short ? "border-rose-200 bg-rose-50" : low ? "border-amber-200 bg-amber-50" : undefined}
           valueTone={short ? "text-rose-700" : low ? "text-amber-700" : undefined}
         >
-          {pending ?? (short
-            ? "Seminars take more than the budget holds"
-            : low ? `Under ${formatCurrency(LOW)} left for new seminars` : "Free for new seminars")}
+          {pending ?? (
+            <>
+              {/* How it is made up, so what came back is seen added to it (the user's report of 2026-11-13). */}
+              {unallocatedLine(f!) && <span data-budget-line="unallocated" className="block">{unallocatedLine(f!)}</span>}
+              {short
+                ? "Seminars take more than the budget holds"
+                : low ? `Under ${formatCurrency(LOW)} left for new seminars` : "Free for new seminars"}
+            </>
+          )}
         </Figure>
         <Figure name="returned" label="Returned to Unallocated" value={shown(f?.returned)} valueTone="text-emerald-700">
-          {pending ?? "Leftovers handed back on liquidated reports, the shares of those who didn’t attend, and what closed seminars didn’t spend."}
+          {pending ?? RETURNED_NOTE}
         </Figure>
       </div>
       {f && !loading && !failed && (

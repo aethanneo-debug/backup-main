@@ -3,7 +3,8 @@
 // the team's name plate. Some are always required, some follow from the report itself, and some from what
 // only the claimant can say about the trip. A Reimbursement needs its certificate and official receipts.
 // The form and the server run the same rules. A report filed before them keeps its own: `travelDeclarations`
-// marks one filed under these.
+// marks one filed under these. The OR for cash handed back is the Finance Officer's: HSAC RAB 1 has no cashier,
+// so Finance issues it and attaches it when validating the report, and validation waits for it (12ai).
 import type { DocumentKind, TravelDeclaration } from "./types";
 
 export interface DocumentSlot {
@@ -30,8 +31,23 @@ export const DOCUMENT_SLOTS: DocumentSlot[] = [
  * ticked (the security review, 2026-11-01). */
 const TRAVEL_EXPENSES = ["Transportation", "Accommodation"];
 
-/** The certificate comes from the attendee's own upload (R4), so it is never a file on the report's form. */
+/** The certificate comes from the attendee's own upload (R4), so it is never a file on the report's form. Every other
+ * slot is a file a report can hold. */
 export const UPLOAD_KINDS: DocumentKind[] = DOCUMENT_SLOTS.map(s => s.kind).filter(k => k !== "certificate");
+
+/** Attached by the Finance Officer when validating, never by the employee: the OR for cash handed back, which Finance
+ * issues (12ai). */
+export const FINANCE_KINDS: DocumentKind[] = ["refundOr"];
+
+/** What the employee's form attaches, and what a Return can ask the employee for. */
+export const EMPLOYEE_KINDS: DocumentKind[] = UPLOAD_KINDS.filter(k => !FINANCE_KINDS.includes(k));
+
+/** The documents a Return asks the employee to bring. A Return made before 12ai could ask for the OR for cash handed
+ * back, which the Finance Officer now attaches when validating: that one is left out, so the employee isn't held at a
+ * slot they can't fill (the code review of 12ai). Anything that isn't a list reads as nothing asked. */
+export function employeeAskedKinds(kinds: unknown): DocumentKind[] {
+  return Array.isArray(kinds) ? kinds.filter((k): k is DocumentKind => EMPLOYEE_KINDS.includes(k)) : [];
+}
 
 /** What a file with no kind counts as: a receipt, as the one box on the older form asked for. */
 const NO_KIND: DocumentKind = "receipts";
@@ -53,8 +69,6 @@ export interface ReportFacts {
   reimbursement: boolean;
   /** The expense types of the report's lines. */
   expenseTypes: Array<string | null | undefined>;
-  /** Whether money is handed back. */
-  handsBack: boolean;
   declarations: TravelDeclaration[];
 }
 
@@ -64,7 +78,8 @@ export interface RequiredDocument {
   why: string;
 }
 
-/** Every document this report needs, in the form's order. */
+/** Every document the claimant attaches to this report, in the form's order. (The OR for cash handed back isn't one:
+ * the Finance Officer attaches it when validating, `FINANCE_KINDS`.) */
 export function requiredDocuments(report: ReportFacts): RequiredDocument[] {
   const always = "Required on every report";
   const chosen = new Map<DocumentKind, string>([["certificate", always]]);
@@ -82,7 +97,6 @@ export function requiredDocuments(report: ReportFacts): RequiredDocument[] {
     }
     if (report.expenseTypes.includes("Transportation")) chosen.set("tickets", "You claimed Transportation");
     if (report.expenseTypes.includes("Accommodation")) chosen.set("hotelBills", "You claimed Accommodation");
-    if (report.handsBack) chosen.set("refundOr", "You are handing money back");
     for (const d of TRAVEL_DECLARATIONS) {
       if (d.brings && report.declarations.includes(d.value)) chosen.set(d.brings, `You ticked: ${d.label}`);
     }
@@ -96,7 +110,7 @@ export function missingDocuments(required: RequiredDocument[], attached: Array<D
 }
 
 /** The slots a correction opens: those the reviewer named, and those the report needs but its filed copies
- * don't fill (a new Accommodation line, money now handed back). A new file anywhere else stays off the report.
+ * don't fill (a new Accommodation line brings its bills). A new file anywhere else stays off the report.
  * Null on a report filed before these rules, not an empty list: it keeps its one box, and this doesn't apply. */
 export function correctionSlots(
   report: { travelDeclarations?: unknown },

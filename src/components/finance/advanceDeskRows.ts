@@ -24,6 +24,10 @@ export interface FundableRow {
   pendingRequestId?: string | null;
   /** Why no request can come yet (no Personnel login, no allowance, another advance out), or null. */
   requestBlocked?: string | null;
+  /** Why no request can come for this seat any more, or null (12ai): HR recorded "Attended", a certificate of attendance
+   * is on file, or the seminar's last day has come, so it is claimed back as a reimbursement. A request already waiting
+   * (`pendingRequestId`) can still be released, until HR records the attendance. */
+  requestClosed?: string | null;
   requestedAt?: string | null;
   /** The voucher the advance went out on. */
   advanceDvNo?: string | null;
@@ -59,15 +63,19 @@ export type AdvanceStage = (typeof ADVANCE_STAGES)[number]["id"];
 
 /**
  * Where a row stands, or null when it has no place on the desk: someone who did not attend or was replaced and has
- * nothing to bring back, and a report filed with no advance on record (a reimbursement), which can't take one now.
- * An advance handed back before the seminar counts as that, even if HR later marked them absent.
+ * nothing to bring back, a report filed with no advance on record (a reimbursement), which can't take one now, and a
+ * seat no request can come for any more with none waiting (claimed back as a reimbursement, 12ai). An advance handed
+ * back before the seminar counts as that, even if HR later marked them absent; one refunded after "Did not attend"
+ * stays refunded once no request can come, even if HR corrects them back to "Attended".
  */
 export function advanceStage(row: FundableRow): AdvanceStage | null {
   if (row.funded) return "released";
   if (row.advanceStatus === "Liquidated") return "settled";
   if (row.advanceStatus === "Refunded" && row.refundedBeforeSeminar) return "returnedEarly";
-  if (row.advanceStatus === "Refunded" && row.didNotAttend) return "refunded";
+  if (row.advanceStatus === "Refunded" && (row.didNotAttend || row.requestClosed)) return "refunded";
   if (row.didNotAttend || row.replaced || row.refundedBeforeSeminar || row.liquidationFiled) return null;
+  // A request already waiting can still be released, until HR records the attendance.
+  if (row.requestClosed && !row.pendingRequestId) return null;
   return "unfunded";
 }
 
@@ -75,6 +83,13 @@ export function advanceStage(row: FundableRow): AdvanceStage | null {
 export function filedWithoutAdvance(row: FundableRow): boolean {
   return !row.didNotAttend && !row.replaced && !row.refundedBeforeSeminar && !row.funded
     && row.advanceStatus !== "Liquidated" && row.liquidationFiled;
+}
+
+/** The assignments no advance can come for any more, with none out, settled or waiting, and no report yet: they are
+ * claimed back as reimbursements (12ai). The desk counts them apart, as it counts `filedWithoutAdvance`. */
+export function noAdvanceNow(row: FundableRow): boolean {
+  return !!row.requestClosed && !row.pendingRequestId && !row.funded && !row.didNotAttend && !row.replaced
+    && !row.refundedBeforeSeminar && !row.liquidationFiled && row.advanceStatus !== "Liquidated" && row.advanceStatus !== "Refunded";
 }
 
 /** Whether the row's advance is collected back in full: a non-attendee's own, or a group's that nobody it covers

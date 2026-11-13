@@ -1,5 +1,5 @@
 import { Activity, ArrowRight, BadgeCheck, Download, Info, Wallet, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActiveSignatory, LiquidationSubmission, User, UserRole } from "../../types";
 import { apiCall } from "../../utils";
 import CashAdvanceDesk from "./CashAdvanceDesk";
@@ -14,6 +14,7 @@ import { useTableView } from "../ui/useTableView";
 import LiquidationReportModal from "../liquidation/LiquidationReportModal";
 import { ClaimTypeFilterValue, matchesClaimType } from "../liquidation/ClaimType";
 import { NEWEST_FILED, REPORT_SORTS, reportRowId, reportSearchText, type Report } from "../liquidation/reportColumns";
+import type { ValidateReceipt } from "./OrNumberFields";
 
 /** The mandated sequence a liquidation dossier must travel, in order. */
 const PIPELINE_STEPS = ["Pending Submission", "Submitted", "Under Review", "Approved", "Completed"];
@@ -27,8 +28,9 @@ interface LiquidationDeskViewProps {
   activeFiscalYear: string;
   /** FinanceView's fiscal-year chooser, shown in the header beside the export. */
   yearControl?: ReactNode;
-  /** Validates a report; throws the server's reason. A Return goes through ReturnForCorrectionDialog instead. */
-  onValidate: (subId: string, remarks: string) => Promise<void>;
+  /** Validates a report; throws the server's reason. A Return goes through ReturnForCorrectionDialog instead.
+   * `receipt`: the OR for what the report hands back, recorded by the Finance Officer (12ai). */
+  onValidate: (subId: string, remarks: string, receipt?: ValidateReceipt) => Promise<void>;
   /** exportMethods.liquidations from FinanceView, given every row the index matches. */
   onExport: (rows?: any[]) => void;
   /** Re-runs the parent's fetches after money moves. */
@@ -79,7 +81,8 @@ export default function LiquidationDeskView({
     }
   }
   useEffect(() => {
-    if (user.role === UserRole.FINANCE_OFFICER) loadAccountant();
+    // (The Administrator validates a report handing back a Financial Officer's own cash, 12ai.)
+    if (user.role === UserRole.FINANCE_OFFICER || user.role === UserRole.SUPER_ADMIN) loadAccountant();
   }, [user.role]);
 
   // The index's search is the desk's, since the masthead's Report Excel exports what it matches. A new
@@ -159,6 +162,12 @@ export default function LiquidationDeskView({
   }, [closed]);
 
   const finance = user.role === UserRole.FINANCE_OFFICER;
+  // The Administrator's queue: only reports handing back a Financial Officer's own cash, whose OR the officer can't record
+  // themselves (the server's financeAction, 12ai). Shown only while there is one.
+  const adminQueue = useMemo(
+    () => (user.role === UserRole.SUPER_ADMIN ? submissions.filter(r => r.status === "Verified & Forwarded" && r.financeAction?.act) : []),
+    [submissions, user.role]
+  );
 
   return (
     <div className="relative flex-1 overflow-y-auto custom-scrollbar">
@@ -272,9 +281,9 @@ export default function LiquidationDeskView({
         )}
 
         {/* FINANCE LIQUIDATION VALIDATION QUEUE */}
-        {finance && (
+        {(finance || adminQueue.length > 0) && (
           <ValidationQueue
-            submissions={submissions}
+            submissions={finance ? submissions : adminQueue}
             currentEmployeeId={user.employeeId}
             accountant={accountant}
             signatoryError={signatoryError}

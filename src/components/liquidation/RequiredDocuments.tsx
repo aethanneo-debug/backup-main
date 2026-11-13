@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, ClipboardCheck, Upload } from "lucide-react";
 import type { DocumentKind, LiquidationDocument, TravelDeclaration } from "../../types";
 import { MAX_REPORT_FILES, FILE_INPUT_ACCEPT } from "../../fileRules";
-import { DOCUMENT_SLOTS, TRAVEL_DECLARATIONS, readDeclarations, type DocumentSlot, type RequiredDocument } from "../../reportDocuments";
+import { DOCUMENT_SLOTS, FINANCE_KINDS, TRAVEL_DECLARATIONS, readDeclarations, type DocumentSlot, type RequiredDocument } from "../../reportDocuments";
 
 interface RequiredDocumentsProps {
   required: RequiredDocument[];
@@ -130,7 +130,10 @@ export default function RequiredDocuments({
   // can bring.
   const shown = DOCUMENT_SLOTS.filter(s => why(s.kind) || asked.includes(s.kind) || filesOf(s.kind).length > 0
     || (s.kind === "receipts" && canAdd(s.kind)));
-  const more = DOCUMENT_SLOTS.filter(s => !shown.includes(s) && canAdd(s.kind));
+  // (Never the OR for cash handed back: the Finance Officer attaches it when validating, 12ai. One already on a report
+  // filed before that still shows in its slot.)
+  const employeeCanAdd = (kind: DocumentKind) => kind !== "certificate" && !FINANCE_KINDS.includes(kind) && canAdd(kind);
+  const more = DOCUMENT_SLOTS.filter(s => !shown.includes(s) && employeeCanAdd(s.kind));
   const declared = TRAVEL_DECLARATIONS.filter(d => declarations.includes(d.value));
 
   function toggle(value: TravelDeclaration, on: boolean) {
@@ -146,7 +149,7 @@ export default function RequiredDocuments({
       filled={filled(s.kind)}
       asked={asked.includes(s.kind)}
       note={askedNote}
-      canAdd={s.kind !== "certificate" && canAdd(s.kind)}
+      canAdd={employeeCanAdd(s.kind)}
       onAddFiles={onAddFiles}
     >
       {s.kind === "certificate" ? certificate : filesOf(s.kind).map(renderFile)}

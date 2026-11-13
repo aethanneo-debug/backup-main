@@ -3,7 +3,7 @@
 // correction request keeps, which the form's "Only these parts can be changed" panel shows. It is made exact:
 // which slot, which file, which line. The server words the Return's notice with the same module.
 import { CORRECTION_FIELDS, type CorrectionField, type CorrectionItem, type CorrectionRequest, type DocumentKind } from "./types";
-import { DOCUMENT_SLOTS, documentPlate } from "./reportDocuments";
+import { DOCUMENT_SLOTS, documentPlate, employeeAskedKinds } from "./reportDocuments";
 
 export type CorrectionTarget =
   /** A missing document: its slot, or an older report's one box (no kind). */
@@ -42,8 +42,12 @@ export function correctionTarget(request: Reopened, report: CorrectionReport): C
   for (const item of listOf<CorrectionItem>(request?.items)) {
     const field = item.field;
     if (field === "addDocument") {
-      const kind = DOCUMENT_SLOTS.find(s => listOf<DocumentKind>(item.documentKinds).includes(s.kind))?.kind;
-      return kind ? { field, documentKind: kind } : { field };
+      const asked = employeeAskedKinds(item.documentKinds);
+      const kind = DOCUMENT_SLOTS.find(s => asked.includes(s.kind))?.kind;
+      if (kind) return { field, documentKind: kind };
+      // Only the Finance Officer's OR was asked for (a Return made before 12ai): nothing there for the employee.
+      if (listOf<DocumentKind>(item.documentKinds).length > 0) continue;
+      return { field };
     }
     if (field === "replaceDocuments") {
       const [file] = filesToReplace(item, report);

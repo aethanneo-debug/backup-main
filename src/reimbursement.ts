@@ -20,11 +20,55 @@ export function seminarPeriod(startDate: unknown, endDate: unknown): { from: str
 
 /** How a seat's report settles, from its current cash advance (the latest record for it, if any):
  * released, a Liquidation of it; a request waiting for Finance, nothing yet (Finance releases or declines
- * it first, so the seat is never funded twice); none, declined or refunded, a Reimbursement. */
+ * it first, so the seat is never funded twice); none, declined or refunded, a Reimbursement. Since 2026-11-12
+ * HR's "Attended" closes a request still waiting (12ai), so "waiting" arises only before attendance is recorded. */
 export function seminarClaimMode(advanceStatus: string | null | undefined): SeminarClaimMode {
   if (advanceStatus === "Released" || advanceStatus === "Liquidated") return "liquidation";
   if (advanceStatus === "Requested") return "waiting";
   return "reimbursement";
+}
+
+/** Why asking for a seat's cash advance is closed. */
+export type AdvanceWindowClosed = "attended" | "certificate" | "lastDay";
+
+/** The reason stored on a cash advance request that HR's "Attended" closed before Finance released it (12ai). The
+ * request is "Declined" either way; this tells such a closure from Finance's own decline, on the server (the release's
+ * refusal) and on the screens. */
+export const CLOSED_BY_ATTENDANCE = "HR recorded the seminar's attendance before Finance released it, so the seminar is claimed back as a reimbursement.";
+
+/** Whether a declined cash advance request was closed by HR's "Attended" rather than declined by Finance. */
+export const closedByAttendance = (advance: { status?: unknown; declineReason?: unknown } | null | undefined): boolean =>
+  !!advance && advance.status === "Declined" && advance.declineReason === CLOSED_BY_ATTENDANCE;
+
+/** How long after HR's attendance closed a request its release can still be recorded, as cash handed out before it (the
+ * user's decision of 2026-11-13): Finance is told at the closure, and after this the request stays closed for good. */
+export const LATE_RELEASE_DAYS = 30;
+
+/** The last Manila day a closed request's release can be recorded (YYYY-MM-DD), or "" when the closing day isn't a date. */
+export function lateReleaseUntil(closedOn: unknown): string {
+  if (!isCalendarDate(closedOn)) return "";
+  return new Date(Date.parse(`${closedOn}T00:00:00Z`) + LATE_RELEASE_DAYS * 86400000).toISOString().slice(0, 10);
+}
+
+/** Whether a new cash advance request for a seat is closed, and why, or null while it is open (the user's rule of
+ * 2026-11-12, known-issues 12ai). A cash advance is asked for before the seminar: HR's "Attended" decides the seat's
+ * money path (a released advance is liquidated; otherwise the seminar is claimed back as a reimbursement), and asking
+ * closes before that, from the seminar's last day, the day a certificate of attendance can first be uploaded, or as soon
+ * as one is on file, so a later change of the seminar's dates can't reopen it. A seminar with no dates stays open.
+ * "Did not attend" keeps the caller's own reason. Finance may still release a request made before, until HR records
+ * the attendance. */
+export function advanceRequestWindow(seat: {
+  attendance?: string | null;
+  hasCertificate: boolean;
+  /** The seminar's last day (`seminarLastDay`), "" when it has no dates. */
+  lastDay: string;
+  /** Manila's day. */
+  today: string;
+}): AdvanceWindowClosed | null {
+  if (seat.attendance === "Attended") return "attended";
+  if (seat.hasCertificate) return "certificate";
+  if (isCalendarDate(seat.lastDay) && isCalendarDate(seat.today) && seat.today >= seat.lastDay) return "lastDay";
+  return null;
 }
 
 /** A claim Finance has validated and not yet paid: what the Reimbursement Queue offers to pay (the server refuses to

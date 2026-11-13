@@ -1,12 +1,65 @@
 import { CashAdvance } from "../../types";
 import { firstTimestamp, formatCurrency, formatDate } from "../../utils";
+import { LATE_RELEASE_DAYS } from "../../reimbursement";
 import type { SortValue } from "../../tableView";
-import type { TableColumn } from "../ui/DataTable";
+import { TableChips, type TableColumn } from "../ui/DataTable";
 
 // The table of Cash Advance Requests (AdvanceRequestsList.tsx), and what a request's window says about it.
 
 /** Everyone a group's request covers, the one who asked first. */
 export const groupOf = (r: CashAdvance) => r.covers ?? [];
+
+/** A request HR's attendance closed before its release (12ai), listed while its release can still be recorded. */
+export const isClosedRequest = (r: CashAdvance) => r.status !== "Requested" && !!r.lateRelease;
+
+/** The list's two kinds: the requests waiting, and those HR's attendance closed. */
+export function RequestChips({ chip, onChip, waiting, closed }: {
+  chip: "waiting" | "closed";
+  onChip: (chip: "waiting" | "closed") => void;
+  waiting: number;
+  closed: number;
+}) {
+  return (
+    <TableChips<"waiting" | "closed">
+      chips={[{ id: "waiting", label: "Waiting", count: waiting }, { id: "closed", label: "Closed by HR's attendance", count: closed }]}
+      value={chip}
+      onChange={onChip}
+      label="Which requests"
+    />
+  );
+}
+
+/** Above the closed requests: why they are there, and when to record one's release. */
+export function ClosedRequestsIntro() {
+  return (
+    <p className="mx-3 mb-2 max-w-3xl text-[11px] text-slate-600">
+      HR recorded the attendance before these requests were released, so each seminar is claimed back as a
+      reimbursement. If the cash for one was handed out before then, record its release with that voucher: the seminar is
+      then liquidated with it. Otherwise nothing is needed: it stays closed, and leaves this list once a report, another
+      cash advance or an expense the office paid settles a seat it covered, or once {LATE_RELEASE_DAYS} days have passed
+      since it was closed.
+    </p>
+  );
+}
+
+/** What a closed request's window says: when it was closed, and the one case its release is recorded in. */
+export function ClosedRequestNote({ request }: { request: CashAdvance }) {
+  const closedOn = request.lateRelease?.closedOn ? formatDate(request.lateRelease.closedOn) : "the day HR recorded the attendance";
+  const problem = request.lateRelease?.problem;
+  const until = request.lateRelease?.until ? formatDate(request.lateRelease.until) : "";
+  return (
+    <>
+      <p className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-[11px] text-slate-700">
+        <strong>Closed on {closedOn}{request.decidedBy ? ` by ${request.decidedBy}` : ""}:</strong> HR recorded the attendance
+        before it was released, so the seminar is claimed back as a reimbursement. Record its release only if the cash was
+        handed out by then: the voucher must be dated on or before {closedOn}, it is recorded at the amount requested, and the
+        seminar is then liquidated with it, still due 30 days after the seminar.{until ? ` This can be recorded until ${until}; after that it stays closed.` : ""}
+      </p>
+      {/* What would still refuse it now (the server's own check), so no voucher is prepared for nothing. */}
+      {problem && <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">Its release can&rsquo;t be recorded now: {problem}</p>}
+    </>
+  );
+}
 
 export const REQUEST_SORTS: Record<string, (r: CashAdvance) => SortValue> = {
   asked: r => firstTimestamp(r.requestedAt) || null,

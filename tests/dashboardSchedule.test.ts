@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   ARCHIVED_TONE, dateRange, dayDiff, longDate, scheduleDetails, seatsText, seminarStanding, seminarTone, timeRange, whenText
 } from "../src/components/dashboard/schedule";
-import { allocatedLine, budgetFigures, percentOfTotal } from "../src/components/dashboard/budgetRows";
+import { allocatedLine, budgetFigures, percentOfTotal, returnedSplit, unallocatedLine } from "../src/components/dashboard/budgetRows";
 import { compactPeso } from "../src/components/dashboard/chartFormat";
 import type { CalendarSeminar } from "../src/trainingCalendar";
 import { scheduleSeminars } from "../src/trainingSchedule";
@@ -115,4 +115,26 @@ test("an axis amount never reads as a thousand of the smaller unit", () => {
     [0, 500, 999.995, 5000, 12_500, 999_949, 999_950, 1_200_000, -2500].map(compactPeso),
     ["₱0", "₱500", "₱1K", "₱5K", "₱12.5K", "₱999.9K", "₱1M", "₱1.2M", "-₱2.5K"]
   );
+});
+
+test("the line under Unallocated shows what came back added to it, adding up to the figure (2026-11-13)", () => {
+  // The user's report: ₱65,000 total, ₱26,300 allocated, ₱1,000 back: Unallocated ₱39,700 already holds it.
+  assert.equal(unallocatedLine({ unallocated: 39700, returned: 1000, over: 0 }), "₱38,700.00 left after HR's allocations + ₱1,000.00 returned");
+  // Taken beyond allocations too: left + returned − over = Unallocated.
+  assert.equal(unallocatedLine({ unallocated: 9000, returned: 500, over: 1500 }), "₱10,000.00 left after HR's allocations + ₱500.00 returned − ₱1,500.00 taken beyond allocations");
+  assert.equal(unallocatedLine({ unallocated: 9000, returned: 0, over: 250 }), "₱9,250.00 left after HR's allocations − ₱250.00 taken beyond allocations");
+  // Nothing back, nothing over: no line.
+  assert.equal(unallocatedLine({ unallocated: 38700, returned: 0, over: 0 }), "");
+  // Centavos: 0.1 + 0.2 style sums stay exact.
+  assert.equal(unallocatedLine({ unallocated: 0.3, returned: 0.1, over: 0 }), "₱0.20 left after HR's allocations + ₱0.10 returned");
+});
+
+test("Finance's note on what came back: how much was handed back with an OR, and the rest (2026-11-13)", () => {
+  assert.equal(returnedSplit(700, 1000), "₱700.00 of it handed back with an OR at validation; the rest from shares not claimed on reimbursements, not attended, or not spent");
+  assert.equal(returnedSplit(700, 700), "Handed back with an OR at validation");
+  assert.equal(returnedSplit(0, 300), "From shares not claimed on reimbursements, not attended, or not spent");
+  assert.equal(returnedSplit(0, 0), "Nothing came back yet");
+  // More handed back than came back: the budget's figure is net of the seminars' other costs, so no split (the code review).
+  assert.equal(returnedSplit(700, 100), "Leftovers handed back and shares not claimed on reimbursements, not attended, or not spent, less the seminars' other costs");
+  assert.equal(returnedSplit(0.1 + 0.2, 0.5), "₱0.30 of it handed back with an OR at validation; the rest from shares not claimed on reimbursements, not attended, or not spent");
 });

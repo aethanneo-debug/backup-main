@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, BookOpen, PiggyBank, Target, type LucideIcon } from "lucide-react";
 import { formatCurrency } from "../../utils";
-import { allocatedLine } from "../dashboard/budgetRows";
+import { allocatedLine, RETURNED_NOTE, unallocatedLine } from "../dashboard/budgetRows";
 
 /**
  * Programs & Budget's figures for the year's training budget: what the seminars hold, what is free, and what they gave
@@ -48,7 +48,12 @@ export default function BudgetSummaryCards({ total, allocated, committed, unallo
           labelTone={short ? "text-red-700" : "text-slate-500"}
           value={formatCurrency(unallocated)}
           valueTone={short ? "text-red-700" : "text-slate-800"}
-        />
+        >
+          {/* How it is made up, so what came back is seen added to it (the user's report of 2026-11-13). */}
+          {unallocatedLine({ unallocated, returned, over }) && (
+            <p data-budget-card="unallocated-line" className="mt-1 text-[11px] leading-snug text-slate-500">{unallocatedLine({ unallocated, returned, over })}</p>
+          )}
+        </Card>
         {/* What came back: emerald, as each seminar's own "Returned to Unallocated" note in the table. Last, so the card
             that is Unallocated itself still comes first. */}
         <Card
@@ -60,10 +65,7 @@ export default function BudgetSummaryCards({ total, allocated, committed, unallo
           value={formatCurrency(returned)}
           valueTone="text-emerald-700"
         >
-          <p className="mt-1 text-[11px] leading-snug text-slate-500">
-            Leftovers handed back on liquidated reports, the shares of those who didn&rsquo;t attend, and what closed
-            seminars didn&rsquo;t spend.
-          </p>
+          <p className="mt-1 text-[11px] leading-snug text-slate-500">{RETURNED_NOTE}</p>
           {over > 0 && (
             <p data-budget-card="over" className="mt-1 text-[11px] font-semibold leading-snug text-amber-700">
               {formatCurrency(over)} spent or held beyond seminars&rsquo; allocations (taken from Unallocated)

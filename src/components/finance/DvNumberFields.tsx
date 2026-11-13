@@ -1,4 +1,5 @@
-import { getLocalTodayString } from "../../utils";
+import { useEffect, useRef, useState } from "react";
+import { apiCall, getLocalTodayString } from "../../utils";
 import { dvNumberFrom, dvPrefix, dvPrefixIn, dvSerialInput, readDvNumber } from "../../dvNumber";
 
 // A disbursement voucher's date and number, YYYY-MM-NNNN (src/dvNumber.ts, 12q): the date first, since
@@ -28,16 +29,52 @@ interface Props {
   disabled: boolean;
   /** The earliest voucher date the server takes, if any (e.g. the day the report was validated). */
   minDate?: string;
+  /** The latest, when earlier than today (e.g. the day HR's attendance closed a request, 12ai). */
+  maxDate?: string;
+  /** Changed by the form after the server refused the voucher (another officer took the number meanwhile): the
+   * suggestion is asked for again, and replaces the one still in the box. */
+  refresh?: number;
 }
 
-export default function DvNumberFields({ prefix, recordId, dvDate, onDvDate, serial, onSerial, onWarning, disabled, minDate }: Props) {
+export default function DvNumberFields({ prefix, recordId, dvDate, onDvDate, serial, onSerial, onWarning, disabled, minDate, maxDate, refresh = 0 }: Props) {
   const dateId = `${prefix}-dvd-${recordId}`, numberId = `${prefix}-dv-${recordId}`, hintId = `${prefix}-dv-hint-${recordId}`;
   const number = validDv(dvDate, serial);
+
+  // The next serial not yet recorded in this system for the voucher date's month, filled in for Finance (the user's
+  // report of 2026-11-13): the server counts every voucher already used on an advance or a reimbursement. The office's
+  // other vouchers aren't recorded here, so it is only a suggestion, said so in amber: Finance checks it against the paper
+  // voucher. Only a box Finance hasn't typed in is filled (empty, or still holding the earlier suggestion).
+  const month = dvPrefix(dvDate);
+  // Kept with its month, so the line never names a month it wasn't worked out for (the code review).
+  const [suggested, setSuggested] = useState<{ month: string; serial: string } | null>(null);
+  const current = useRef(serial);
+  current.current = serial;
+  const setSerial = useRef(onSerial);
+  setSerial.current = onSerial;
+  const filled = useRef("");
+  useEffect(() => {
+    setSuggested(null);
+    if (!month) return;
+    let live = true;
+    apiCall(`/api/disbursement-vouchers/next?month=${encodeURIComponent(month)}`)
+      .then(res => {
+        if (!live || res?.status !== "success") return;
+        const next = String(res.data?.serial || "");
+        setSuggested(next ? { month, serial: next } : null);
+        if (next && (current.current === "" || current.current === filled.current)) {
+          filled.current = next;
+          setSerial.current(next);
+        }
+      })
+      // No suggestion is no harm: the box stays as it is.
+      .catch(() => {});
+    return () => { live = false; };
+  }, [month, refresh]);
   return (
     <div className="grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="space-y-1">
         <label htmlFor={dateId} className="font-mono text-[10px] font-bold uppercase text-slate-400">Voucher Date</label>
-        <input id={dateId} type="date" value={dvDate} min={minDate || undefined} max={getLocalTodayString()} disabled={disabled}
+        <input id={dateId} type="date" value={dvDate} min={minDate || undefined} max={maxDate && maxDate < getLocalTodayString() ? maxDate : getLocalTodayString()} disabled={disabled}
           onChange={e => onDvDate(e.target.value)} className={INPUT} />
       </div>
       <div className="space-y-1">
@@ -66,6 +103,11 @@ export default function DvNumberFields({ prefix, recordId, dvDate, onDvDate, ser
             : /^0+$/.test(serial)
               ? "The voucher's serial can't be 0000."
               : `Serial on the voucher, up to 4 digits: the number reads ${dvPrefix(dvDate) || "YYYY-MM"}-NNNN.`}
+          {suggested && suggested.month === month && serial === suggested.serial && (
+            <span data-dv-suggested className="mt-0.5 block font-sans text-[10px] font-semibold text-amber-700">
+              Filled in: the next number for {month} not yet recorded in this system. Check it against the paper voucher.
+            </span>
+          )}
         </p>
       </div>
     </div>

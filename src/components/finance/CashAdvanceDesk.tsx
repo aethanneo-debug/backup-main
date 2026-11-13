@@ -7,7 +7,8 @@ import SectionCard, { SectionCount } from "../ui/SectionCard";
 import { DataTable, TableChips, TablePager, TableSearch, type TableColumn } from "../ui/DataTable";
 import { useTableView } from "../ui/useTableView";
 import AdvanceRefundForm from "./AdvanceRefundForm";
-import { ADVANCE_STAGES, advanceRowDate, advanceStage, filedWithoutAdvance, refundDue, type AdvanceStage, type FundableRow } from "./advanceDeskRows";
+import { ADVANCE_STAGES, advanceRowDate, advanceStage, filedWithoutAdvance, noAdvanceNow, refundDue, type AdvanceStage, type FundableRow } from "./advanceDeskRows";
+import { olderDv } from "../../dvNumber";
 
 interface Props {
   /** Bumped by the parent so a liquidation elsewhere refreshes the funding state here. */
@@ -55,6 +56,10 @@ function AdvanceRef({ row }: { row: FundableRow }) {
         <span className="mt-0.5 inline-block rounded border border-blue-200 bg-blue-50 px-1.5 py-px text-[10px] font-semibold text-blue-700">
           DV No. {row.advanceDvNo}{row.advanceDvDate ? ` · dated ${formatDate(row.advanceDvDate)}` : ""}
         </span>
+      )}
+      {/* Typed as free text before the voucher format (2026-10-29), and kept as typed. */}
+      {olderDv(row.advanceDvNo) && (
+        <span data-dv-older className="mt-0.5 block font-sans text-[10px] text-slate-500">Entered before the voucher number format</span>
       )}
     </span>
   );
@@ -209,6 +214,8 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
   const countOf = (stage: AdvanceStage) => listed.filter(row => advanceStage(row) === stage).length;
   const unfunded = countOf("unfunded");
   const reimbursed = useMemo(() => rows.filter(filedWithoutAdvance), [rows]);
+  // Past asking, with nothing released or waiting: claimed back as reimbursements (12ai), so counted apart too.
+  const claimedBack = useMemo(() => rows.filter(noAdvanceNow), [rows]);
   const outstanding = useMemo(() => sumPesos(rows.filter(r => r.funded).map(r => r.advanceAmount)), [rows]);
 
   const table = useTableView<FundableRow>({
@@ -283,6 +290,15 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
             an advance on record (reimbursements), so {reimbursed.length === 1 ? "it needs" : "they need"} nothing
             here: no advance can be released once a report is filed. If an employee did receive one, return the report so
             they can correct it to a Liquidation.
+          </p>
+        )}
+        {rows.length > 0 && claimedBack.length > 0 && (
+          <p data-desk-note="claimed-back" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            {claimedBack.length} assignment{claimedBack.length === 1 ? " is" : "s are"} past asking for a cash advance (the seminar&rsquo;s
+            last day has come, a certificate of attendance is on file, or HR recorded the attendance) with none released:
+            nothing to fund here. Once HR records an attendee&rsquo;s attendance, their seminar is claimed back as a reimbursement.
+            A request HR&rsquo;s attendance closed, whose cash was handed out before then, is recorded under Cash Advance Requests,
+            &ldquo;Closed by HR&rsquo;s attendance&rdquo;.
           </p>
         )}
         {rows.length > 0 && unfunded === 0 && (

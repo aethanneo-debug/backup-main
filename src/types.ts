@@ -714,11 +714,13 @@ export interface CashAdvance {
   // "Refunded": the employee did not attend and gave the whole advance back (requirement 6).
   // "Requested": an employee asked for it from their seminar and Finance hasn't acted yet; no
   // money is out, so dvNo, dvDate, issuedBy and issuedAt stay blank until it is released.
-  // "Declined": Finance turned the request down (declineReason). The employee may ask again.
+  // "Declined": Finance turned the request down (declineReason), or HR's attendance closed it while it waited
+  // ("Did not attend"; and since 2026-11-12 "Attended", which makes the seminar a reimbursement, 12ai). The employee
+  // may ask again while asking is still open (before the seminar's last day, src/reimbursement.ts).
   status: "Requested" | "Released" | "Declined" | "Liquidated" | "Cancelled" | "Refunded";
   requestedAt?: string;           // ISO timestamp of the employee's request
   requestedBy?: string;           // the employee's name, as signed in
-  decidedBy?: string;             // the Financial Officer who released or declined the request
+  decidedBy?: string;             // who released or declined the request (the Financial Officer, or HR when attendance closed it)
   decidedAt?: string;             // ISO timestamp
   declineReason?: string;
   liquidationId?: string;         // the report that settled it
@@ -739,6 +741,14 @@ export interface CashAdvance {
   vehicleRequestId?: string;
   // DERIVED, never stored: that request's number and status, added by GET /api/cash-advances.
   vehicle?: LinkedVehicleSummary;
+  // Released after HR's "Attended" had closed the request (12ai, the user's decision of 2026-11-13): its cash went out
+  // on a voucher dated on or before HR's record and was recorded only afterwards. When the request was closed, and by whom.
+  releasedAfterClosure?: { closedAt: string; closedBy: string };
+  // DERIVED, never stored: for a request HR's attendance closed while nothing has settled its seats another way, sent to
+  // Finance and the Administrator by GET /api/cash-advances: the Manila day it was closed (the latest voucher date its
+  // release can carry), the last day its release can be recorded (30 days after, LATE_RELEASE_DAYS), and what would still
+  // refuse its release now (e.g. COA's one advance), or null when nothing would.
+  lateRelease?: { closedOn: string; until: string; problem: string | null };
 }
 
 // The instructor's note 11: a reviewer returns a liquidation report with a checklist of what
@@ -836,6 +846,8 @@ export interface LiquidationDocument {
   replacedBy?: string;      // the id of the file that replaced it
   kind?: DocumentKind;      // which named document it is; none on a file from before R5
   participantId?: string;   // a certificate: whose it is (a group's report has one per attendee)
+  uploadedBy?: string;      // set when someone other than the claimant attached it: the Finance Officer, for the
+                            // OR for cash handed back, attached when validating (12ai)
 }
 
 // An attendee's certificate of attendance (R4): HR's basis for "Attended", and the proof on the report.
@@ -972,7 +984,7 @@ export interface LiquidationSubmission {
   // Finance pays it from the Reimbursement Queue. Reports filed before keep their rules.
   withinAllowance?: boolean;
   // The leftover of the advance, recorded once when Finance validates: what went back to the
-  // training budget, with the employee's refund OR.
+  // training budget, with its OR (since 12ai the Finance Officer's; an older report's, the employee's).
   fundReturn?: {
     amount: number;
     orNo: string;
@@ -1027,6 +1039,10 @@ export interface LiquidationSubmission {
 export type LiquidationSubmissionView = LiquidationSubmission & {
   fiscalYear?: string;
   covers?: Array<Pick<CashAdvanceCover, "participantId" | "employeeId" | "employeeName">>;
+  /** For Finance and the Administrator: what the one asking may do at Finance's stage (12ai, the user's decision of
+   * 2026-11-13). `act`: validate or return it; `validate`: validate it; `reason`: why not. Nobody records the OR for
+   * cash they hand back themselves, and the Administrator acts here only on a Financial Officer's handed-back cash. */
+  financeAction?: { act: boolean; validate: boolean; reason?: string; own?: boolean; fallback?: boolean };
 };
 
 /** One file in the Documents Vault (GET /api/liquidation-documents): a file attached to a

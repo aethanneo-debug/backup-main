@@ -27,6 +27,11 @@ test("a notice lands on the first part on the reviewer's checklist", () => {
 test("a missing document lands on its slot, the first in the form's order", () => {
   assert.deepEqual(correctionTarget(returned({ field: "addDocument", documentKinds: ["rer", "tickets"] }), report), { field: "addDocument", documentKind: "tickets" });
   assert.deepEqual(correctionTarget(returned({ field: "addDocument" }), report), { field: "addDocument" }, "an older report's one box");
+  // A Return made before 12ai could ask for the OR's scan, which the Finance Officer now attaches: never its slot.
+  assert.deepEqual(correctionTarget(returned({ field: "addDocument", documentKinds: ["refundOr", "rer"] }), report), { field: "addDocument", documentKind: "rer" });
+  assert.deepEqual(correctionTarget(returned({ field: "addDocument", documentKinds: ["refundOr"] }, { field: "remarks" }), report), { field: "remarks" },
+    "only the OR asked: the next part reopened");
+  assert.equal(correctionTarget(returned({ field: "addDocument", documentKinds: ["refundOr"] }), report), null, "and nothing else: no landing");
 });
 
 test("a file to replace lands on the first one still current, in the form's order", () => {
