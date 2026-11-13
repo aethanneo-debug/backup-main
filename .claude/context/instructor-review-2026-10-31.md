@@ -95,7 +95,7 @@ Team's decision: seminar photos are not required. The named slots follow the doc
 
 Which are required (Phase 3's plan, approved 2026-11-01):
 - Always: the certificate, Itinerary of Travel and Certificate of Travel Completed.
-- When the report shows it: Tickets with a Transportation line, the hotel bills with an Accommodation line, "OR, Excess Cash Advance" when money is handed back.
+- When the report shows it: Tickets with a Transportation line, the hotel bills with an Accommodation line, "OR, Excess Cash Advance" when money is handed back. Since 2026-11-13 that one is the Finance Officer's: HSAC RAB 1 has no cashier, so Finance receives the money, issues the OR and attaches its scan, with its number and date, when validating the report, and validation waits for all three. It stays required (R5); the employee only hands the money back (the user's decision; known-issues 12ai).
 - When the employee ticks it: the revised Office Order (the schedule changed), the revised itinerary (the approved one wasn't followed), the Head of Agency's certification (over the daily rate), the RER (an expense with no official receipt).
 - A tick "No travel: held at my own office" takes the two travel documents off, since an in-house seminar has no itinerary. It can't be ticked with a vehicle request, a Transportation line or an Accommodation line, and a Transportation or Accommodation line added on a correction brings the two documents back. (Accommodation counting as travel is the developer's reading after the security review, 2026-11-02; the team can reverse it.)
 - A Reimbursement needs only the certificate and Official Receipts. "Official Receipts" isn't on the team's list; it is an optional slot on every other report, so meal and registration receipts have somewhere to go.
@@ -116,7 +116,7 @@ Build:
 | Certification by the Head of Agency as to the absolute necessity of the expenses together with the corresponding bills or receipts, if the expenses incurred for official travel exceeded the prescribed rate per day (certification or affidavit of loss shall not be considered as an appropriate replacement for the required hotel/lodging bills and receipts) | Certification by the Head of Agency |
 | Liquidation Report | Not a slot |
 | Reimbursement Expense Receipt (RER) | RER |
-| OR in case of refund of excess cash advance | OR, Excess Cash Advance |
+| OR in case of refund of excess cash advance | OR, Excess Cash Advance (attached by the Finance Officer at validation, since 12ai) |
 | Certificate of Travel Completed | Certificate of Travel Completed |
 | Hotel room/lodging bills with official receipts in the case of official travel to places within 50-kilometer radius from the last city or municipality covered by the Metro Manila Area, or the city or municipality where their permanent official station is located in the case of those outside the Metro Manila Area, if the travel allowances being claimed include the hotel room/lodging rate | Hotel Room/Lodging Bills with Official Receipts, Within 50-Kilometer |
 
