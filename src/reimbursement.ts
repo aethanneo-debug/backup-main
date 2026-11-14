@@ -20,8 +20,9 @@ export function seminarPeriod(startDate: unknown, endDate: unknown): { from: str
 
 /** How a seat's report settles, from its current cash advance (the latest record for it, if any):
  * released, a Liquidation of it; a request waiting for Finance, nothing yet (Finance releases or declines
- * it first, so the seat is never funded twice); none, declined or refunded, a Reimbursement. Since 2026-11-12
- * HR's "Attended" closes a request still waiting (12ai), so "waiting" arises only before attendance is recorded. */
+ * it first, so the seat is never funded twice); none, declined, expired or refunded, a Reimbursement. Since
+ * 2026-11-14 a request still waiting expires on the seminar's first day (requestDueToExpire), and HR records the
+ * attendance only once the seminar has ended, so "waiting" arises only before the seminar. */
 export function seminarClaimMode(advanceStatus: string | null | undefined): SeminarClaimMode {
   if (advanceStatus === "Released" || advanceStatus === "Liquidated") return "liquidation";
   if (advanceStatus === "Requested") return "waiting";
@@ -29,45 +30,50 @@ export function seminarClaimMode(advanceStatus: string | null | undefined): Semi
 }
 
 /** Why asking for a seat's cash advance is closed. */
-export type AdvanceWindowClosed = "attended" | "certificate" | "lastDay";
+export type AdvanceWindowClosed = "attended" | "certificate" | "firstDay";
 
-/** The reason stored on a cash advance request that HR's "Attended" closed before Finance released it (12ai). The
- * request is "Declined" either way; this tells such a closure from Finance's own decline, on the server (the release's
- * refusal) and on the screens. */
+/** The reason stored on a cash advance request that HR's "Attended" closed before Finance released it (12ai, from
+ * 2026-11-12 to 2026-11-14). The request is "Declined" either way; this tells such a closure from Finance's own decline,
+ * on the server (the release's refusal) and on the screens. Since 2026-11-14 recording attendance never touches a cash
+ * advance request (the user's rule), so only requests closed in those days carry it. */
 export const CLOSED_BY_ATTENDANCE = "HR recorded the seminar's attendance before Finance released it, so the seminar is claimed back as a reimbursement.";
 
 /** Whether a declined cash advance request was closed by HR's "Attended" rather than declined by Finance. */
 export const closedByAttendance = (advance: { status?: unknown; declineReason?: unknown } | null | undefined): boolean =>
   !!advance && advance.status === "Declined" && advance.declineReason === CLOSED_BY_ATTENDANCE;
 
-/** How long after HR's attendance closed a request its release can still be recorded, as cash handed out before it (the
- * user's decision of 2026-11-13): Finance is told at the closure, and after this the request stays closed for good. */
-export const LATE_RELEASE_DAYS = 30;
+/** The reason stored on a cash advance request that expired (the user's rule of 2026-11-14): Finance hadn't released
+ * or declined it by the seminar's first day. The request is "Declined", with `expiredAt` set (requestExpired), so the
+ * seat is a reimbursement, as after any decline, and the record keeps why. */
+export const EXPIRED_UNPROCESSED = "Finance didn't release or decline this request before the seminar's first day, so it expired: the seminar is claimed back as a reimbursement.";
 
-/** The last Manila day a closed request's release can be recorded (YYYY-MM-DD), or "" when the closing day isn't a date. */
-export function lateReleaseUntil(closedOn: unknown): string {
-  if (!isCalendarDate(closedOn)) return "";
-  return new Date(Date.parse(`${closedOn}T00:00:00Z`) + LATE_RELEASE_DAYS * 86400000).toISOString().slice(0, 10);
+/** Whether a cash advance request expired, rather than being declined by Finance or closed by HR's attendance. */
+export const requestExpired = (advance: { status?: unknown; declineReason?: unknown; expiredAt?: unknown } | null | undefined): boolean =>
+  !!advance && advance.status === "Declined" && typeof advance.expiredAt === "string" && advance.expiredAt !== "";
+
+/** Whether a request still waiting for Finance is due to expire now: Manila's day is the seminar's first day or later
+ * (the user's rule of 2026-11-14). For a group's request, the whole of it. A seminar with no dates never expires one. */
+export function requestDueToExpire(request: { status?: unknown } | null | undefined, firstDay: string, today: string): boolean {
+  return !!request && request.status === "Requested" && isCalendarDate(firstDay) && isCalendarDate(today) && today >= firstDay;
 }
 
-/** Whether a new cash advance request for a seat is closed, and why, or null while it is open (the user's rule of
- * 2026-11-12, known-issues 12ai). A cash advance is asked for before the seminar: HR's "Attended" decides the seat's
- * money path (a released advance is liquidated; otherwise the seminar is claimed back as a reimbursement), and asking
- * closes before that, from the seminar's last day, the day a certificate of attendance can first be uploaded, or as soon
- * as one is on file, so a later change of the seminar's dates can't reopen it. A seminar with no dates stays open.
- * "Did not attend" keeps the caller's own reason. Finance may still release a request made before, until HR records
- * the attendance. */
+/** Whether a new cash advance request for a seat is closed, and why, or null while it is open. A cash advance is asked
+ * for before the seminar (the user's rule of 2026-11-14, which moved 12ai's last day to the first): asking closes on the
+ * seminar's first day, since nobody asks for one in the middle of a seminar, or as soon as a certificate of attendance
+ * is on file or HR records "Attended", so a later change of the seminar's dates can't reopen it. A request still waiting
+ * then expires on the first day (requestDueToExpire). A seminar with no dates stays open. "Did not attend" keeps the
+ * caller's own reason. */
 export function advanceRequestWindow(seat: {
   attendance?: string | null;
   hasCertificate: boolean;
-  /** The seminar's last day (`seminarLastDay`), "" when it has no dates. */
-  lastDay: string;
+  /** The seminar's first day (`seminarFirstDay`), "" when it has no dates. */
+  firstDay: string;
   /** Manila's day. */
   today: string;
 }): AdvanceWindowClosed | null {
   if (seat.attendance === "Attended") return "attended";
   if (seat.hasCertificate) return "certificate";
-  if (isCalendarDate(seat.lastDay) && isCalendarDate(seat.today) && seat.today >= seat.lastDay) return "lastDay";
+  if (isCalendarDate(seat.firstDay) && isCalendarDate(seat.today) && seat.today >= seat.firstDay) return "firstDay";
   return null;
 }
 

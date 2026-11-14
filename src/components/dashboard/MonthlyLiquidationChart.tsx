@@ -47,9 +47,9 @@ export default function MonthlyLiquidationChart({ months, loading, failed, onRet
         <div>
           <h4 className="flex items-center text-xs font-bold uppercase tracking-tight text-slate-800">
             <TrendingUp size={15} className="mr-1.5 text-blue-600" aria-hidden="true" />
-            Liquidated per month
+            Total Liquidated &amp; Reimbursed Expenses per month
           </h4>
-          <p className="mt-0.5 text-[10px] text-slate-500">What validated reports spent, by the month Finance validated them.</p>
+          <p className="mt-0.5 text-[10px] text-slate-500">What validated liquidation reports and reimbursement claims spent, by the month Finance validated them.</p>
         </div>
         <span className="shrink-0 text-[10px] font-mono text-slate-500">{range}</span>
       </div>
@@ -86,7 +86,7 @@ export default function MonthlyLiquidationChart({ months, loading, failed, onRet
                   style={{ bottom: `${(t / top) * 100}%` }}
                 />
               ))}
-              <div className="absolute inset-0 flex" role="list" aria-label="Liquidated per month">
+              <div className="absolute inset-0 flex" role="list" aria-label="Total liquidated and reimbursed expenses per month">
                 {months.map((m, i) => {
                   const height = (m.amount / top) * 100;
                   const name = `${m.fullLabel}${m.current ? " (so far)" : ""}: ${formatCurrency(m.amount)} from ${m.count} report${m.count === 1 ? "" : "s"}`;

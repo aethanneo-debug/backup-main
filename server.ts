@@ -137,10 +137,10 @@ import {
 import { swapAdvanceStep } from "./src/representative";
 import { catalogOrder, isMandate, mandateFor, mandateIndex, readMandateBasis, readMandateTitle } from "./src/trainingMandates";
 import { dvKey, nextDvSerial, readDvNumber } from "./src/dvNumber";
-import { advanceRequestWindow, CLOSED_BY_ATTENDANCE, closedByAttendance, LATE_RELEASE_DAYS, lateReleaseUntil, reimbursementLimit, reimbursementProblem, seminarClaimMode, seminarPeriod, type AdvanceWindowClosed } from "./src/reimbursement";
+import { advanceRequestWindow, CLOSED_BY_ATTENDANCE, closedByAttendance, EXPIRED_UNPROCESSED, reimbursementLimit, reimbursementProblem, requestDueToExpire, requestExpired, seminarClaimMode, seminarPeriod, type AdvanceWindowClosed } from "./src/reimbursement";
 import { orKey, readRefundOr } from "./src/officialReceipt";
 import { expenseLineLabel, expenseLinesProblem, isBlankExpenseLine, isProgramOnlyExpense, MAX_REPORT_LINES, vehicleOverlapsSeminar } from "./src/expenseLines";
-import { certificateDocumentName, certificateUploadProblem, MAX_CERTIFICATE_UPLOADS, seminarLastDay } from "./src/attendanceCertificate";
+import { certificateDocumentName, certificateUploadProblem, MAX_CERTIFICATE_UPLOADS, clockText, manilaMoment, seminarFirstDay, seminarHasEnded, seminarLastDay } from "./src/attendanceCertificate";
 import {
   correctionSlots, documentPlate, EMPLOYEE_KINDS, employeeAskedKinds, filedUnderDocuments, FINANCE_KINDS, missingDocuments, missingDocumentsText, noTravelProblem,
   readDeclarations, readDocumentKind, requiredDocuments
@@ -2150,7 +2150,7 @@ function seatReimbursementLimit(participantId: string): number {
 }
 
 // Whether a seminar enrolment's liquidation form is open to its employee, and why not.
-// Only attendees get the form (HR records attendance once the seminar has started), and
+// Only attendees get the form (HR records attendance once the seminar has ended, 12ak), and
 // each enrolment takes one report. POST /api/liquidation-submissions enforces the same.
 function seminarFormEligibility(p: any): { canLiquidate: boolean; reason?: string; reportNo?: string } {
   const report = reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], p.id);
@@ -2843,7 +2843,7 @@ function withAdvanceLinks(r: any, user: any) {
   return {
     ...r,
     linkedSeminar: p ? { title: String(p.title || "").trim(), startDate: p.startDate, endDate: p.endDate, tripProblem: vehicleTripProblem(r, p) } : null,
-    linkedAdvance: a ? { advanceNo: a.advanceNo || null, status: a.status } : null
+    linkedAdvance: a ? { advanceNo: a.advanceNo || null, status: a.status, ...(requestExpired(a) ? { expired: true } : {}) } : null
   };
 }
 
@@ -4102,7 +4102,7 @@ app.put("/api/requests/:id/chief-decide", authenticateToken, (req: any, res) => 
 // POST /api/activities were removed on 2026-10-22 (outside the thesis scope; none had ever been
 // made). This route stays because it is what lists an employee's seminars, with their cash
 // advance and DV, under My Assigned Activities. Activities stored before (none live) still list.
-app.get("/api/activities", authenticateToken, (req: any, res) => {
+app.get("/api/activities", authenticateToken, expireDueFirst, (req: any, res) => {
   const { role, employeeId } = req.user;
   // Each seat's money, and a group's names and attendance: not kept in a shared PC's cache (7m).
   res.set("Cache-Control", "no-store");
@@ -4770,8 +4770,10 @@ function withinAdvanceProblem(
       code: 409,
       message: asked?.status === "Requested"
         ? "Your cash advance request is still with Finance. File the report once it is released. If you paid for the seminar yourself, ask Finance to decline the request; you can then claim it back as a reimbursement."
+        : requestExpired(asked)
+          ? "Your cash advance request expired on the seminar's first day, before Finance released it, so this seminar is claimed back as a reimbursement."
         : asked?.status === "Declined"
-          ? `Your cash advance request was declined${asked.declineReason ? ` (${asked.declineReason})` : ""}. Ask for it again under My Assigned Activities, before the seminar's last day.`
+          ? `Your cash advance request was declined${asked.declineReason ? ` (${asked.declineReason})` : ""}, so this seminar is claimed back as a reimbursement.`
           : "Request your cash advance first, under My Assigned Activities. A seminar report settles the advance Finance releases, and its items can't go past it."
     };
   }
@@ -4799,7 +4801,7 @@ function balanceText(released: number, spent: number, orNo?: string): string {
   return leftover > 0 ? `${pesoText(leftover)} of the advance handed back${orNo ? ` (OR ${orNo})` : ""}` : "balanced, the advance fully used";
 }
 
-app.post("/api/liquidation-submissions", authenticateToken, transactional((req: any, res: any) => {
+app.post("/api/liquidation-submissions", authenticateToken, expireDueFirst, transactional((req: any, res: any) => {
   const { employeeId, fullName } = req.user;
   const {
     activityId, totalReleased, totalSpent, remarks, supportingDocs, particulars,
@@ -5102,6 +5104,7 @@ app.post("/api/liquidation-submissions", authenticateToken, transactional((req: 
   // declined, or an advance handed back before the seminar), so reviewers see how it came to be.
   const advanceHistory = !withinAllowance ? ""
     : !seatAdvance ? "no cash advance was asked for"
+    : requestExpired(seatAdvance) ? `cash advance request${seatAdvance.advanceNo ? ` ${seatAdvance.advanceNo}` : ""} expired on the seminar's first day before Finance released or declined it`
     : seatAdvance.status === "Declined" ? `cash advance request${seatAdvance.advanceNo ? ` ${seatAdvance.advanceNo}` : ""} declined`
     : seatAdvance.status === "Refunded" ? `cash advance ${seatAdvance.advanceNo} refunded${seatAdvance.refundedBeforeSeminar ? " before the seminar" : ""}${seatAdvance.refundOrNo ? ` (OR ${seatAdvance.refundOrNo})` : ""}`
     : `cash advance ${seatAdvance.advanceNo}: ${seatAdvance.status}`;
@@ -6495,15 +6498,15 @@ function namesText(names: string[]): string {
   return names.length <= 1 ? (names[0] || "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-// Whether asking for this enrolment's cash advance is closed, and why (src/reimbursement.ts, 12ai): HR recorded
-// "Attended", a certificate of attendance is on file, or the seminar's last day has come, the day a certificate can
-// first be uploaded. Read from what the certificate rules read (certificateProblemFor), so the card and the server agree.
+// Whether asking for this enrolment's cash advance is closed, and why (src/reimbursement.ts): the seminar's first day
+// has come (the user's rule of 2026-11-14, which moved 12ai's last day: nobody asks for one in the middle of a
+// seminar), a certificate of attendance is on file, or HR recorded "Attended".
 function advanceWindowFor(p: any): AdvanceWindowClosed | null {
   const prog = (db.trainingPrograms || []).find((x: any) => x && x.id === p?.trainingProgramId);
   return advanceRequestWindow({
     attendance: p?.attendance ?? null,
     hasCertificate: !!currentCertificate(p?.id),
-    lastDay: seminarLastDay(prog),
+    firstDay: seminarFirstDay(prog),
     today: manilaToday()
   });
 }
@@ -6513,13 +6516,13 @@ function advanceWindowText(closed: AdvanceWindowClosed, forEmployee = true): str
   if (!forEmployee) {
     return closed === "attended" ? "HR recorded the attendance with no cash advance out: the seminar is claimed back as a reimbursement."
       : closed === "certificate" ? "Their certificate of attendance is on file: the seminar is claimed back as a reimbursement once HR records the attendance."
-      : "The seminar's last day has come: it is claimed back as a reimbursement once HR records the attendance.";
+      : "The seminar has started: it is claimed back as a reimbursement once it ends and HR records the attendance.";
   }
   return closed === "attended"
     ? "HR recorded your attendance without a cash advance, so you claim this seminar back as a reimbursement: click its title to open your claim."
     : closed === "certificate"
       ? "Your certificate of attendance is on file, so no cash advance can be requested for this seminar: once HR records your attendance, claim it back as a reimbursement."
-      : "This seminar's last day has come, so no cash advance can be requested for it: once HR records your attendance, claim it back as a reimbursement.";
+      : "This seminar has started, so no cash advance can be requested for it: once it ends and HR records your attendance, claim it back as a reimbursement.";
 }
 
 // What a person left out of a group's cash advance can do instead: ask for their own while asking is still open, or
@@ -6540,18 +6543,17 @@ function ownAdvanceTail(participantId: string): { canAsk: boolean; text: string 
 
 // Why a co-participant can't be covered by the holder's group advance now, or null. The words follow
 // their name ("Ana Cruz did not attend"); they name no other record, since the holder sees them.
-// `exceptAdvanceId`: the group advance being released, which already covers them. `late`: a request HR's attendance
-// closed, released because its cash went out before HR's record (lateReleaseProblem), so attendance recorded since
-// leaves nobody out: the group's report settles it as after any release.
-function groupCoverProblem(member: any, holder: any, exceptAdvanceId?: string, late = false): string | null {
+// `exceptAdvanceId`: the group advance being released, which already covers them.
+function groupCoverProblem(member: any, holder: any, exceptAdvanceId?: string): string | null {
   if (!member || !holder || member.trainingProgramId !== holder.trainingProgramId) return "isn't in this seminar";
   if (member.status === "Cancelled" || member.status === "Archived") return "is no longer on this seminar";
   if (member.status === "Liquidated") return "is already liquidated";
-  if (!late && member.attendance === "Did not attend") return "did not attend";
+  if (member.attendance === "Did not attend") return "did not attend";
   // HR's "Attended" decides the seat's money path (12ai): with no cash advance by then, it is a reimbursement. A new
-  // cover also can't take someone whose certificate is on file (the holder's own last day refuses the whole request).
-  // Neither is shared with the holder ("can't be included now").
-  if (!late && member.attendance === "Attended") return "already attended, without a cash advance";
+  // cover also can't take someone whose certificate is on file (the seminar's first day refuses the whole request
+  // anyway, and attendance waits for its end, so both are backstops). Neither is shared with the holder ("can't be
+  // included now").
+  if (member.attendance === "Attended") return "already attended, without a cash advance";
   if (exceptAdvanceId === undefined && advanceWindowFor(member) === "certificate") return "already has a certificate of attendance on file";
   if (reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], member.id)) return "already has a liquidation report for this seminar";
   const open = advancesCovering(db.cashAdvances || [], member.id)
@@ -6618,9 +6620,9 @@ function advanceRequestEligibility(p: any): { canRequest: boolean; reason?: stri
   if (current?.status === "Released") return { canRequest: false, reason: `Finance released ${current.advanceNo} (DV ${current.dvNo}).` };
   // (One refunded in full, or declined, can be asked for again while asking is still open.)
   if (current?.status === "Liquidated") return { canRequest: false, reason: `${current.advanceNo} is already liquidated.` };
-  // A cash advance is asked for before the seminar (12ai): from its last day, with a certificate on file, or once HR
-  // records "Attended", the seminar is claimed back as a reimbursement. This closes the request, "For my group…" and
-  // the vehicle filed with it, which are one request.
+  // A cash advance is asked for before the seminar (the user's rule of 2026-11-14): from its first day, with a
+  // certificate on file, or once HR records "Attended", the seminar is claimed back as a reimbursement. This closes the
+  // request, "For my group…" and the vehicle filed with it, which are one request.
   const closed = advanceWindowFor(p);
   if (closed) return { canRequest: false, reason: advanceWindowText(closed) };
   const elsewhere = openAdvanceElsewhere(p.employeeId, p.id);
@@ -6631,21 +6633,18 @@ function advanceRequestEligibility(p: any): { canRequest: boolean; reason?: stri
   return { canRequest: true };
 }
 
-app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
+app.get("/api/cash-advances", authenticateToken, expireDueFirst, (req: any, res) => {
   const { role, employeeId } = req.user;
   const all = db.cashAdvances || [];
   // (Each with the vehicle request filed alongside, if any: its number and status.)
   if (isCashAdvanceRole(role)) {
-    // A request HR's attendance closed, while nothing has settled its seats another way (12ai, lateReleaseProblem), carries
-    // the day it was closed, and what would still refuse its release now (requestReleaseProblem, e.g. COA's one advance),
-    // so Cash Advance Requests lists it under "Closed by HR's attendance" and says why before a voucher is prepared.
+    // A request still waiting carries the day it expires, its seminar's first day (12ak), so Finance sees the deadline.
     return res.json({
       status: "success",
       data: all.map((a: any) => {
         const out = withVehicle(a);
-        return closedByAttendance(a) && !lateReleaseProblem(a)
-          ? { ...out, lateRelease: { closedOn: manilaDateOf(a.decidedAt), until: lateReleaseUntil(manilaDateOf(a.decidedAt)), problem: requestReleaseProblem(a, true) } }
-          : out;
+        const expiresOn = a?.status === "Requested" ? requestFirstDay(a) : "";
+        return expiresOn ? { ...out, expiresOn } : out;
       })
     });
   }
@@ -6663,6 +6662,8 @@ app.get("/api/cash-advances", authenticateToken, (req: any, res) => {
         id: a.id, advanceNo: a.advanceNo, status: a.status,
         employeeName: a.employeeName, activityId: a.activityId, activityTitle: a.activityTitle, amount: a.amount,
         dvNo: a.dvNo, dvDate: a.dvDate, requestedAt: a.requestedAt, decidedAt: a.decidedAt, issuedAt: a.issuedAt,
+        // (When it expired, so their card says so: not Finance's reason, which is written for the holder.)
+        expiredAt: a.expiredAt, expiredOn: a.expiredOn,
         liquidatedAt: a.liquidatedAt, refundedAt: a.refundedAt,
         covers: a.covers.filter((c: any) => coverIsUser(req.user, c)),
         coversCount: a.covers.length,
@@ -6698,7 +6699,7 @@ function noRequestReason(p: any, emp: any): string | null {
   return null;
 }
 
-app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
+app.get("/api/cash-advances/fundable", authenticateToken, expireDueFirst, (req: any, res) => {
   if (!isCashAdvanceRole((req as any).user.role)) {
     return res.status(403).json({ status: "error", message: "Cash advances are restricted to the Financial Officer." });
   }
@@ -6764,10 +6765,10 @@ app.get("/api/cash-advances/fundable", authenticateToken, (req: any, res) => {
       pendingRequestId: request ? request.id : null,
       requestedAt: request ? request.requestedAt : null,
       // An advance is released only on the employee's request: when none can come yet, why, so the desk
-      // doesn't only say it is waiting. When none can come any more (the seminar's last day has come, a certificate
-      // is on file, or HR recorded "Attended", 12ai), the seat is claimed back as a reimbursement, unless a request
-      // is already waiting, which can still be released until HR records the attendance. (Not on a row whose advance
-      // went out: that advance is its story.)
+      // doesn't only say it is waiting. When none can come any more (the seminar's first day has come, a certificate
+      // is on file, or HR recorded "Attended"; the user's rule of 2026-11-14), the seat is claimed back as a
+      // reimbursement, and a request still waiting expires on that first day (expireDueRequests). (Not on a row whose
+      // advance went out: that advance is its story.)
       requestClosed: windowClosed && !cashOut ? advanceWindowText(windowClosed, false) : null,
       requestBlocked: !request && !advance && !windowClosed ? noRequestReason(p, emp) : null,
       activityId: p.id,
@@ -6851,7 +6852,7 @@ app.post("/api/cash-advances", authenticateToken, (req: any, res: any) => {
 // An attendee asks Finance for their seminar's cash advance (the seminar budget flow). The
 // amount is their allowance (allocation ÷ seats, HR's ceiling), set here and never typed.
 // Only for seminars, the only assignments there are (general activities can't be created, 13c).
-app.post("/api/cash-advances/request", authenticateToken, transactional((req: any, res: any) => {
+app.post("/api/cash-advances/request", authenticateToken, expireDueFirst, transactional((req: any, res: any) => {
   const activityId = typeof req.body?.activityId === "string" ? req.body.activityId : "";
   const enrolment = activityId ? (db.trainingParticipants || []).find((p: any) => p && p.id === activityId) : null;
   if (!enrolment) {
@@ -7046,7 +7047,7 @@ app.post("/api/cash-advances/request", authenticateToken, transactional((req: an
 
 // Who an attendee's group cash advance could cover: their co-participants in the seminar, each with
 // why not when they can't be. Only for the employee enrolled; it lists names and allowances only.
-app.get("/api/cash-advances/group-options", authenticateToken, (req: any, res: any) => {
+app.get("/api/cash-advances/group-options", authenticateToken, expireDueFirst, (req: any, res: any) => {
   const activityId = typeof req.query?.activityId === "string" ? req.query.activityId : "";
   const enrolment = activityId ? (db.trainingParticipants || []).find((p: any) => p && p.id === activityId) : null;
   if (!enrolment) return res.status(404).json({ status: "error", message: "That seminar enrolment was not found." });
@@ -7095,7 +7096,7 @@ function removeFromGroupRequest(request: CashAdvance, participantId: string) {
 // A covered member leaves a group request Finance hasn't released yet (the user's decision,
 // 2026-10-26): they'd rather have their own advance. The request is re-priced without them; with
 // only the holder left, it is the holder's own request. Once released, the cash is with the holder.
-app.post("/api/cash-advances/:id/leave", authenticateToken, transactional((req: any, res: any) => {
+app.post("/api/cash-advances/:id/leave", authenticateToken, expireDueFirst, transactional((req: any, res: any) => {
   const request = (db.cashAdvances || []).find((a: any) => a && a.id === req.params.id);
   if (!request) return res.status(404).json({ status: "error", message: "Cash advance request not found." });
   const me = (request.covers || []).find((c: any) => c.participantId !== request.activityId && coverIsUser(req.user, c));
@@ -7112,6 +7113,7 @@ app.post("/api/cash-advances/:id/leave", authenticateToken, transactional((req: 
       status: "error",
       message: request.status === "Released"
         ? `Finance has already released ${request.advanceNo} to ${request.employeeName}: your share comes back in the group's liquidation report.`
+        : requestExpired(request) ? expiredRequestText(request)
         : `This request was already ${String(request.status).toLowerCase()}.`
     });
   }
@@ -7126,7 +7128,7 @@ app.post("/api/cash-advances/:id/leave", authenticateToken, transactional((req: 
   logEvent(req.user.id, req.user.username, req.user.role, "Leave Group Cash Advance Request",
     `${me.employeeName} left ${request.employeeName}'s group cash advance request for ${title}; it is now ${pesoText(request.amount)}${request.covers ? ` for ${namesText(request.covers.map((c: any) => c.employeeName))}` : ` for ${request.employeeName} alone`}.`);
   saveDB();
-  // (Asking for their own is closed from the seminar's last day, 12ai.)
+  // (Asking for their own is closed from the seminar's first day, the user's rule of 2026-11-14.)
   const own = ownAdvanceTail(me.participantId);
   res.json({
     status: "success",
@@ -7137,19 +7139,23 @@ app.post("/api/cash-advances/:id/leave", authenticateToken, transactional((req: 
 
 // Why Finance can't release an employee's request now, or null. Checked again at release,
 // since the seminar may have changed since the request (attendance, a report, HR's allowance).
-// `late`: a request HR's attendance closed, whose cash went out before HR's record (lateReleaseProblem checks the rest):
-// attendance recorded after the cash went out is settled as after any release, and there is nothing to decline.
-function requestReleaseProblem(request: CashAdvance, late = false): string | null {
-  const decline = late ? "" : " Decline the request.";
+function requestReleaseProblem(request: CashAdvance): string | null {
+  const decline = " Decline the request.";
   const enrolment = (db.trainingParticipants || []).find((p: any) => p && p.id === request.activityId);
   const facts = enrolment ? liquidationActivityFacts(enrolment.id) : null;
   if (!enrolment || !facts) return `The seminar enrolment no longer exists, so nothing can be released.${decline}`;
   if (enrolment.status === "Cancelled" || enrolment.status === "Archived") return `This enrolment was cancelled, so nothing can be released.${decline}`;
   if (enrolment.status === "Liquidated") return `This seminar is already liquidated, so nothing can be released.${decline}`;
-  if (!late && enrolment.attendance === "Did not attend") return `HR recorded that ${request.employeeName} did not attend, so nothing can be released.${decline}`;
-  // HR's "Attended" decides the seat's money path (12ai): the attendance route closes a request still waiting then, so
-  // this is only a backstop.
-  if (!late && enrolment.attendance === "Attended") {
+  // A request still waiting on its seminar's first day expires (expireDueRequests, run before this route), so this is only
+  // a backstop.
+  const firstDay = seminarFirstDay((db.trainingPrograms || []).find((x: any) => x && x.id === enrolment.trainingProgramId));
+  if (requestDueToExpire(request, firstDay, manilaToday())) {
+    return `The seminar started on ${formatLongDate(firstDay)}, so this request has expired and nothing can be released: the seminar is claimed back as a reimbursement.`;
+  }
+  if (enrolment.attendance === "Did not attend") return `HR recorded that ${request.employeeName} did not attend, so nothing can be released.${decline}`;
+  // HR's "Attended" decides the seat's money path (12ai): attendance waits for the seminar's end, and a request still
+  // waiting expires on its first day, so this is only a backstop.
+  if (enrolment.attendance === "Attended") {
     return `HR has recorded ${request.employeeName}'s attendance, so the seminar is claimed back as a reimbursement and nothing can be released.${decline}`;
   }
   const filed = reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], request.activityId);
@@ -7161,44 +7167,17 @@ function requestReleaseProblem(request: CashAdvance, late = false): string | nul
   // The request can wait: it can be released once the other advance is settled.
   const elsewhere = openAdvanceElsewhere(request.employeeId, request.activityId);
   if (elsewhere) {
-    return `${request.employeeName} still has cash advance ${openAdvanceText(elsewhere)} not liquidated or refunded. COA rules allow no new cash advance until it is settled, so release this one after that${late ? "" : ", or decline it"}.`;
+    return `${request.employeeName} still has cash advance ${openAdvanceText(elsewhere)} not liquidated or refunded. COA rules allow no new cash advance until it is settled, so release this one after that, or decline it.`;
   }
   // HR may have re-priced the seminar since: the release is the allowance as it is now.
-  if (!(centavos(facts.allocated) > 0)) return `HR has set no allowance for ${request.employeeName} on this seminar, so nothing can be released.${late ? " Ask HR to set one." : " Decline the request, or ask HR to set one."}`;
+  if (!(centavos(facts.allocated) > 0)) return `HR has set no allowance for ${request.employeeName} on this seminar, so nothing can be released. Decline the request, or ask HR to set one.`;
   return null;
 }
 
-// A request HR's "Attended" closed before Finance released it (12ai) can still be released when its cash really went out
-// first: Finance handed it over on a voucher dated on or before HR's record and recorded it only afterwards (the user's
-// decision of 2026-11-13). Released, the seat is a liquidation; so nothing may be settling any seat it covered another way.
-// Only for 30 days after the closure (LATE_RELEASE_DAYS, the user's decision of 2026-11-13): Finance is told at once, and
-// after that the request stays closed for good, and leaves Finance's list.
-// Why it can't be released now, or null. (The voucher's date is checked at release: on or before `closedOn`.)
-function lateReleaseProblem(request: CashAdvance): string | null {
-  if (!closedByAttendance(request)) return "Only a request HR's attendance closed can be released after it was closed.";
-  const closedOn = manilaDateOf(request.decidedAt);
-  if (!closedOn) return "This request's closing date isn't on record, so the voucher can't be checked against it.";
-  const until = lateReleaseUntil(closedOn);
-  if (manilaToday() > until) {
-    return `Its release could be recorded for ${LATE_RELEASE_DAYS} days after that, until ${formatLongDate(until)}, so it stays closed.`;
-  }
-  for (const seat of coveredEnrolmentIds(request)) {
-    const who = seat === request.activityId ? request.employeeName : "someone this request covered";
-    const report = reportCovering(db.liquidationSubmissions || [], db.cashAdvances || [], seat);
-    if (report) {
-      return `${report.submissionNo} has been filed for ${who} since it was closed, so the seminar is settled that way and this request can't be released.`;
-    }
-    const other = advancesCovering(db.cashAdvances || [], seat)
-      .find((a: any) => a.id !== request.id && (a.status === "Requested" || a.status === "Released" || a.status === "Liquidated"));
-    if (other) return `${other.advanceNo || "Another request"} has covered ${who} since it was closed, so this request can't be released.`;
-    // On a seat claimed back as a reimbursement, HR's hand entries are what the office paid itself (12q): funded with the
-    // full allowance on top of them, it would pass its share, and validation would replace them (12ai's security review).
-    if ((db.trainingLiquidations || []).some((r: any) => r && r.trainingParticipantId === seat && r.source !== "report")) {
-      return `HR has entered expenses the office paid for ${who}, so the seminar stays a reimbursement and this request can't be released.`;
-    }
-  }
-  return null;
-}
+// A cash advance is recorded as released in the system before Finance hands the cash over (the user's rule of
+// 2026-11-14), so nothing records a release after a request was closed or expired, as cash handed out first. (12ai's
+// "late release" of a request HR's attendance closed, the user's decision of 2026-11-13, assumed the opposite order and
+// is gone.)
 
 // The calendar date in the Philippines (UTC+8) of a stored timestamp, as YYYY-MM-DD, or "".
 function manilaDateOf(iso: string | undefined): string {
@@ -7240,7 +7219,7 @@ app.get("/api/disbursement-vouchers/next", authenticateToken, (req: any, res: an
 });
 
 // Finance releases an employee's request: the voucher number and date, and the advance is out.
-app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req: any, res: any) => {
+app.post("/api/cash-advances/:id/release", authenticateToken, expireDueFirst, transactional((req: any, res: any) => {
   if (!isCashAdvanceRole(req.user.role)) {
     return res.status(403).json({ status: "error", message: "Only the Financial Officer can release a cash advance." });
   }
@@ -7254,35 +7233,24 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
         : "This group cash advance covers you, so you can't release it: another Financial Officer or the Administrator has to."
     });
   }
-  // A request HR's "Attended" closed before its release (12ai) can still be released when its cash went out first, on a
-  // voucher dated on or before HR's record (the user's decision of 2026-11-13; lateReleaseProblem).
-  const late = closedByAttendance(request);
-  const closedOn = late ? manilaDateOf(request.decidedAt) : "";
-  if (request.status !== "Requested" && !late) {
+  // Only a request still waiting can be released. A release is recorded before the cash is handed over (the user's rule
+  // of 2026-11-14), so a request that expired, or one HR's attendance closed before that day (12ai), stays closed: no
+  // release is recorded after the fact for cash handed out first.
+  if (request.status !== "Requested") {
     return res.status(409).json({
       status: "error",
       message: request.status === "Released" ? `This request was already released (${request.advanceNo}, DV ${request.dvNo}).`
+        : requestExpired(request) ? expiredRequestText(request)
+        : closedByAttendance(request) ? "This request was closed when HR recorded the attendance, so nothing can be released on it: a cash advance is recorded as released before the cash is handed over, and the seminar is claimed back as a reimbursement."
         : `This request was already ${String(request.status).toLowerCase()}.`
     });
   }
   // A request that has to be declined anyway is said so first, before Finance fixes a voucher for it.
-  const problem = late ? lateReleaseProblem(request) || requestReleaseProblem(request, true) : requestReleaseProblem(request);
-  if (problem) {
-    return res.status(409).json({
-      status: "error",
-      message: late ? `This request was closed${closedOn ? ` on ${formatLongDate(closedOn)}` : ""}, when HR recorded the attendance. ${problem}` : problem
-    });
-  }
+  const problem = requestReleaseProblem(request);
+  if (problem) return res.status(409).json({ status: "error", message: problem });
   const dvDate = req.body?.dvDate;
   if (!isCalendarDate(dvDate) || dvDate > manilaToday()) {
     return res.status(400).json({ status: "error", message: "Enter the DV date as YYYY-MM-DD, no later than today." });
-  }
-  // Only cash handed out by the day HR recorded the attendance: after it, the seminar is claimed back as a reimbursement.
-  if (late && dvDate > closedOn) {
-    return res.status(400).json({
-      status: "error",
-      message: `This request was closed on ${formatLongDate(closedOn)}, when HR recorded the attendance, so the seminar is claimed back as a reimbursement. Only cash handed out by then can be recorded on it: the DV must be dated on or before ${formatLongDate(closedOn)}.`
-    });
   }
   // HSAC's voucher numbers: YYYY-MM-NNNN, in the voucher date's month (src/dvNumber.ts).
   const dv = readDvNumber(req.body?.dvNo, dvDate);
@@ -7304,17 +7272,13 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
   const askedCovers = (request.covers || []).map(c => ({ participantId: c.participantId, amount: round2(Number(c.amount)) }));
   const allowance = liquidationActivityFacts(request.activityId)!.allocated;
   const holderEnrolment = (db.trainingParticipants || []).find((p: any) => p && p.id === request.activityId);
-  // What the seminar holds before, so a late release can say what it holds again (12ai's code review): the shares of
-  // anyone HR has since recorded as not attending come back with the cash recorded for them.
-  const lateProgram = late && holderEnrolment ? (db.trainingPrograms || []).find((p: any) => p && p.id === holderEnrolment.trainingProgramId) : null;
-  const lateHeldBefore = lateProgram ? seminarBudget(lateProgram, participantsForBudget()).committed : 0;
   const dropped: { name: string; why: string; participantId: string; employeeId: string }[] = [];
   if (isGroupAdvance(request)) {
     const kept: CashAdvanceCover[] = [];
     for (const c of request.covers!) {
       if (c.participantId === request.activityId) { kept.push({ ...c, amount: allowance }); continue; }
       const member = (db.trainingParticipants || []).find((p: any) => p && p.id === c.participantId);
-      const why = groupCoverProblem(member, holderEnrolment, request.id, late);
+      const why = groupCoverProblem(member, holderEnrolment, request.id);
       if (why) dropped.push({ name: c.employeeName, why, participantId: c.participantId, employeeId: c.employeeId });
       else kept.push({ ...c, amount: round2(Number(member.allowanceAllocated || 0)) });
     }
@@ -7322,20 +7286,6 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
     else request.covers = kept;
   }
   const total = request.covers ? coversTotal(request.covers) : allowance;
-  // A late release records the cash already handed out, so it can't be recorded at another amount (12ai's code review):
-  // a voucher paid out at the request's amount, recorded at today's, would leave the difference on no record. Nothing
-  // is offered in its place: HR sets the allowances back first.
-  if (late) {
-    const repriced = dropped.length > 0 || centavos(total) !== centavos(askedFor)
-      || (request.covers || []).some(c => centavos(c.amount) !== centavos(askedCovers.find(a => a.participantId === c.participantId)?.amount ?? NaN));
-    if (repriced) {
-      return res.status(409).json({
-        status: "error",
-        message: `This request was for ${pesoText(askedFor)}, the cash handed out before HR's record, but recorded today it would be ${pesoText(total)}${dropped.length > 0
-          ? ` (left out: ${dropped.map(d => `${d.name}, ${d.why}`).join("; ")})` : " (HR has changed an allowance since)"}. A release recorded after the closure records exactly what was handed out: ask HR to set the allowances back first.`
-      });
-    }
-  }
   // The amount Finance saw when they opened the request (the screen sends it): the voucher was prepared
   // for it, so a total that has changed since (someone left or no longer qualifies, or HR re-priced) is
   // shown to Finance first instead of being recorded against that voucher. The reply carries the new
@@ -7356,15 +7306,6 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
     + (dropped.length > 0 ? ` Left out: ${dropped.map(d => `${d.name} (${exact ? d.why : coverReasonForHolder(d.why)})`).join("; ")}.` : "");
   const changed = changeNote(true);
   const now = new Date();
-  // Released after HR's record closed it: when and by whom it was closed stays on the advance.
-  if (late) {
-    request.releasedAfterClosure = { closedAt: String(request.decidedAt), closedBy: String(request.decidedBy || "") };
-    delete request.declineReason;
-  }
-  // What the employee and the others were told on the closure no longer holds: the seminar is liquidated with this.
-  const lateNote = late
-    ? ` Finance recorded it after HR's attendance record of ${formatLongDate(closedOn)}, as cash handed out before then: the seminar is liquidated with this cash advance, not claimed back as a reimbursement.`
-    : "";
   request.status = "Released";
   request.amount = total;
   request.advanceNo = nextCashAdvanceNo(now);
@@ -7378,7 +7319,7 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
   const group = request.covers ? ` for your group of ${request.covers.length} (${namesText(request.covers.map(c => c.employeeName))})` : "";
   notifyEmployee(request.employeeId, {
     title: "Cash advance released",
-    message: `${pesoText(request.amount)} was released to you on DV ${dvNo} dated ${formatLongDate(dvDate)} for ${request.activityTitle}${group}.${changeNote(false)}${lateNote} Your liquidation report can't go past it; hand back what you don't spend.`,
+    message: `${pesoText(request.amount)} was released to you on DV ${dvNo} dated ${formatLongDate(dvDate)} for ${request.activityTitle}${group}: the Finance Officer hands you the cash now that the release is recorded.${changeNote(false)} Your liquidation report can't go past it; hand back what you don't spend.`,
     type: "success",
     link: { tab: "employee_portal", record: { kind: "assignment", id: request.activityId } },
     dedupeKey: `ca-released:${request.id}`
@@ -7386,7 +7327,7 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
   for (const c of (request.covers || []).slice(1)) {
     notifyEmployee(c.employeeId, {
       title: "Group cash advance released",
-      message: `Finance released ${request.advanceNo} (${pesoText(request.amount)}) to ${request.employeeName} for your group at ${request.activityTitle}, ${pesoText(c.amount)} of it for you.${lateNote} ${request.employeeName} files the group's liquidation report.`,
+      message: `Finance released ${request.advanceNo} (${pesoText(request.amount)}) to ${request.employeeName} for your group at ${request.activityTitle}, ${pesoText(c.amount)} of it for you. ${request.employeeName} files the group's liquidation report.`,
       type: "info",
       link: { tab: "employee_portal", record: { kind: "assignment", id: c.participantId } },
       dedupeKey: `ca-released:${request.id}:${c.participantId}`
@@ -7403,47 +7344,16 @@ app.post("/api/cash-advances/:id/release", authenticateToken, transactional((req
       link: { tab: "employee_portal", record: { kind: "assignment", id: d.participantId } }
     });
   }
-  // What the training budget holds again: the cash is out, so the shares of anyone HR has since recorded as not attending
-  // are held for it until it is settled (12ai's code review). Said, not refused, since refusing would hide the cash.
-  let lateBudget = "";
-  if (lateProgram) {
-    const heldMore = round2(seminarBudget(lateProgram, participantsForBudget()).committed - lateHeldBefore);
-    const fy = (db.fiscalYears || []).find((f: any) => f && f.label === lateProgram.fiscalYear);
-    const left = fy && fy.status === "Active" ? round2(computeTrainingUsage(fy.id).remaining) : null;
-    if (heldMore > 0) {
-      lateBudget = ` The seminar now holds ${pesoText(heldMore)} more of the training budget for it${fy && fy.status !== "Active"
-        ? `; FY ${fy.label} is closed, so what it carried over doesn't change` : left !== null && left < 0 ? `, and FY ${fy!.label}'s Unallocated is now ${pesoText(left)}` : ""}.`;
-    }
-  }
-  // Recorded after HR's record closed the request, on a voucher dated before it: a voucher dated back is where a release
-  // nobody handed out would hide, so the entry says so, and HR (whose record closed it) and the other approver role are
-  // told: the Administrator when a Financial Officer recorded it, Finance when the Administrator did (both reviews).
-  const lateEntry = late
-    ? ` Recorded after the request was closed on ${formatLongDate(closedOn)}, when HR recorded the attendance (closed by ${request.releasedAfterClosure!.closedBy || "HR"}): the voucher is dated ${formatLongDate(dvDate)}, on or before that day, as Finance records the cash went out before it.${lateBudget}`
-    : "";
   logEvent(req.user.id, req.user.username, req.user.role, "Release Cash Advance",
     `Released ${pesoText(request.amount)} to ${request.employeeName} for ${request.activityTitle} via DV ${dvNo} (${request.advanceNo}), as they requested on ${manilaLongDate(request.requestedAt)}${request.covers
-      ? `, one advance for ${request.covers.map(c => `${c.employeeName} (${pesoText(c.amount)})`).join(", ")}` : ""}.${changed}${lateEntry}`);
-  if (late) {
-    const lateMessage = `${req.user.fullName} released ${request.advanceNo} (${pesoText(request.amount)}) to ${request.employeeName} for ${request.activityTitle} on DV ${dvNo} dated ${formatLongDate(dvDate)}, after HR's attendance record of ${formatLongDate(closedOn)} had closed the request, as cash handed out before it: the seminar is liquidated with it, not claimed back as a reimbursement.${lateBudget}`;
-    for (const role of [UserRole.HR_OFFICER, req.user.role === UserRole.SUPER_ADMIN ? UserRole.FINANCE_OFFICER : UserRole.SUPER_ADMIN]) {
-      notify({ role }, {
-        title: "Cash advance recorded after HR's attendance",
-        message: lateMessage,
-        type: "warning",
-        link: role !== UserRole.HR_OFFICER ? { tab: "finance", subTab: "liquidation" }
-          : lateProgram ? { tab: "training_development", record: { kind: "seminar", id: lateProgram.id } } : { tab: "training_development" },
-        dedupeKey: `ca-late:${request.id}:${role}`
-      });
-    }
-  }
+      ? `, one advance for ${request.covers.map(c => `${c.employeeName} (${pesoText(c.amount)})`).join(", ")}` : ""}.${changed}`);
   saveDB();
-  res.json({ status: "success", message: `${request.advanceNo}: ${pesoText(request.amount)} released to ${request.employeeName} on DV ${dvNo}${request.covers ? ` for ${request.covers.length} participants` : ""}.${changed}${late ? ` Recorded after HR's attendance closed the request: the seminar is now liquidated with it.${lateBudget}` : ""}`, data: request });
+  res.json({ status: "success", message: `${request.advanceNo}: ${pesoText(request.amount)} released to ${request.employeeName} on DV ${dvNo}${request.covers ? ` for ${request.covers.length} participants` : ""}.${changed} Hand over the cash now that the release is recorded.`, data: request });
 }));
 
 // Finance declines an employee's request, saying why. The employee may ask again while asking is still open (before
-// the seminar's last day, 12ai).
-app.post("/api/cash-advances/:id/decline", authenticateToken, transactional((req: any, res: any) => {
+// the seminar's first day, the user's rule of 2026-11-14). A request not declined or released by then expires.
+app.post("/api/cash-advances/:id/decline", authenticateToken, expireDueFirst, transactional((req: any, res: any) => {
   if (!isCashAdvanceRole(req.user.role)) {
     return res.status(403).json({ status: "error", message: "Only the Financial Officer can decline a cash advance request." });
   }
@@ -7458,16 +7368,21 @@ app.post("/api/cash-advances/:id/decline", authenticateToken, transactional((req
     });
   }
   if (request.status !== "Requested") {
-    return res.status(409).json({ status: "error", message: `This request was already ${String(request.status).toLowerCase()}.` });
+    return res.status(409).json({
+      status: "error",
+      message: requestExpired(request) ? expiredRequestText(request) : `This request was already ${String(request.status).toLowerCase()}.`
+    });
   }
   const reason = signatoryText(req.body?.reason);
   if (!reason || reason.length > 500) {
     return res.status(400).json({ status: "error", message: "Say why the request is declined, up to 500 characters." });
   }
-  // HR's closure is told apart by its own wording (closedByAttendance), so a decline can't take it: it would pass for HR's
-  // record and could later be released as cash handed out before it (12ai's security review).
-  if (reason.trim().toLowerCase() === CLOSED_BY_ATTENDANCE.toLowerCase()) {
-    return res.status(400).json({ status: "error", message: "That wording is kept for requests HR's attendance closed: say why you decline it in your own words." });
+  // HR's closure (before 2026-11-14) and an expiry have their own wording (closedByAttendance; an expiry is told apart by
+  // `expiredAt` too), so a decline can't take either: it would read as the system's record, not Finance's reason.
+  // (Compared with quotes made straight and spaces collapsed, so "didn’t" with a curly apostrophe is the same wording.)
+  const plain = (text: string) => text.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim().toLowerCase();
+  if (plain(reason) === plain(CLOSED_BY_ATTENDANCE) || plain(reason) === plain(EXPIRED_UNPROCESSED)) {
+    return res.status(400).json({ status: "error", message: "That wording is kept for requests the system closed: say why you decline it in your own words." });
   }
   declineAdvanceRequest(request, reason, req.user.fullName);
   logEvent(req.user.id, req.user.username, req.user.role, "Decline Cash Advance Request",
@@ -7478,38 +7393,138 @@ app.post("/api/cash-advances/:id/decline", authenticateToken, transactional((req
 
 // Closes a request without releasing it, and tells the employee why; for a group, everyone it
 // covered too. Finance's reason is written for the holder, so the others are told only that it was
-// declined, unless the caller words one for them (`othersReason`); what each can do next follows their
-// own seat (`ownAdvanceTail`, 12ai). HR's "Attended" closes a request still waiting (`closed`), and the
-// person it was recorded for hears it in their own notice (`skipParticipantId`). Callers save and log.
-function declineAdvanceRequest(request: CashAdvance, reason: string, by: string,
-  options: { othersReason?: string; closed?: boolean; skipParticipantId?: string } = {}) {
+// declined; what each can do next follows their own seat (`ownAdvanceTail`, 12ai). Callers save and log.
+// (Since 2026-11-14 recording attendance closes no request, the user's rule: a request still waiting expires on the
+// seminar's first day instead, expireDueRequests.)
+function declineAdvanceRequest(request: CashAdvance, reason: string, by: string) {
   request.status = "Declined";
   request.declineReason = reason;
   request.decidedBy = by;
   request.decidedAt = new Date().toISOString();
-  const verb = options.closed ? "closed" : "declined";
-  if (request.activityId !== options.skipParticipantId) {
-    notifyEmployee(request.employeeId, {
-      title: options.closed ? "Cash advance request closed" : "Cash advance request declined",
-      message: `Your ${pesoText(request.amount)} cash advance request for ${request.activityTitle} was ${verb}: ${reason}`,
-      type: "warning",
-      link: { tab: "employee_portal", record: { kind: "assignment", id: request.activityId } }
-    });
-  }
+  notifyEmployee(request.employeeId, {
+    title: "Cash advance request declined",
+    message: `Your ${pesoText(request.amount)} cash advance request for ${request.activityTitle} was declined: ${reason}`,
+    type: "warning",
+    link: { tab: "employee_portal", record: { kind: "assignment", id: request.activityId } }
+  });
   for (const c of (request.covers || []).slice(1)) {
-    if (c.participantId === options.skipParticipantId) continue;
     const next = ownAdvanceTail(c.participantId).text;
     notifyEmployee(c.employeeId, {
-      title: options.closed ? "Group cash advance request closed" : "Group cash advance request declined",
-      message: `${request.employeeName}'s group cash advance request for ${request.activityTitle} was ${verb}${options.othersReason ? `: ${options.othersReason}` : "."}${next ? ` ${next}` : ""}`,
+      title: "Group cash advance request declined",
+      message: `${request.employeeName}'s group cash advance request for ${request.activityTitle} was declined.${next ? ` ${next}` : ""}`,
       type: "warning",
       link: { tab: "employee_portal", record: { kind: "assignment", id: c.participantId } }
     });
   }
 }
 
-// Whether a seminar is still to come (its first day after Manila's today): its attendance can't be
-// recorded yet, and someone's own cash advance can still be handed back in full (12z Part B).
+// A cash advance request still waiting when its seminar's first day comes expires (the user's rule of 2026-11-14):
+// Finance had until then to release or decline it. The whole request expires, a group's included. It stays on record,
+// "Declined" with `expiredAt` and the reason (EXPIRED_UNPROCESSED), so the seat is claimed back as a reimbursement as
+// after any decline, and the record says Finance didn't act on it in time. The holder, everyone it covered and Finance
+// are told, once each (dedupe keys), and the audit log has an entry. A vehicle request filed with it stays standing:
+// the Division Chief decides it. Run at startup, every minute, and before each cash-advance route reads or changes
+// requests (expireDueFirst), so none acts on a request due to expire. Saves when anything expired; returns how many.
+function expireDueRequests(): number {
+  const today = manilaToday();
+  const words = (v: unknown, fallback = ""): string => (typeof v === "string" && v.trim() ? v.trim() : fallback);
+  let expired = 0;
+  for (const a of (db.cashAdvances || []) as CashAdvance[]) {
+    if (!a || a.status !== "Requested") continue;
+    // Each request on its own (the security review): one damaged record can't stop the others' expiry, every minute.
+    try {
+      const prog = requestSeminar(a);
+      const firstDay = seminarFirstDay(prog);
+      if (!requestDueToExpire(a, firstDay, today)) continue;
+      // Everything worked out before the record changes, so a throw leaves the request as it was, to expire on the next
+      // pass, never expired with nobody told and nothing logged.
+      const title = words(prog?.title, words(a.activityTitle, "the seminar"));
+      const holder = words(a.employeeName, "The holder");
+      const day = formatLongDate(firstDay);
+      const members = (Array.isArray(a.covers) ? a.covers : []).filter(Boolean).slice(1);
+      const group = isGroupAdvance(a);
+      const count = group ? a.covers!.length : 1;
+      const requestNo = words(a.advanceNo, a.id);
+      const amount = pesoText(a.amount);
+      const vehicle: any = a.vehicleRequestId
+        ? (db.requests || []).find((r: any) => r && r.id === a.vehicleRequestId && r.status !== RequestStatus.REJECTED)
+        : null;
+      const vehicleNote = vehicle ? ` Vehicle request ${words(vehicle.vrsNo, vehicle.id)}, filed with it, still stands: the Division Chief decides it.` : "";
+      const at = new Date().toISOString();
+      a.status = "Declined";
+      a.declineReason = EXPIRED_UNPROCESSED;
+      a.decidedBy = "System";
+      a.decidedAt = at;
+      a.expiredAt = at;
+      a.expiredOn = firstDay;
+      expired++;
+      notifyEmployee(a.employeeId, {
+        title: "Cash advance request expired",
+        message: `Your ${amount} ${group ? "group " : ""}cash advance request for "${title}" expired on ${day}, the seminar's first day: Finance didn't release or decline it before then. The seminar is now claimed back as a reimbursement: once it ends and HR records your attendance, file your claim from your seminar card, with your official receipts.${group ? " Everyone it covered was told." : ""}${vehicleNote}`,
+        type: "warning",
+        link: { tab: "employee_portal", record: { kind: "assignment", id: a.activityId } },
+        dedupeKey: `ca-expired:${a.id}:${a.activityId}`
+      });
+      for (const c of members) {
+        notifyEmployee(c.employeeId, {
+          title: "Group cash advance request expired",
+          message: `${holder}'s group cash advance request for "${title}" expired on ${day}, the seminar's first day: Finance didn't release or decline it before then. You claim the seminar back as a reimbursement once it ends and HR records your attendance.`,
+          type: "warning",
+          link: { tab: "employee_portal", record: { kind: "assignment", id: c.participantId } },
+          dedupeKey: `ca-expired:${a.id}:${c.participantId}`
+        });
+      }
+      notify({ role: UserRole.FINANCE_OFFICER }, {
+        title: "Cash advance request expired",
+        message: `${holder}'s ${amount} ${group ? `group cash advance request (for ${count} participants)` : "cash advance request"} ${requestNo} for "${title}" expired on ${day}, the seminar's first day, because it was neither released nor declined before then. It stays on record as expired, and the seminar is claimed back as a reimbursement: no cash is handed out on it, since a cash advance is recorded as released before the cash is handed over.${vehicleNote}`,
+        type: "warning",
+        link: { tab: "finance", subTab: "liquidation" },
+        dedupeKey: `ca-expired:${a.id}`
+      });
+      logEvent("system", "system", "System", "Expire Cash Advance Request",
+        `${requestNo}, ${quoteWords(holder)}'s ${amount} request for ${quoteWords(title)}${group ? ` covering ${count} participants` : ""}: Finance didn't release or decline it before the seminar's first day (${day}), so it expired; the seminar is claimed back as a reimbursement. The holder${group ? ", everyone it covered" : ""} and Finance were told.${vehicleNote}`);
+    } catch (err) {
+      console.error(`[cash-advance-expiry] request ${String(a?.id ?? "?").slice(0, 80)} couldn't be checked:`, err);
+    }
+  }
+  if (expired > 0) {
+    saveDB();
+    console.log(`[cash-advance-expiry] ${expired} request(s) expired`);
+  }
+  return expired;
+}
+
+// The seminar a cash advance request is for (through its enrolment), and that seminar's first day, the day the request
+// expires if Finance hasn't acted on it ("" when it has no dates).
+function requestSeminar(a: CashAdvance): any {
+  const enrolment = (db.trainingParticipants || []).find((p: any) => p && p.id === a?.activityId);
+  return enrolment ? (db.trainingPrograms || []).find((x: any) => x && x.id === enrolment.trainingProgramId) || null : null;
+}
+function requestFirstDay(a: CashAdvance): string {
+  return seminarFirstDay(requestSeminar(a));
+}
+
+// What Finance is told when it acts on a request that expired.
+function expiredRequestText(a: CashAdvance): string {
+  const on = isIsoDate(a.expiredOn) ? formatLongDate(String(a.expiredOn).slice(0, 10)) : manilaLongDate(a.expiredAt);
+  return `This request expired on ${on}, the seminar's first day: Finance didn't release or decline it before then, so the seminar is claimed back as a reimbursement.`;
+}
+
+// Expires what is due before a cash-advance route reads or changes requests (expireDueRequests), so nothing acts on a
+// request whose seminar's first day has come since the last sweep: the cash-advance routes, the employee's seminar list
+// and filing a report. Runs after sign-in, outside the route's transaction, so a refusal by the route doesn't undo an
+// expiry. (Not before the attendance route: recording attendance never touches a request, the user's rule.)
+function expireDueFirst(_req: any, _res: any, next: any) {
+  try {
+    expireDueRequests();
+  } catch (err) {
+    console.error("[cash-advance-expiry] failed:", err);
+  }
+  next();
+}
+
+// Whether a seminar is still to come (its first day after Manila's today): someone's own cash advance can still be
+// handed back in full (12z Part B). (HR records the attendance only once the seminar has ended, seminarHasEnded.)
 function seminarNotStarted(programId: string): boolean {
   const prog = (db.trainingPrograms || []).find((p: any) => p.id === programId);
   return !!prog && isIsoDate(prog.startDate) && String(prog.startDate).slice(0, 10) > manilaToday();
@@ -8790,10 +8805,12 @@ function canAccessEmployeeTrainingRecords(user: any, employeeForms: string[]): b
   return !!own && employeeForms[0] === own.id;
 }
 
-// Seminars run within office hours (the user, 2026-10-25): each day starts at 8:00 AM or later and
-// ends by 5:00 PM, and a one-day seminar ends after it starts. Times are "HH:MM" (24-hour), as the
-// planner's time boxes send them, so they compare as text. TrainingDevelopmentView checks the same
-// on Save (seminarTimeProblem there), and the server is the rule.
+// Seminars run within office hours (the user, 2026-10-25, confirmed 2026-11-14): HR schedules a seminar within the
+// approved working hours, 8:00 AM to 5:00 PM, so none starts before 8:00 AM or ends after 5:00 PM (9:00 AM to 3:00 PM,
+// or 10:00 AM to 3:00 PM, is fine; 5:00 AM to 7:00 PM is not), and a one-day seminar ends after it starts. Times are
+// "HH:MM" (24-hour), as the planner's time boxes send them, so they compare as text. HR's attendance waits for the last
+// day's end time (seminarHasEnded). TrainingDevelopmentView checks the same on Save (seminarTimeProblem there), and the
+// server is the rule.
 const OFFICE_START = "08:00";
 const OFFICE_END = "17:00";
 function seminarTimeProblem(startDate: unknown, startTime: unknown, endDate: unknown, endTime: unknown): string | null {
@@ -10857,8 +10874,8 @@ app.put("/api/training/programs/:id", authenticateToken, transactional((req: any
   if ("problem" in tdpSent) return res.status(400).json({ status: "error", message: tdpSent.problem });
   const seminarSent = body.seminarTdpException == null ? null : readSeminarTdpJustification(body.seminarTdpException, manilaToday());
   if (seminarSent && "problem" in seminarSent) return res.status(400).json({ status: "error", message: seminarSent.problem });
-  // The times as they will be saved (a value not sent keeps the stored one). A seminar saved before
-  // the office-hours rule with times outside it has to be corrected on its next edit.
+  // The times as they will be saved (a value not sent keeps the stored one). A seminar saved with times outside office
+  // hours (while the rule was lifted on 2026-11-14, or before 2026-10-25) has to be corrected on its next edit.
   const timeProblem = seminarTimeProblem(
     startDate,
     body.startTime !== undefined ? body.startTime : existingProgram.startTime,
@@ -11417,7 +11434,7 @@ app.post("/api/training/participants/:id/replace", authenticateToken, transactio
       message: step.why === "ownAdvanceOut"
         ? seminarNotStarted(prog.id)
           ? `${originalName}'s cash advance ${a.advanceNo} (DV ${a.dvNo}) is out. Finance records its refund first (it can be handed back before the seminar starts), then send the representative.`
-          : `${originalName}'s cash advance ${a.advanceNo} (DV ${a.dvNo}) is out, and the seminar has started, so it can't be handed back before it now. Record their attendance: if they didn't attend, Finance collects it back.`
+          : `${originalName}'s cash advance ${a.advanceNo} (DV ${a.dvNo}) is out, and the seminar has started, so it can't be handed back before it now. Once it ends, record their attendance: if they didn't attend, Finance collects it back.`
         : step.why === "holdsGroupRequest"
           ? `${originalName} asked Finance for a cash advance that covers others too. Finance declines it first, then send the representative.`
           : a.activityId === original.id
@@ -11597,7 +11614,7 @@ app.get("/api/training/participants/:id/certificate", authenticateToken, (req: a
   res.json({ status: "success", data: { name: certificate.name, type: certificate.type, content } });
 });
 
-// Attendance: HR records it per participant once the seminar has started. It is stored
+// Attendance: HR records it per participant once the seminar has ended (12ak). It is stored
 // apart from the liquidation status, and only "Attended" opens the liquidation form
 // (seminarFormEligibility). Marking someone Attended tells them their form is ready.
 app.put("/api/training/participants/:id/attendance", authenticateToken, transactional((req: any, res: any) => {
@@ -11619,9 +11636,18 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   if (prog.archivedAt) {
     return res.status(409).json({ status: "error", message: `"${prog.title}" is archived. Restore it before changing attendance.` });
   }
-  const start = isIsoDate(prog.startDate) ? String(prog.startDate).slice(0, 10) : "";
-  if (!start || start > manilaToday()) {
-    return res.status(400).json({ status: "error", message: `Attendance can be recorded once the seminar starts${start ? ` on ${start}` : ""}.` });
+  // HR records attendance only once the seminar has officially ended (the user's rule of 2026-11-14): after its last
+  // day's end time, on Manila's clock, or after its last day when no end time is on record. Before, it could be
+  // recorded from the first day.
+  if (!seminarHasEnded(prog, manilaMoment(Date.now()))) {
+    const lastDay = seminarLastDay(prog);
+    const endsAt = clockText(prog.endTime);
+    return res.status(400).json({
+      status: "error",
+      message: lastDay
+        ? `Attendance can be recorded once the seminar has ended: after ${endsAt ? `${endsAt} on ` : ""}${formatLongDate(lastDay)}.`
+        : "This seminar has no dates yet, so its attendance can't be recorded."
+    });
   }
   if (attendance === "Did not attend") {
     // Their own report, or their group's: the report counts them among those who attended.
@@ -11704,49 +11730,12 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   const addedTo = attendance === "Attended" && settledBy && !settledBy.financeValidatedAt
     && addCertificateToReport(settledBy, participant.id, employeeByKey(participant.employeeId)?.fullName || participant.employeeId)
     ? settledBy.submissionNo : "";
-  // A group's cash advance covering the HR officer, read before a request still waiting is closed below, so the
-  // self-approval flag at the end still sees it.
+  // A group's cash advance covering the HR officer, for the self-approval flag at the end.
   const actorsGroup = advanceCovering(db.cashAdvances || [], participant.id, ["Requested", "Released"]);
-  // A cash advance request still waiting closes now, rather than staying in Finance's list:
-  // - "Did not attend": nothing can be released to someone who didn't attend. (A group request they asked for closes
-  //   too; one that only covers them is re-priced without them when Finance releases it.)
-  // - "Attended" (the user's rule, 12ai): HR's record decides the seat's money path, and nobody the request covers got
-  //   the cash before attending, so the whole request closes, a colleague's group request covering them included. The
-  //   seminar is then claimed back as a reimbursement. The person recorded hears it in their own notice below.
-  const closedRequest = attendance === "Did not attend" ? pendingRequestFor(participant.id) : pendingRequestCovering(participant.id);
-  if (closedRequest && attendance === "Did not attend") {
-    declineAdvanceRequest(closedRequest, "HR recorded that you did not attend the seminar.", actor.fullName,
-      { othersReason: `HR recorded that ${closedRequest.employeeName} did not attend the seminar.` });
-  } else if (closedRequest) {
-    // (What to do next is each seat's own: the card says it, once HR records that seat's attendance.)
-    declineAdvanceRequest(closedRequest, CLOSED_BY_ATTENDANCE, actor.fullName,
-      { closed: true, skipParticipantId: participant.id, othersReason: "HR recorded the seminar's attendance before Finance released it" });
-    // Finance is told at once, and the closure has an entry of its own (both reviews): Finance may have handed out the
-    // cash on a voucher not yet recorded (a DV can be dated before its release is). Its release can then still be
-    // recorded, with a voucher dated on or before the closing day, while nothing settles its seats another way (lateReleaseProblem,
-    // the user's decision of 2026-11-13).
-    const requestNo = closedRequest.advanceNo || closedRequest.id;
-    const coveredCount = isGroupAdvance(closedRequest) ? closedRequest.covers!.length : 1;
-    notify({ role: UserRole.FINANCE_OFFICER }, {
-      title: "Cash advance request closed by HR's attendance",
-      message: `HR recorded the attendance at "${String(prog.title).trim()}" before ${closedRequest.employeeName}'s ${pesoText(closedRequest.amount)} ${isGroupAdvance(closedRequest) ? `group cash advance request (for ${coveredCount} participants)` : "cash advance request"} ${requestNo} was released, so it was closed and the seminar is claimed back as a reimbursement. If its cash was already handed out, record its release under Cash Advance Requests, "Closed by HR's attendance", with the voucher (dated on or before ${formatLongDate(manilaDateOf(closedRequest.decidedAt))}), within ${LATE_RELEASE_DAYS} days (by ${formatLongDate(lateReleaseUntil(manilaDateOf(closedRequest.decidedAt)))}); otherwise nothing is needed.`,
-      type: "warning",
-      link: { tab: "finance", subTab: "liquidation", record: { kind: "cashAdvance", id: closedRequest.id } },
-      dedupeKey: `ca-closed:${closedRequest.id}`
-    });
-    logEvent(actor.id, actor.username, actor.role, "Close Cash Advance Request",
-      `${requestNo}, ${closedRequest.employeeName}'s ${pesoText(closedRequest.amount)} request for "${String(prog.title).trim()}"${isGroupAdvance(closedRequest) ? ` covering ${coveredCount} participants` : ""}: HR recorded ${employeeByKey(participant.employeeId)?.fullName || participant.employeeId}'s attendance before its release, so it was closed; the seminar is claimed back as a reimbursement. Finance was told.`);
-  }
-  // A vehicle request filed with it stays standing: the Division Chief decides it (and while it stands, no
-  // Transportation line can be claimed, R3).
-  const closedVehicle: any = closedRequest?.vehicleRequestId
-    ? (db.requests || []).find((r: any) => r && r.id === closedRequest.vehicleRequestId && r.status !== RequestStatus.REJECTED)
-    : null;
-  const closedNote = !closedRequest ? ""
-    : (attendance === "Did not attend"
-      ? ` Their ${pesoText(closedRequest.amount)} cash advance request was closed, and they were told why.`
-      : ` ${closedRequest.activityId === participant.id ? `Their ${pesoText(closedRequest.amount)} cash advance request` : `${closedRequest.employeeName}'s ${pesoText(closedRequest.amount)} group cash advance request covering them`}, still with Finance, was closed: the attendance came before its release, so the seminar is claimed back as a reimbursement${isGroupAdvance(closedRequest) ? ", and everyone it covered was told" : ""}.`)
-    + (closedVehicle ? ` Vehicle request ${closedVehicle.vrsNo || closedVehicle.id}, filed with it, still stands: the Division Chief decides it.` : "");
+  // Recording attendance never touches a cash advance request (the user's rule of 2026-11-14): it doesn't release,
+  // decline, close or change one. (Until then "Did not attend" closed one's own request still waiting, and since
+  // 2026-11-12 "Attended" closed any request covering the seat, 12ai.) None can still be waiting now anyway: a request
+  // expires on the seminar's first day (expireDueRequests), and attendance waits for the seminar's end.
   const budgetNote = freed > 0
     ? after.stage === "nobodyAttended"
       ? ` Nobody attended, so the seminar now counts only what it spent: ${pesoText(freed)} returns to Unallocated.`
@@ -11765,7 +11754,7 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
       ? ` Their ${pesoText(outstanding)} share of the group's cash advance they hold stays held until the group's liquidation report (or, if nobody it covers attended, its refund) settles it.`
       : attendance === "Did not attend" && outstanding > 0
         ? ` Their ${pesoText(outstanding)} cash advance is still out, and stays held for the seminar until Finance records the refund.`
-        : "") + closedNote;
+        : "");
 
   const emp = (db.employees || []).find((e: any) => e.id === participant.employeeId || e.employeeId === participant.employeeId);
   // The form opens in the Employee Portal, which needs a Personnel login. Only then is
@@ -11793,7 +11782,8 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
     }
   } else if (attendance === "Attended" && personnelLogin && !coveredByOther) {
     // Worded by the seat's money path, which HR's "Attended" has just decided (12ai): a released cash advance is
-    // liquidated; with none, the seminar is claimed back as a reimbursement. Once per seat and path.
+    // liquidated; with none (none asked for, declined, expired or refunded), the seminar is claimed back as a
+    // reimbursement. Once per seat and path.
     const seminarTitle = String(prog.title).trim();
     if (releasedAdvanceForAssignment(participant.id)) {
       notify({ employee: emp.employeeId }, {
@@ -11808,8 +11798,10 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
       // No allowance on the seat (a free seminar, or none set yet) is a different matter from the office having paid
       // the whole share (the code review of 12ai).
       const noAllowance = !(centavos(Number(participant.allowanceAllocated || 0)) > 0);
-      const closedText = closedRequest
-        ? ` (the cash advance request${closedRequest.activityId === participant.id ? "" : ` ${closedRequest.employeeName} made for your group`} was still with Finance, so it was closed)`
+      // A request that expired before Finance acted on it (expireDueRequests) is named, so the employee knows why.
+      const latest = currentAdvanceFor(participant.id);
+      const closedText = requestExpired(latest)
+        ? ` (the cash advance request${latest!.activityId === participant.id ? "" : ` ${latest!.employeeName} made for your group`} expired on the seminar's first day, before Finance released it)`
         : "";
       notify({ employee: emp.employeeId }, {
         title: "Claim your seminar back as a reimbursement",
@@ -11834,8 +11826,7 @@ app.put("/api/training/participants/:id/attendance", authenticateToken, transact
   const ownAttendance = isOwnRecord(actor, participant.employeeId);
   if (ownAttendance) flagSelfApproval(actor, `recorded their own attendance at "${String(prog.title).trim()}": ${previous} → ${attendance}`);
   // On a group's advance that covers the HR officer, others' attendance decides when its report can be
-  // filed, how much it may spend and whether it is refunded in full: flagged the same way. (Read above, before
-  // a request still waiting was closed.)
+  // filed, how much it may spend and whether it is refunded in full: flagged the same way.
   if (!ownAttendance && actorsGroup && isGroupAdvance(actorsGroup) && advanceInvolves(actor, actorsGroup)) {
     flagSelfApproval(actor, `recorded ${name}'s attendance at "${String(prog.title).trim()}" (${previous} → ${attendance}) on group cash advance ${actorsGroup.advanceNo || "request"}, which covers them`);
   }
@@ -12376,6 +12367,11 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`[IPFMS Server Host] Live operational portal initialized on core PORT ${PORT}`);
   // Liquidation-deadline reminders: once at startup, then hourly. Each notice is
   // deduplicated, so the short interval only makes delivery timelier.
+  // Cash advance requests still waiting on their seminar's first day expire (the user's rule of 2026-11-14): at startup,
+  // then every minute, so one expires within a minute of Manila's midnight even with no route asking first.
+  const expirySweep = () => { try { expireDueRequests(); } catch (err) { console.error("[cash-advance-expiry] sweep failed:", err); } };
+  expirySweep();
+  setInterval(expirySweep, 60 * 1000);
   runLiquidationReminderSweep();
   setInterval(runLiquidationReminderSweep, 60 * 60 * 1000);
   runCertificateReminderSweep();

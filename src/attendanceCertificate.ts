@@ -12,10 +12,51 @@ export const MAX_OFFICER_CERTIFICATE_UPLOADS = 10;
 /** The day a seminar ends: the first day of a one-day seminar with no end date. "" when neither is a date. */
 export function seminarLastDay(seminar: { startDate?: unknown; endDate?: unknown } | null | undefined): string {
   for (const value of [seminar?.endDate, seminar?.startDate]) {
-    const day = String(value ?? "").slice(0, 10);
-    if (isCalendarDate(day)) return day;
+    const day = storedDay(value);
+    if (day) return day;
   }
   return "";
+}
+
+/** A stored date's day (YYYY-MM-DD), read only from text, so a damaged value can't throw; "" when it isn't one. */
+function storedDay(value: unknown): string {
+  const day = typeof value === "string" ? value.slice(0, 10) : "";
+  return isCalendarDate(day) ? day : "";
+}
+
+/** The day a seminar begins: the earlier of its start and end dates (one stored out of order before 12x's date checks
+ * begins on the earlier), either when only one is a date. "" when neither is. Asking for a cash advance closes on it,
+ * and a request still waiting expires on it (the user's rule of 2026-11-14), so it never comes after the last day. */
+export function seminarFirstDay(seminar: { startDate?: unknown; endDate?: unknown } | null | undefined): string {
+  const start = storedDay(seminar?.startDate), end = storedDay(seminar?.endDate);
+  return start && end ? (start <= end ? start : end) : start || end;
+}
+
+/** A moment on Manila's clock (UTC+8, no daylight saving): its day (YYYY-MM-DD) and time (HH:MM). */
+export function manilaMoment(ms: number): { day: string; time: string } {
+  const iso = new Date(ms + 8 * 60 * 60 * 1000).toISOString();
+  return { day: iso.slice(0, 10), time: iso.slice(11, 16) };
+}
+
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Whether a seminar has officially ended, on Manila's clock (the user's rule of 2026-11-14: HR records the attendance
+ * only then): its last day's end time has passed, or, with no end time on record, its last day has. A seminar with no
+ * dates hasn't. */
+export function seminarHasEnded(seminar: { startDate?: unknown; endDate?: unknown; endTime?: unknown } | null | undefined,
+  now: { day: string; time: string }): boolean {
+  const last = seminarLastDay(seminar);
+  if (!last || !isCalendarDate(now.day)) return false;
+  if (now.day !== last) return now.day > last;
+  const end = typeof seminar?.endTime === "string" && CLOCK.test(seminar.endTime) ? seminar.endTime : "";
+  return !!end && CLOCK.test(now.time) && now.time >= end;
+}
+
+/** "5:00 PM" for "17:00"; "" for anything that isn't a time. */
+export function clockText(time: unknown): string {
+  if (typeof time !== "string" || !CLOCK.test(time)) return "";
+  const [h, m] = time.split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
 export interface CertificateSeat {

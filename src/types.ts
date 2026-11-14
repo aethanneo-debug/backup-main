@@ -338,8 +338,9 @@ export interface VehicleRequest extends BaseRequest {
 export interface VehicleRequestView extends VehicleRequest {
   /** The seminar (the employee, HR and the Administrator), and why the trip may be off, if it may. */
   linkedSeminar?: { title: string; startDate?: string; endDate?: string; tripProblem?: string | null } | null;
-  /** The cash advance (the employee, Finance and the Administrator): its number once released. */
-  linkedAdvance?: { advanceNo: string | null; status: CashAdvance["status"] } | null;
+  /** The cash advance (the employee, Finance and the Administrator): its number once released. `expired`: the request
+   * expired on the seminar's first day, Finance not having released or declined it (12ak). */
+  linkedAdvance?: { advanceNo: string | null; status: CashAdvance["status"]; expired?: boolean } | null;
 }
 
 /** A vehicle request filed with a seminar's cash advance, as the cash-advance screens show it. */
@@ -714,15 +715,26 @@ export interface CashAdvance {
   // "Refunded": the employee did not attend and gave the whole advance back (requirement 6).
   // "Requested": an employee asked for it from their seminar and Finance hasn't acted yet; no
   // money is out, so dvNo, dvDate, issuedBy and issuedAt stay blank until it is released.
-  // "Declined": Finance turned the request down (declineReason), or HR's attendance closed it while it waited
-  // ("Did not attend"; and since 2026-11-12 "Attended", which makes the seminar a reimbursement, 12ai). The employee
-  // may ask again while asking is still open (before the seminar's last day, src/reimbursement.ts).
+  // "Declined": Finance turned the request down (declineReason); or it expired, Finance having neither released nor
+  // declined it by the seminar's first day (expiredAt, since 2026-11-14); or, before 2026-11-14, HR's attendance closed
+  // it while it waited (12ai). Each makes the seminar a reimbursement. The employee may ask again while asking is still
+  // open (before the seminar's first day, src/reimbursement.ts).
   status: "Requested" | "Released" | "Declined" | "Liquidated" | "Cancelled" | "Refunded";
   requestedAt?: string;           // ISO timestamp of the employee's request
   requestedBy?: string;           // the employee's name, as signed in
-  decidedBy?: string;             // who released or declined the request (the Financial Officer, or HR when attendance closed it)
+  decidedBy?: string;             // who released or declined the request (the Financial Officer; HR when attendance closed it; "System" when it expired)
   decidedAt?: string;             // ISO timestamp
   declineReason?: string;
+  // When the request expired (ISO timestamp): Finance hadn't released or declined it by the seminar's first day (the
+  // user's rule of 2026-11-14, requestExpired in src/reimbursement.ts). Its status is "Declined", with declineReason
+  // saying why, so the record keeps the request's history.
+  expiredAt?: string;
+  // The day it expired on: its seminar's first day (YYYY-MM-DD), which every text names, even when the sweep ran later
+  // (a server that was off at midnight).
+  expiredOn?: string;
+  // DERIVED, never stored: on a request still waiting, the day it expires (its seminar's first day), sent to Finance by
+  // GET /api/cash-advances.
+  expiresOn?: string;
   liquidationId?: string;         // the report that settled it
   liquidatedAt?: string;
   refundOrNo?: string;            // the official receipt for the refund
@@ -741,14 +753,10 @@ export interface CashAdvance {
   vehicleRequestId?: string;
   // DERIVED, never stored: that request's number and status, added by GET /api/cash-advances.
   vehicle?: LinkedVehicleSummary;
-  // Released after HR's "Attended" had closed the request (12ai, the user's decision of 2026-11-13): its cash went out
-  // on a voucher dated on or before HR's record and was recorded only afterwards. When the request was closed, and by whom.
+  // Released after HR's "Attended" had closed the request, on a voucher dated before HR's record (12ai's late release,
+  // 2026-11-13 to 2026-11-14): when it was closed, and by whom. Nothing writes it since the user's rule of 2026-11-14 (a
+  // release is recorded before the cash is handed over); a record released in those days may still carry it.
   releasedAfterClosure?: { closedAt: string; closedBy: string };
-  // DERIVED, never stored: for a request HR's attendance closed while nothing has settled its seats another way, sent to
-  // Finance and the Administrator by GET /api/cash-advances: the Manila day it was closed (the latest voucher date its
-  // release can carry), the last day its release can be recorded (30 days after, LATE_RELEASE_DAYS), and what would still
-  // refuse its release now (e.g. COA's one advance), or null when nothing would.
-  lateRelease?: { closedOn: string; until: string; problem: string | null };
 }
 
 // The instructor's note 11: a reviewer returns a liquidation report with a checklist of what
@@ -1542,7 +1550,7 @@ export interface TrainingParticipant {
   employeeId: string;
   status: "Assigned" | "Completed" | "Cancelled" | "Liquidated" | "Liquidation Pending" | "Archived";
   allowanceAllocated: number;
-  // Recorded by HR once the seminar has started, separately from `status` (which tracks
+  // Recorded by HR once the seminar has ended (12ak), separately from `status` (which tracks
   // the liquidation). Only an "Attended" enrolment gets a liquidation form. Unset means
   // not recorded yet.
   attendance?: AttendanceStatus;

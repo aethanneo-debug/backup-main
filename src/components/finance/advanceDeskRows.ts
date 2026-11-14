@@ -24,9 +24,9 @@ export interface FundableRow {
   pendingRequestId?: string | null;
   /** Why no request can come yet (no Personnel login, no allowance, another advance out), or null. */
   requestBlocked?: string | null;
-  /** Why no request can come for this seat any more, or null (12ai): HR recorded "Attended", a certificate of attendance
-   * is on file, or the seminar's last day has come, so it is claimed back as a reimbursement. A request already waiting
-   * (`pendingRequestId`) can still be released, until HR records the attendance. */
+  /** Why no request can come for this seat any more, or null: HR recorded "Attended", a certificate of attendance is on
+   * file, or the seminar's first day has come (the user's rule of 2026-11-14), so it is claimed back as a reimbursement.
+   * A request still waiting expires on that first day. */
   requestClosed?: string | null;
   requestedAt?: string | null;
   /** The voucher the advance went out on. */
@@ -74,7 +74,7 @@ export function advanceStage(row: FundableRow): AdvanceStage | null {
   if (row.advanceStatus === "Refunded" && row.refundedBeforeSeminar) return "returnedEarly";
   if (row.advanceStatus === "Refunded" && (row.didNotAttend || row.requestClosed)) return "refunded";
   if (row.didNotAttend || row.replaced || row.refundedBeforeSeminar || row.liquidationFiled) return null;
-  // A request already waiting can still be released, until HR records the attendance.
+  // A request already waiting can still be released, until it expires on the seminar's first day (12ak).
   if (row.requestClosed && !row.pendingRequestId) return null;
   return "unfunded";
 }

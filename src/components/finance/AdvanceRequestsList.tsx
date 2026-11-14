@@ -8,9 +8,7 @@ import ModalDialog from "../ui/ModalDialog";
 import { DataTable, TablePager, TableSearch, ViewButton } from "../ui/DataTable";
 import { useTableView } from "../ui/useTableView";
 import { dvNumberFrom, dvPrefix, readDvNumber } from "../../dvNumber";
-import {
-  ClosedRequestNote, ClosedRequestsIntro, REQUEST_COLUMNS, REQUEST_SORTS, RequestChips, RequestFacts, groupOf, isClosedRequest, requestSearchText
-} from "./advanceRequestColumns";
+import { REQUEST_COLUMNS, REQUEST_SORTS, RequestFacts, groupOf, requestSearchText } from "./advanceRequestColumns";
 import DvNumberFields from "./DvNumberFields";
 
 interface Props {
@@ -31,9 +29,8 @@ const SECONDARY = `${BUTTON} border border-slate-300 bg-white text-slate-600 hov
  * Finance releases one with its disbursement voucher, or declines it saying why. The amount is
  * the employee's allowance, set by the server, so it is shown, not typed. A group's request is one
  * row (HSAC RAB 1): the one who asked; its window has everyone it covers and the total. Newest first.
- * Under "Closed by HR's attendance": requests HR's "Attended" closed before their release (12ai), whose release can
- * still be recorded if the cash went out first, on a voucher dated on or before that day (the user's decision of
- * 2026-11-13). The server lists only those nothing has settled another way.
+ * A release is recorded here before the cash is handed over (the user's rule of 2026-11-14), and a request not released
+ * or declined by its seminar's first day expires (12ak): the Expires column says when.
  */
 export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }: Props) {
   const [requests, setRequests] = useState<CashAdvance[]>([]);
@@ -61,15 +58,10 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
   // Bumped after a refusal, so the voucher fields suggest a fresh serial (another officer may have taken the one shown).
   const [dvRefresh, setDvRefresh] = useState(0);
   const [notice, setNotice] = useState("");
-  // A refusal whose request has since left the list (e.g. HR marked the employee absent, which
-  // closed it): its row is gone, so the server's reason shows here instead.
+  // A refusal whose request has since left the list (another officer declined it, or it expired on its seminar's first
+  // day): its row is gone, so the server's reason shows here instead.
   const [refusal, setRefusal] = useState("");
-  // The requests waiting, or those HR's attendance closed. `listed` is the list shown: once the last closed request has
-  // left (its chip with it), the waiting ones (the code review: no chip was left to switch back).
-  const [chip, setChip] = useState<"waiting" | "closed">("waiting");
-  const closedCount = requests.filter(isClosedRequest).length;
-  const waitingCount = requests.length - closedCount;
-  const listed = closedCount > 0 ? chip : "waiting";
+  const waitingCount = requests.length;
 
   const noticeRef = useRef<HTMLParagraphElement>(null);
   const releaseRef = useRef<HTMLButtonElement>(null);
@@ -85,9 +77,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
     rowId: r => r.id,
     searchText: requestSearchText,
     sorts: REQUEST_SORTS,
-    defaultSort: { key: "asked", dir: "desc" },
-    filter: r => isClosedRequest(r) === (listed === "closed"),
-    filterKey: listed
+    defaultSort: { key: "asked", dir: "desc" }
   });
 
   // The requests still waiting; returns them (null when the load failed).
@@ -97,8 +87,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
     try {
       const res = await apiCall("/api/cash-advances");
       if (res?.status !== "success") throw new Error(res?.message || "Could not load the requests.");
-      // (A closed request only while its release can still be recorded: the server says why not otherwise.)
-      const waiting = ((res.data ?? []) as CashAdvance[]).filter(a => a && (a.status === "Requested" || !!a.lateRelease));
+      const waiting = ((res.data ?? []) as CashAdvance[]).filter(a => a && a.status === "Requested");
       setRequests(waiting);
       return waiting;
     } catch (err: any) {
@@ -126,7 +115,6 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
     if (!fresh || !shown) return;
     const found = requests.find(r => r.id === shown.id);
     if (found) {
-      setChip(isClosedRequest(found) ? "closed" : "waiting");
       table.reveal(shown.id);
       openedForNotice.current = true;
       setViewingId(shown.id);
@@ -178,9 +166,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
   function open(id: string, kind: "release" | "decline") {
     setActing({ id, kind });
     setDvSerial("");
-    // A closed request's voucher is dated on or before the day it was closed, so the form starts there.
-    const closedOn = requests.find(r => r.id === id)?.lateRelease?.closedOn;
-    setDvDate(closedOn && closedOn < getLocalTodayString() ? closedOn : getLocalTodayString());
+    setDvDate(getLocalTodayString());
     setReason("");
     setFormError("");
     setNotice("");
@@ -221,7 +207,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
       await load();
       onChanged?.();
     } catch (err: any) {
-      // apiCall throws with the server's reason (e.g. the employee was since marked absent).
+      // apiCall throws with the server's reason (e.g. the request expired, or HR re-priced the allowance).
       const message = err?.message || "That didn't go through.";
       setFormError(message);
       setDvRefresh(n => n + 1);
@@ -242,7 +228,6 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
 
   const form = viewed && acting?.id === viewed.id ? acting.kind : null;
   const isGroup = !!viewed && groupOf(viewed).length > 1;
-  const viewedClosed = !!viewed && isClosedRequest(viewed);
 
   return (
     <SectionCard
@@ -278,7 +263,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
           )}
           {alreadyHandled && (
             <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-              That request is no longer here: it was released or declined, its seminar is settled another way, or the days to record its release have passed.
+              That request is no longer here: it was released or declined, or it expired on its seminar&rsquo;s first day.
             </p>
           )}
         </div>
@@ -310,14 +295,12 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
       {requests.length > 0 && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-            {closedCount > 0 && <RequestChips chip={chip} onChip={setChip} waiting={waitingCount} closed={closedCount} />}
             <TableSearch table={table} id="request-search" label="Search the cash advance requests" placeholder="Employee, seminar or vehicle" />
           </div>
-          {listed === "closed" && <ClosedRequestsIntro />}
           <DataTable
             table={table}
             columns={REQUEST_COLUMNS}
-            caption={listed === "closed" ? "Cash advance requests closed by HR's attendance, newest first" : "Cash advance requests waiting for Finance, newest first"}
+            caption="Cash advance requests waiting for Finance, newest first"
             rowId={r => r.id}
             actions={r => <ViewButton label={`${r.employeeName}'s request`} onClick={() => view(r.id)} />}
             minWidth={720}
@@ -358,44 +341,44 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
               >
                 {saving && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
                 {form === "release"
-                  ? saving ? "Releasing…" : `${viewedClosed ? "Record release of" : "Release"} ${formatCurrency(amountOf(viewed))}`
+                  ? saving ? "Releasing…" : `Release ${formatCurrency(amountOf(viewed))}`
                   : saving ? "Declining…" : "Decline request"}
               </button>
             </>
           ) : (
             <>
               <button type="button" onClick={closeView} className={SECONDARY}>Close</button>
-              {/* A closed request has nothing to decline: its release is recorded, or it stays closed. */}
-              {!viewedClosed && (
-                <button
-                  ref={declineRef}
-                  type="button"
-                  onClick={() => open(viewed.id, "decline")}
-                  className={`${BUTTON} border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 focus-visible:ring-rose-500`}
-                >
-                  Decline<span className="sr-only"> {viewed.employeeName}&rsquo;s request</span>
-                </button>
-              )}
-              {/* (A closed request whose release would still be refused says why in its note, with no button.) */}
-              {!viewed.lateRelease?.problem && (
-                <button
-                  ref={releaseRef}
-                  type="button"
-                  onClick={() => open(viewed.id, "release")}
-                  className={`${BUTTON} bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus-visible:ring-blue-500`}
-                >
-                  {viewedClosed ? "Record release" : "Release"}<span className="sr-only"> {viewed.employeeName}&rsquo;s advance</span>
-                </button>
-              )}
+              <button
+                ref={declineRef}
+                type="button"
+                onClick={() => open(viewed.id, "decline")}
+                className={`${BUTTON} border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 focus-visible:ring-rose-500`}
+              >
+                Decline<span className="sr-only"> {viewed.employeeName}&rsquo;s request</span>
+              </button>
+              <button
+                ref={releaseRef}
+                type="button"
+                onClick={() => open(viewed.id, "release")}
+                className={`${BUTTON} bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus-visible:ring-blue-500`}
+              >
+                Release<span className="sr-only"> {viewed.employeeName}&rsquo;s advance</span>
+              </button>
             </>
           )}
         >
           <div className="space-y-3 text-xs text-slate-700">
             <RequestFacts request={viewed} />
-            {viewedClosed && <ClosedRequestNote request={viewed} />}
 
             {form && (
               <div className="space-y-3 border-t border-slate-200 pt-3">
+                {/* The order of things (the user's rule of 2026-11-14): the release is recorded, then the cash goes out. */}
+                {form === "release" && (
+                  <p data-release-first="" className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-800">
+                    Record the release here first, then hand over the cash: a cash advance is recorded as released in the
+                    system before the money is handed to the employee.
+                  </p>
+                )}
                 {form === "release" && isGroup && (
                   <p className="text-[11px] text-slate-500">
                     Each person is checked again when you release it: anyone who no longer qualifies (marked absent,
@@ -405,7 +388,7 @@ export default function AdvanceRequestsList({ focus, onFocusHandled, onChanged }
                 {form === "release" ? (
                   // The date first, then only the serial (DvNumberFields.tsx).
                   <DvNumberFields prefix="rq" recordId={viewed.id} dvDate={dvDate} onDvDate={setDvDate} serial={dvSerial} onSerial={setDvSerial}
-                    onWarning={setFormError} disabled={saving} maxDate={viewed.lateRelease?.closedOn || undefined} refresh={dvRefresh} />
+                    onWarning={setFormError} disabled={saving} refresh={dvRefresh} />
                 ) : (
                   <div className="space-y-1">
                     <label htmlFor={`rq-why-${viewed.id}`} className="font-mono text-[10px] font-bold uppercase text-slate-500">Why it is declined (the employee sees this)</label>

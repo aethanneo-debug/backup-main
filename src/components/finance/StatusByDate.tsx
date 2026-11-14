@@ -3,7 +3,7 @@ import { ClipboardCheck, HandCoins, Receipt } from "lucide-react";
 import { manilaDay } from "../../trainingCalendar";
 import PanelBoundary from "../dashboard/PanelBoundary";
 import { presetRange, statusFigures, type RangePreset, type StatusAdvance, type StatusReport } from "./statusFigures";
-import LiquidationsDonut from "./status/LiquidationsDonut";
+import StatusDonut from "./status/StatusDonut";
 import RangeControls from "./status/RangeControls";
 import StatusBars from "./status/StatusBars";
 import StatusPanel from "./status/StatusPanel";
@@ -95,7 +95,7 @@ function StatusSection({ reports, advances, fiscalYear, fiscalYearDates, status,
           icon={ClipboardCheck}
           description="Reports by the day they were filed, and released cash advances still without one by the day they were requested. Amounts: what each report spent, or the cash released."
           model={liquidations}
-          chart={<LiquidationsDonut parts={liquidations.parts} rangeText={words} />}
+          chart={<StatusDonut chartId="fin-liquidations" parts={liquidations.parts} title={`Liquidations, ${words}`} doneKey="liquidated" doneWord="liquidated" emptyText="Nothing filed or due in this range." emptyWord="nothing due" />}
           skeleton="mx-auto h-36 w-36 max-w-full"
           failedNote={status.reportsFailed ? "The liquidation reports couldn't be loaded." : "The cash advances couldn't be loaded, so the share liquidated can't be worked out."}
           emptyNote={emptyNote(liquidations, "No liquidation report was filed, and no released cash advance is waiting for one, in this range.")}
@@ -124,8 +124,8 @@ function StatusSection({ reports, advances, fiscalYear, fiscalYearDates, status,
           icon={Receipt}
           description="What the Reimbursement Queue pays: claims for seminars employees paid for themselves, and older liquidations that spent more than their advance (for the difference), by the day they were filed. Amounts: what each claim asks for."
           model={claims}
-          chart={<StatusBars chartId="fin-reimbursements" parts={claims.parts} title={`Reimbursement claims filed, ${words}`} />}
-          skeleton="h-40"
+          chart={<StatusDonut chartId="fin-reimbursements" parts={claims.parts} title={`Reimbursement claims filed, ${words}`} doneKey="paid" doneWord="paid" emptyText="No reimbursement claim was filed in this range." emptyWord="none filed" />}
+          skeleton="mx-auto h-36 w-36 max-w-full"
           failedNote="The reimbursement claims couldn't be loaded."
           emptyNote={emptyNote(claims, "No reimbursement claim was filed in this range.")}
           caption={`Reimbursement claims, ${words}: count, amount and share by status`}

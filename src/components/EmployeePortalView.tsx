@@ -1857,7 +1857,7 @@ export default function EmployeePortalView({ user, fetchSummary, onRefresh, liqu
           <div className="space-y-6">
             <div className="border-b border-slate-100 pb-4">
               <h1 className="text-base font-bold text-slate-800">My Assigned Activities</h1>
-              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here before the seminar&rsquo;s last day, upload your certificate of attendance from that day, then file your report when HR has recorded your attendance: a liquidation of the cash advance released to you, or, if none was, a reimbursement of what you paid.</p>
+              <p className="text-xs text-slate-400">The seminars HR has enrolled you in: ask for your cash advance here before the seminar&rsquo;s first day (a request Finance hasn&rsquo;t released or declined by then expires), upload your certificate of attendance from its last day, then file your report when HR has recorded your attendance after the seminar: a liquidation of the cash advance released to you, or, if none was, a reimbursement of what you paid.</p>
             </div>
 
             {activities.length === 0 ? (

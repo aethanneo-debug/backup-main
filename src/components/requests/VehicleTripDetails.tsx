@@ -46,7 +46,7 @@ export default function VehicleTripDetails({ item }: { item: Partial<VehicleRequ
           {advance.advanceNo
             ? `${advance.advanceNo}: ${advance.status}.`
             : advance.status === "Declined"
-              ? "Cash advance request declined."
+              ? advance.expired ? "Cash advance request expired: Finance didn't release or decline it before the seminar's first day." : "Cash advance request declined."
               : advance.status === "Requested" ? "Cash advance requested, not yet released." : `Cash advance: ${advance.status}.`}
           {" "}Finance decides the cash advance; the Division Chief decides the vehicle.
         </Field>

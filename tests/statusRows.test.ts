@@ -71,7 +71,7 @@ test("cash advances and claims: one line per status, then the total", () => {
   const f = statusFigures(reports, advances, ALL);
   const a = panelModel("advances", f, READY);
   assert.deepEqual(a.lines.map(l => [l.key, l.tally.count]),
-    [["requested", 1], ["released", 2], ["declined", 0], ["liquidated", 0], ["refunded", 0], ["total", 3]],
+    [["requested", 1], ["released", 2], ["declined", 0], ["expired", 0], ["liquidated", 0], ["refunded", 0], ["total", 3]],
     "a status with none still has its line; Cancelled (which nothing sets any more) only when there is one");
   const withCancelled = panelModel("advances", statusFigures(reports, [...advances, { id: "old", status: "Cancelled", amount: 10, requestedAt: "2026-11-02" }], ALL), READY);
   assert.ok(withCancelled.lines.some(l => l.key === "cancelled" && l.tally.count === 1));

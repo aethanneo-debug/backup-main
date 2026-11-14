@@ -108,6 +108,7 @@ export default function AuditView({ user, onRefresh }: AuditViewProps) {
             <option value="Upload Certificate of Attendance">Certificates uploaded</option>
             <option value="Replace Certificate of Attendance">Certificates replaced</option>
             <option value="Self-Approval">Self-approvals (flagged)</option>
+            <option value="Expire Cash Advance Request">Cash advance requests expired</option>
             <option value="Division Coverage Override">Division coverage overrides</option>
             <option value="TDP Exception">TDP exceptions</option>
             <option value="TDP Exception (seminar)">Seminars held outside the TDP</option>

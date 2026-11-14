@@ -25,6 +25,10 @@ import {
   MAX_OFFICER_CERTIFICATE_UPLOADS,
   certificateDocumentName,
   certificateUploadProblem,
+  clockText,
+  manilaMoment,
+  seminarFirstDay,
+  seminarHasEnded,
   seminarLastDay,
   type CertificateSeat
 } from "../src/attendanceCertificate";
@@ -165,6 +169,48 @@ test("a seminar's last day is its end date, or its first when it has none", () =
   assert.equal(seminarLastDay({ startDate: "2026-11-02T00:00:00Z" }), "2026-11-02");
   assert.equal(seminarLastDay({ startDate: "soon", endDate: 12 }), "");
   assert.equal(seminarLastDay(null), "");
+});
+
+test("a seminar's first day is its start date, or its end date when it has none (2026-11-14)", () => {
+  assert.equal(seminarFirstDay({ startDate: "2026-11-14", endDate: "2026-11-15" }), "2026-11-14");
+  assert.equal(seminarFirstDay({ startDate: "", endDate: "2026-11-15" }), "2026-11-15");
+  assert.equal(seminarFirstDay({ startDate: "2026-11-14T00:00:00Z" }), "2026-11-14");
+  assert.equal(seminarFirstDay({ startDate: "soon", endDate: 12 }), "");
+  assert.equal(seminarFirstDay(null), "");
+  assert.equal(seminarFirstDay({ startDate: "2026-11-20", endDate: "2026-11-18" }), "2026-11-18", "stored out of order: the earlier, never after the last day");
+  // A damaged stored date can't throw (the security review): read only as text.
+  const damaged = { startDate: { toString: 1 } as unknown, endDate: "2026-11-15" };
+  assert.equal(seminarFirstDay(damaged), "2026-11-15");
+  assert.equal(seminarLastDay({ startDate: "2026-11-14", endDate: { toString: 1 } as unknown }), "2026-11-14");
+});
+
+test("HR records attendance only once a seminar has ended: its last day's end time, on Manila's clock (2026-11-14)", () => {
+  const seminar = { startDate: "2026-11-14", endDate: "2026-11-15", endTime: "17:00" };
+  assert.equal(seminarHasEnded(seminar, { day: "2026-11-14", time: "18:00" }), false, "the first day, after hours: not over");
+  assert.equal(seminarHasEnded(seminar, { day: "2026-11-15", time: "16:59" }), false, "the last day, before its end");
+  assert.equal(seminarHasEnded(seminar, { day: "2026-11-15", time: "17:00" }), true, "at its end time");
+  assert.equal(seminarHasEnded(seminar, { day: "2026-11-16", time: "00:00" }), true, "the day after");
+  // A seminar from 10:00 AM to 3:00 PM (the user's own example) ends at 3:00 PM.
+  assert.equal(seminarHasEnded({ startDate: "2026-11-20", endTime: "15:00" }, { day: "2026-11-20", time: "15:30" }), true);
+  assert.equal(seminarHasEnded({ startDate: "2026-11-20", endTime: "15:00" }, { day: "2026-11-20", time: "14:59" }), false);
+  // No end time on record: over once its last day has passed.
+  assert.equal(seminarHasEnded({ startDate: "2026-11-20", endDate: "2026-11-20" }, { day: "2026-11-20", time: "23:59" }), false);
+  assert.equal(seminarHasEnded({ startDate: "2026-11-20", endTime: "5pm" }, { day: "2026-11-21", time: "00:00" }), true);
+  assert.equal(seminarHasEnded({ startDate: "", endDate: "" }, { day: "2030-01-01", time: "12:00" }), false, "no dates: never");
+  assert.equal(seminarHasEnded(null, { day: "2030-01-01", time: "12:00" }), false);
+  assert.equal(seminarHasEnded(seminar, { day: "later", time: "12:00" }), false, "a day that isn't one");
+});
+
+test("Manila's clock is UTC+8, and a time reads on a 12-hour clock", () => {
+  // 2026-11-14 23:30 UTC is 07:30 on the 15th in Manila.
+  assert.deepEqual(manilaMoment(Date.UTC(2026, 10, 14, 23, 30)), { day: "2026-11-15", time: "07:30" });
+  assert.deepEqual(manilaMoment(Date.UTC(2026, 10, 14, 15, 59)), { day: "2026-11-14", time: "23:59" });
+  assert.equal(clockText("17:00"), "5:00 PM");
+  assert.equal(clockText("10:05"), "10:05 AM");
+  assert.equal(clockText("00:15"), "12:15 AM");
+  assert.equal(clockText("12:00"), "12:00 PM");
+  assert.equal(clockText("25:00"), "");
+  assert.equal(clockText(undefined), "");
 });
 
 const seat = (over: Partial<CertificateSeat> = {}): CertificateSeat => ({

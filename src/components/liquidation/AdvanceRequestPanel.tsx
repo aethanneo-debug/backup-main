@@ -4,7 +4,9 @@ import { CashAdvance, type LinkedVehicleSummary } from "../../types";
 import { apiCall, formatCurrency, formatDate, getLocalTodayString } from "../../utils";
 import { advancesCovering, isGroupAdvance, portionCentavos } from "../../advanceCoverage";
 import { cleanText } from "../../inputText";
-import { closedByAttendance } from "../../reimbursement";
+import { closedByAttendance, requestExpired } from "../../reimbursement";
+import { manilaDay } from "../../trainingCalendar";
+import { seminarFirstDay } from "../../attendanceCertificate";
 import { vehicleDraftFor, vehicleWithAdvanceFields, type SeminarForVehicle, type VehicleDraft } from "../../vehicleWithAdvance";
 import GroupCoverPicker from "./GroupCoverPicker";
 import VehicleWithAdvance from "./VehicleWithAdvance";
@@ -96,8 +98,9 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
 
   // A covered member leaves a group request Finance hasn't released, to ask for their own.
   async function leave(group: CashAdvance) {
-    // (Asking for one's own closes from the seminar's last day, 12ai: then the seminar is claimed back instead.)
-    if (!window.confirm(`Leave ${group.employeeName}'s group cash advance request? Before the seminar's last day you can then ask Finance for your own; from it, you claim the seminar back as a reimbursement.`)) return;
+    // (Asking for one's own closes on the seminar's first day, the user's rule of 2026-11-14: then the seminar is
+    // claimed back instead.)
+    if (!window.confirm(`Leave ${group.employeeName}'s group cash advance request? Before the seminar's first day you can then ask Finance for your own; from it, you claim the seminar back as a reimbursement.`)) return;
     setSending(true);
     setError("");
     try {
@@ -112,8 +115,19 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
   }
 
   const status = advance?.status;
-  // A request HR's "Attended" closed before Finance released it (12ai), told from Finance's own decline.
+  // A request HR's "Attended" closed before Finance released it (12ai, until 2026-11-14), and one that expired on the
+  // seminar's first day with Finance not having acted on it (the user's rule of 2026-11-14), told from Finance's own decline.
   const closedByHr = closedByAttendance(advance);
+  const expired = requestExpired(advance);
+  // The day it expired on: the seminar's first day, as stored (a late sweep's moment is later), else that moment's day.
+  const expiredMs = expired ? Date.parse(String(advance!.expiredAt)) : NaN;
+  const storedDay = expired && /^\d{4}-\d{2}-\d{2}$/.test(String(advance!.expiredOn ?? "")) ? String(advance!.expiredOn) : "";
+  const expiredOn = storedDay ? formatDate(storedDay) : Number.isNaN(expiredMs) ? "" : formatDate(manilaDay(expiredMs));
+  // A request still waiting expires on the seminar's first day (12ak): said beside it, so nobody is surprised.
+  const firstDay = seminarFirstDay(seminar);
+  const expiresNote = firstDay
+    ? ` If Finance hasn't released or declined it by ${formatDate(firstDay)}, the seminar's first day, it expires and the seminar is claimed back as a reimbursement.`
+    : "";
   const group = advance && isGroupAdvance(advance) ? advance : null;
   // Covered by a co-participant's group advance, rather than holding it.
   const covered = !!group && group.activityId !== activityId;
@@ -131,7 +145,7 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
         {status === "Requested" && <Pill tone="amber">Waiting for Finance</Pill>}
         {status === "Released" && <Pill tone="blue">Released</Pill>}
         {status === "Liquidated" && <Pill tone="emerald">Liquidated</Pill>}
-        {status === "Declined" && (closedByHr ? <Pill tone="slate">Closed</Pill> : <Pill tone="rose">Declined</Pill>)}
+        {status === "Declined" && (expired ? <Pill tone="slate">Expired</Pill> : closedByHr ? <Pill tone="slate">Closed</Pill> : <Pill tone="rose">Declined</Pill>)}
         {status === "Refunded" && <Pill tone="slate">Refunded</Pill>}
       </div>
 
@@ -141,7 +155,7 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
             <p className="text-[11px] text-slate-600">
               <strong>{group!.employeeName}</strong> asked Finance on {formatDate(String(group!.requestedAt || ""))} for one cash advance for
               your group ({formatCurrency(Number(group!.amount))}), <strong>{formatCurrency(share)}</strong> of it for you, so you
-              don&rsquo;t need to ask for your own.
+              don&rsquo;t need to ask for your own.{expiresNote}
             </p>
           )}
           {status === "Released" && (
@@ -157,8 +171,15 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
           {status === "Refunded" && (
             <p className="text-[11px] text-slate-600">{group!.advanceNo} was refunded in full by {group!.employeeName}.</p>
           )}
-          {status === "Declined" && (
-            // (Finance declines a request, and HR's attendance can close one too, 12ai: the reason says which.)
+          {status === "Declined" && expired && (
+            <p className="text-[11px] text-slate-600">
+              {group!.employeeName}&rsquo;s group request expired{expiredOn ? ` on ${expiredOn}` : ""}: Finance didn&rsquo;t release or
+              decline it before the seminar&rsquo;s first day. You claim the seminar back as a reimbursement once it ends and HR records
+              your attendance.
+            </p>
+          )}
+          {status === "Declined" && !expired && (
+            // (Finance declines a request, and HR's attendance could close one too, 12ai: the reason says which.)
             <p className={`text-[11px] ${closedByHr ? "text-slate-600" : "text-rose-700"}`}>
               {group!.employeeName}&rsquo;s group request was {closedByHr ? "closed" : "declined"} on {formatDate(String(group!.decidedAt || ""))}
               {group!.declineReason ? <>: &ldquo;{group!.declineReason}&rdquo;</> : "."}
@@ -187,7 +208,7 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
           {status === "Requested" && (
             <p className="text-[11px] text-slate-600">
               You asked for <strong>{formatCurrency(Number(advance!.amount))}</strong>{groupLine} on {formatDate(String(advance!.requestedAt || ""))}.
-              Finance will release it with a disbursement voucher, or tell you why not.
+              Finance will release it with a disbursement voucher, or tell you why not.{expiresNote}
             </p>
           )}
           {status === "Released" && (
@@ -200,7 +221,14 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
           {status === "Liquidated" && (
             <p className="text-[11px] text-slate-600">{advance!.advanceNo} ({formatCurrency(Number(advance!.amount))}) was settled by your liquidation report.</p>
           )}
-          {status === "Declined" && (
+          {status === "Declined" && expired && (
+            <p className="text-[11px] text-slate-600">
+              Your {formatCurrency(Number(advance!.amount))} request expired{expiredOn ? ` on ${expiredOn}` : ""}: Finance didn&rsquo;t
+              release or decline it before the seminar&rsquo;s first day, so you claim the seminar back as a reimbursement once it
+              ends and HR records your attendance.
+            </p>
+          )}
+          {status === "Declined" && !expired && (
             <p className={`text-[11px] ${closedByHr ? "text-slate-600" : "text-rose-700"}`}>
               Your {formatCurrency(Number(advance!.amount))} request was {closedByHr ? "closed" : "declined"} on {formatDate(String(advance!.decidedAt || ""))}
               {advance!.declineReason ? <>: &ldquo;{advance!.declineReason}&rdquo;</> : "."}
@@ -274,8 +302,8 @@ export default function AdvanceRequestPanel({ activityId, allowance, canRequest,
           onCancel={() => setPicking(false)}
         />
       ) : (!advance || status === "Declined" || status === "Refunded") && blockedReason ? (
-        // Why no request can be made, also after one was declined or refunded: once the seminar's last day has come, a
-        // certificate is on file or HR recorded "Attended", the seminar is claimed back as a reimbursement (12ai).
+        // Why no request can be made, also after one was declined, expired or refunded: once the seminar's first day has
+        // come, a certificate is on file or HR recorded "Attended", the seminar is claimed back as a reimbursement.
         <p data-advance-blocked="" className="text-[10px] italic text-slate-500">{blockedReason}</p>
       ) : null}
 

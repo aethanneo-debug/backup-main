@@ -44,10 +44,10 @@ const CHIP_BTN = "text-[10px] font-semibold bg-white border border-slate-300 tex
 // with two in one class list, Tailwind's own order decides, and slate would win.
 const CELL_INPUT_INVALID = CELL_INPUT.replace("border-slate-300", "border-rose-500");
 
-// Seminars run within office hours, 8:00 AM to 5:00 PM (the user, 2026-10-25), and a one-day
-// seminar ends after it starts. The server refuses anything else (seminarTimeProblem in
-// server.ts, the rule); this is the same check, so the row shows the problem before Save.
-// Times are "HH:MM" (24-hour), as the time boxes give them, so they compare as text.
+// Seminars run within office hours, 8:00 AM to 5:00 PM (the user, 2026-10-25, confirmed 2026-11-14), and a one-day
+// seminar ends after it starts. The server refuses anything else (seminarTimeProblem in server.ts, the rule); this is
+// the same check, so the row shows the problem before Save. Times are "HH:MM" (24-hour), as the time boxes give them,
+// so they compare as text.
 const OFFICE_START = "08:00";
 const OFFICE_END = "17:00";
 const isClockTime = (t: unknown): t is string => typeof t === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
@@ -892,11 +892,11 @@ export default function TrainingDevelopmentView({ user, triggerRefresh, focus, o
     const partsCount = isEditing ? (row.participantIds ? row.participantIds.length : 0) : participants.filter(part => part.trainingProgramId === p.id && onRoster(part)).length;
     // A row added from the plan while its participants are being looked up (handleAddFromPlan).
     const filling = isNew && row.planFill === "loading";
-    // Office hours, while editing (seminarTimeProblem): the box at fault turns rose, and the line
-    // under the boxes says why until it is fixed. A seminar saved before the rule opens with it.
+    // Office hours, while editing (seminarTimeProblem): the box at fault turns rose, and the line under the boxes says
+    // why until it is fixed. A seminar saved outside them opens with it.
     const timeProblem = isEditing ? seminarTimeProblem(row) : null;
-    // The start box is at fault when it is empty or outside office hours. Otherwise the problem is
-    // the end's: empty, outside office hours, or not after the start on a one-day seminar.
+    // The start box is at fault when it is empty or outside office hours. Otherwise the problem is the end's: empty,
+    // outside office hours, or not after the start on a one-day seminar.
     const startTimeBad = !!timeProblem && (!isClockTime(row.startTime) || outsideOfficeHours(row.startTime));
     const endTimeBad = !!timeProblem && (!isClockTime(row.endTime) || outsideOfficeHours(row.endTime) || !startTimeBad);
     const hoursNoteId = `tdp-hours-${p.id}`;

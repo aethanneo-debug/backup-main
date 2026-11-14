@@ -294,11 +294,10 @@ export default function CashAdvanceDesk({ refreshKey = 0, onReleased }: Props) {
         )}
         {rows.length > 0 && claimedBack.length > 0 && (
           <p data-desk-note="claimed-back" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-            {claimedBack.length} assignment{claimedBack.length === 1 ? " is" : "s are"} past asking for a cash advance (the seminar&rsquo;s
-            last day has come, a certificate of attendance is on file, or HR recorded the attendance) with none released:
-            nothing to fund here. Once HR records an attendee&rsquo;s attendance, their seminar is claimed back as a reimbursement.
-            A request HR&rsquo;s attendance closed, whose cash was handed out before then, is recorded under Cash Advance Requests,
-            &ldquo;Closed by HR&rsquo;s attendance&rdquo;.
+            {claimedBack.length} assignment{claimedBack.length === 1 ? " is" : "s are"} past asking for a cash advance (the seminar
+            has started, a certificate of attendance is on file, or HR recorded the attendance) with none released: nothing to
+            fund here. A request not released or declined by the seminar&rsquo;s first day expires. Once the seminar ends and HR
+            records an attendee&rsquo;s attendance, their seminar is claimed back as a reimbursement.
           </p>
         )}
         {rows.length > 0 && unfunded === 0 && (

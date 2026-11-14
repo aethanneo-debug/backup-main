@@ -139,10 +139,11 @@ const LIQUIDATION_SPECS: Record<"liquidated" | "withHr" | "withFinance" | "retur
   other: { key: "other", label: "Other statuses", short: "Other", hint: OTHER_HINT, color: C.other, unit: REPORT }
 };
 
-const ADVANCE_SPECS: Record<"requested" | "released" | "declined" | "liquidated" | "refunded" | "cancelled" | "other", Spec> = {
+const ADVANCE_SPECS: Record<"requested" | "released" | "declined" | "expired" | "liquidated" | "refunded" | "cancelled" | "other", Spec> = {
   requested: { key: "requested", label: "Requested", short: "Requested", hint: "Finance releases or declines it", color: C.action, unit: ADVANCE },
   released: { key: "released", label: "Released", short: "Released", hint: "With the employee, not yet settled", color: C.progress, unit: ADVANCE },
-  declined: { key: "declined", label: "Declined", short: "Declined", hint: "Turned down by Finance, or closed when HR recorded the attendance before a release", color: C.returned, unit: ADVANCE },
+  declined: { key: "declined", label: "Declined", short: "Declined", hint: "Turned down by Finance (before 2026-11-14, also closed when HR recorded the attendance first)", color: C.returned, unit: ADVANCE },
+  expired: { key: "expired", label: "Expired", short: "Expired", hint: "Not released or declined by the seminar's first day: claimed back as a reimbursement", color: C.closed, unit: ADVANCE },
   liquidated: { key: "liquidated", label: "Liquidated", short: "Liquidated", hint: "Settled by a validated report", color: C.done, unit: ADVANCE },
   refunded: { key: "refunded", label: "Refunded", short: "Refunded", hint: "Handed back in full", color: C.doneOther, unit: ADVANCE },
   cancelled: { key: "cancelled", label: "Cancelled", short: "Cancelled", hint: "No longer open", color: C.closed, unit: ADVANCE },
@@ -200,7 +201,7 @@ export function panelModel(panel: PanelKey, f: StatusFigures, load: LoadState): 
     const A = f.advances, S = ADVANCE_SPECS;
     // Nothing sets an advance "Cancelled" any more (a waiting request is declined), so its line shows only when an older
     // one is in the range, as "other" does.
-    const keys = ["requested", "released", "declined", "liquidated", "refunded"] as const;
+    const keys = ["requested", "released", "declined", "expired", "liquidated", "refunded"] as const;
     const parts = [
       ...keys.map(k => line(S[k], A[k], advances)),
       ...(A.cancelled.count > 0 ? [line(S.cancelled, A.cancelled, advances)] : []),

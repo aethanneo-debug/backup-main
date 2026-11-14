@@ -14,27 +14,44 @@ interface Slice {
   line?: FigureLine;
 }
 
+interface StatusDonutProps {
+  /** data-chart: "fin-liquidations", "fin-reimbursements". */
+  chartId: string;
+  parts: FigureLine[];
+  /** The chart's title, with the range ("Liquidations, this month"). */
+  title: string;
+  /** The part that is done (emerald), whose share sits in the hole: "liquidated", "paid". */
+  doneKey: string;
+  /** The word under the share: "liquidated", "paid". */
+  doneWord: string;
+  /** Said when nothing is in the range: "Nothing filed or due in this range." */
+  emptyText: string;
+  /** The hole's word when nothing is in the range: "nothing due", "none filed". */
+  emptyWord: string;
+}
+
 /**
- * The liquidations in the range as one ring, by count: liquidated (emerald) against each part not yet liquidated (with
- * HR, with Finance, returned, released with no report yet), and the share liquidated in the hole, rounded down so 100%
- * means every one. No keyboard layer: Recharts 3 would make the ring a Tab stop that moves nothing (a pie's tooltip is
- * per slice); the list beside it and "Show the figures" carry every figure.
+ * One panel's records in the range as one ring, by count: the part that is done (emerald; liquidated, or paid) against
+ * each part not done yet, and the share done in the hole, rounded down so 100% means every one. The Liquidations panel
+ * and the Reimbursement Claims panel draw it (the user's request of 2026-11-14: the claims panel gets the same ring). No
+ * keyboard layer: Recharts 3 would make the ring a Tab stop that moves nothing (a pie's tooltip is per slice); the list
+ * beside it and "Show the figures" carry every figure.
  */
-export default function LiquidationsDonut({ parts, rangeText }: { parts: FigureLine[]; rangeText: string }) {
+export default function StatusDonut({ chartId, parts, title, doneKey, doneWord, emptyText, emptyWord }: StatusDonutProps) {
   const whole = parts.reduce((n, p) => n + p.tally.count, 0);
-  const liquidated = parts.find(p => p.key === "liquidated")?.tally.count ?? 0;
-  const pct = whole > 0 ? Math.floor((liquidated / whole) * 100) : null;
+  const done = parts.find(p => p.key === doneKey)?.tally.count ?? 0;
+  const pct = whole > 0 ? Math.floor((done / whole) * 100) : null;
   const slices: Slice[] = whole > 0
     ? parts.filter(p => p.tally.count > 0).map(p => ({ key: p.key, name: p.label, value: p.tally.count, fill: p.color ?? TRACK, line: p }))
     : [{ key: "none", name: "Nothing in this range", value: 1, fill: TRACK }];
   const summary = whole > 0
-    ? `${pct}% liquidated. ${parts.map(p => `${p.label}: ${countWords(p.tally.count, p.unit)}, ${formatCurrency(p.tally.amount)}`).join("; ")}.`
-    : "Nothing filed or due in this range.";
+    ? `${pct}% ${doneWord}. ${parts.map(p => `${p.label}: ${countWords(p.tally.count, p.unit)}, ${formatCurrency(p.tally.amount)}`).join("; ")}.`
+    : emptyText;
 
   return (
-    <div data-chart="fin-liquidations" className="relative mx-auto aspect-square w-36 max-w-full">
+    <div data-chart={chartId} className="relative mx-auto aspect-square w-36 max-w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart title={`Liquidations, ${rangeText}`} desc={`${summary} The list beside the chart gives every figure.`} accessibilityLayer={false}>
+        <PieChart title={title} desc={`${summary} The list beside the chart gives every figure.`} accessibilityLayer={false}>
           <Pie
             data={slices}
             dataKey="value"
@@ -67,10 +84,10 @@ export default function LiquidationsDonut({ parts, rangeText }: { parts: FigureL
           />
         </PieChart>
       </ResponsiveContainer>
-      {/* The share liquidated, in the hole (the chart's own title and description carry it for screen readers). */}
+      {/* The share done, in the hole (the chart's own title and description carry it for screen readers). */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
         <span className="font-mono text-lg font-bold leading-none tabular-nums text-slate-800">{pct === null ? "—" : `${pct}%`}</span>
-        <span className="mt-0.5 text-[10px] text-slate-500">{pct === null ? "nothing due" : "liquidated"}</span>
+        <span className="mt-0.5 text-[10px] text-slate-500">{pct === null ? emptyWord : doneWord}</span>
       </div>
     </div>
   );

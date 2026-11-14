@@ -133,3 +133,14 @@ test("a damaged record is read as nothing, never thrown on (the security review 
   assert.deepEqual(presetRange("fiscalYear", TODAY, { label: "", start: "2026-13-45", end: "2026-12-31" }), { from: "", to: "" });
   assert.equal(rangeProblem({ from: "2026-13-45", to: "2026-12-01" }), "Enter the dates as real days.");
 });
+
+test("a request that expired on its seminar's first day is counted apart from Finance's own declines (2026-11-14)", () => {
+  const f = statusFigures([], [
+    advance("x-dec", "Declined", "2026-11-04T02:00:00Z"),
+    advance("x-exp", "Declined", "2026-11-04T03:00:00Z", { expiredAt: "2026-11-13T16:00:00.000Z", amount: 700 }),
+    advance("x-odd", "Declined", "2026-11-04T04:00:00Z", { expiredAt: 5 as never })
+  ], { from: "", to: "" });
+  assert.deepEqual([f.advances.declined.count, f.advances.expired.count, f.advances.expired.amount], [2, 1, 700],
+    "a stored expiry that isn't a timestamp reads as a decline");
+  assert.equal(f.advances.total.count, 3, "each counted once");
+});

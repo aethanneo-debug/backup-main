@@ -8,13 +8,15 @@ import { useRecordHighlight } from "../ui/useRecordHighlight";
 import TdpJustificationForm from "./TdpJustificationForm";
 import SendRepresentativePanel from "./SendRepresentativePanel";
 import CertificatePanel from "./CertificatePanel";
+import { clockText, manilaMoment, seminarHasEnded, seminarLastDay } from "../../attendanceCertificate";
 
 /**
  * HR's attendance roster for one seminar (Training Plan & Budget). Only attendees get a
  * liquidation form, so HR records each participant as Attended, on their certificate of
- * attendance, or Did not attend, which can be recorded once the seminar has started and
- * needs no file. Someone who already filed a report can't be marked as not attending. The
- * server enforces every one of these rules; this only shows them first.
+ * attendance, or Did not attend, which needs no file. Either can be recorded only once the
+ * seminar has ended, after its last day's end time (the user's rule of 2026-11-14), and
+ * neither touches a cash advance request. Someone who already filed a report can't be marked
+ * as not attending. The server enforces every one of these rules; this only shows them first.
  */
 
 interface AttendanceModalProps {
@@ -35,8 +37,6 @@ interface AttendanceModalProps {
   /** Called after a change so the page can reload its data. */
   onChanged: () => void;
 }
-
-const manilaToday = () => new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 const BADGE: Record<AttendanceStatus | "none", string> = {
   Attended: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -63,8 +63,10 @@ export default function AttendanceModal({ program, participants, employees, canR
   const [repFor, setRepFor] = useState<string | null>(null);
   const [sendingRep, setSendingRep] = useState(false);
 
-  const start = String(program.startDate || "").slice(0, 10);
-  const started = !!start && start <= manilaToday();
+  // On Manila's clock, as the server reads it (seminarHasEnded): after the last day's end time.
+  const ended = seminarHasEnded(program, manilaMoment(Date.now()));
+  const lastDay = seminarLastDay(program);
+  const endsAt = clockText(program.endTime);
   const roster = (participants ?? []).filter(p => p.status !== "Cancelled" && p.status !== "Archived");
   // Whoever a representative replaced: their enrolment is closed, and kept on record.
   const replaced = (participants ?? []).filter(p => p.status === "Cancelled" && p.replacedBy);
@@ -158,13 +160,15 @@ export default function AttendanceModal({ program, participants, employees, canR
         <p className="text-[11px] text-slate-500">
           Only participants marked <strong>Attended</strong> get a form. Marking someone attended needs their
           certificate of attendance on file, opens their form and notifies them, and decides how they settle: with a cash
-          advance released, a liquidation report; with none, a reimbursement claim, and a request still with Finance
-          closes.{" "}
-          <strong>Did not attend</strong> needs no file.
+          advance released, a liquidation report; with none, a reimbursement claim.{" "}
+          <strong>Did not attend</strong> needs no file. Recording attendance never changes a cash advance request: one
+          Finance didn&rsquo;t release or decline by the seminar&rsquo;s first day has already expired.
         </p>
-        {!started && (
+        {!ended && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-            Attendance can be recorded from {start ? formatDate(start) : "the seminar's start date"}, when the seminar starts.
+            {lastDay
+              ? <>Attendance can be recorded once the seminar has ended: after {endsAt ? `${endsAt} on ` : ""}{formatDate(lastDay)}.</>
+              : "This seminar has no dates yet, so its attendance can't be recorded."}
           </p>
         )}
         {!canRecord && (
@@ -184,7 +188,7 @@ export default function AttendanceModal({ program, participants, employees, canR
             {roster.map(p => {
               const state: AttendanceStatus | "none" = p.attendance ?? "none";
               const saving = savingId === p.id;
-              const locked = !canRecord || !started || !!savingId;
+              const locked = !canRecord || !ended || !!savingId;
               const tdpText = tdpBadgeText(p.tdp, p.tdpException);
               const why = p.tdpException;
               // A representative: whose place they took, unless their badge already says so (the TDP

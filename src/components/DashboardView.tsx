@@ -294,7 +294,7 @@ export default function DashboardView({ user, summaryData, loading, setActiveTab
           {/* What validated reports spent, month by month (real figures). Wrapped, so the chart's own
               lg:col-span-2 can't open a second column in this grid below xl; on a phone its six fixed
               columns need 18rem, so there it scrolls sideways inside this box. */}
-          <PanelBoundary name="Liquidated per month" className="xl:col-span-2">
+          <PanelBoundary name="Total liquidated and reimbursed expenses per month" className="xl:col-span-2">
           <div className="custom-scrollbar min-w-0 xl:col-span-2 max-sm:overflow-x-auto">
             <div className="max-sm:min-w-[18rem]">
               <MonthlyLiquidationChart

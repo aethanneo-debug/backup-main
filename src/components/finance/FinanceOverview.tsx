@@ -286,8 +286,8 @@ export default function FinanceOverview({
             onClick={onOpenDesk}
           />
           <FigureCard
-            label="Amount liquidated"
-            {...shown("reports", formatCurrency(f.year.liquidated), "Spent, per validated reports")}
+            label="Amount liquidated and reimbursed"
+            {...shown("reports", formatCurrency(f.year.liquidated), "Spent, per validated liquidation reports and reimbursement claims")}
             icon={FileClock}
             onClick={onOpenDesk}
           />

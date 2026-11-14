@@ -15,6 +15,7 @@
 // A record with no date that can be read counts only when the range has no bounds (All time).
 import { isCalendarDate } from "../../inputText";
 import { sumPesos } from "../../liquidationMoney";
+import { requestExpired } from "../../reimbursement";
 import { REPORT_STAGES } from "./overviewFigures";
 
 /** The days a range covers, YYYY-MM-DD, both included; "" means no bound on that side. */
@@ -62,6 +63,8 @@ export interface StatusAdvance {
   activityId?: string;
   requestedAt?: string;
   issuedAt?: string;
+  /** When a request expired, Finance not having released or declined it by the seminar's first day (2026-11-14). */
+  expiredAt?: string;
 }
 
 export interface StatusFigures {
@@ -82,7 +85,10 @@ export interface StatusFigures {
   advances: {
     requested: Tally;
     released: Tally;
+    /** Turned down by Finance (or closed by HR's attendance, 12ai, before 2026-11-14). */
     declined: Tally;
+    /** Not released or declined by the seminar's first day (requestExpired): Finance's own record of it. */
+    expired: Tally;
     liquidated: Tally;
     refunded: Tally;
     cancelled: Tally;
@@ -208,6 +214,8 @@ export function statusFigures(
   const noReport = requestedIn.filter(a => a.status === "Released" && !reported(a));
 
   const advanceStatus = (...statuses: string[]) => tally(requestedIn.filter(a => statuses.includes(statusOf(a.status))).map(a => a.amount));
+  // An expired request is stored "Declined" with `expiredAt`, and counted apart from Finance's own declines.
+  const expiredIn = new Set(requestedIn.filter(a => statusOf(a.status) === "Declined" && requestExpired({ status: "Declined", expiredAt: a.expiredAt })));
   const knownAdvance = ["Requested", "Released", "Declined", "Liquidated", "Refunded", "Cancelled"];
 
   const claimTally = (list: StatusReport[]) => tally(list.map(claimAmount));
@@ -232,7 +240,8 @@ export function statusFigures(
     advances: {
       requested: advanceStatus("Requested"),
       released: advanceStatus("Released"),
-      declined: advanceStatus("Declined"),
+      declined: tally(requestedIn.filter(a => statusOf(a.status) === "Declined" && !expiredIn.has(a)).map(a => a.amount)),
+      expired: tally([...expiredIn].map(a => a.amount)),
       liquidated: advanceStatus("Liquidated"),
       refunded: advanceStatus("Refunded"),
       cancelled: advanceStatus("Cancelled"),

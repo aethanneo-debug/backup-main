@@ -13,7 +13,7 @@ import { advancesCovering, isGroupAdvance, type CoverableAdvance } from "./advan
 export type SwapAdvanceStep =
   /** No advance, or one declined, refunded or settled: the swap goes ahead. */
   | { action: "proceed" }
-  /** Their own request, not yet released: closed, as "Did not attend" closes one. */
+  /** Their own request, not yet released: closed, as Finance would decline it. */
   | { action: "closeRequest"; advanceId: string }
   /** Covered by someone else's unreleased group request: taken off it, as "Leave" does. */
   | { action: "leaveGroup"; advanceId: string }

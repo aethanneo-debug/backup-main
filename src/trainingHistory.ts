@@ -6,6 +6,7 @@ import type { EmployeeTrainingHistory, TrainingHistoryRecord, TrainingHistoryRow
 import { advancesCovering, currentAdvance, isGroupAdvance, portionCentavos, reportCovering, type CoverableReport, type DatedAdvance } from "./advanceCoverage";
 import { centavos, pesos } from "./liquidationMoney";
 import { cleanText } from "./inputText";
+import { requestExpired } from "./reimbursement";
 import { fiscalYearSpan, isoDay, type CoverageFiscalYear } from "./trainingCoverage";
 
 export interface HistorySeat {
@@ -36,6 +37,8 @@ export interface HistoryAdvance extends DatedAdvance {
   dvNo?: string;
   dvDate?: string;
   refundOrNo?: string;
+  /** When a request expired, Finance not having acted on it by the seminar's first day (12ak). */
+  expiredAt?: string;
 }
 export interface HistoryReport extends CoverableReport {
   submissionNo?: string;
@@ -148,7 +151,8 @@ export function seatRecords(seat: HistorySeat, input: SeatRecordsInput): SeatRec
     const holder = cleanText(text(advance.employeeName)).slice(0, 200) || input.nameOf(String(advance.employeeId ?? ""));
     row.advance = {
       advanceNo: text(advance.advanceNo),
-      status: text(advance.status),
+      // (A request that expired on the seminar's first day, Finance not having acted on it, reads "Expired", 2026-11-14.)
+      status: requestExpired(advance) ? "Expired" : text(advance.status),
       amount: covered ? share : money(advance.amount),
       ...(group ? { share } : {}),
       ...(advance.dvNo ? { dvNo: text(advance.dvNo), dvDate: text(advance.dvDate) } : {}),

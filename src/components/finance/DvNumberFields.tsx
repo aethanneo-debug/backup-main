@@ -29,14 +29,12 @@ interface Props {
   disabled: boolean;
   /** The earliest voucher date the server takes, if any (e.g. the day the report was validated). */
   minDate?: string;
-  /** The latest, when earlier than today (e.g. the day HR's attendance closed a request, 12ai). */
-  maxDate?: string;
   /** Changed by the form after the server refused the voucher (another officer took the number meanwhile): the
    * suggestion is asked for again, and replaces the one still in the box. */
   refresh?: number;
 }
 
-export default function DvNumberFields({ prefix, recordId, dvDate, onDvDate, serial, onSerial, onWarning, disabled, minDate, maxDate, refresh = 0 }: Props) {
+export default function DvNumberFields({ prefix, recordId, dvDate, onDvDate, serial, onSerial, onWarning, disabled, minDate, refresh = 0 }: Props) {
   const dateId = `${prefix}-dvd-${recordId}`, numberId = `${prefix}-dv-${recordId}`, hintId = `${prefix}-dv-hint-${recordId}`;
   const number = validDv(dvDate, serial);
 
@@ -74,7 +72,7 @@ export default function DvNumberFields({ prefix, recordId, dvDate, onDvDate, ser
     <div className="grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="space-y-1">
         <label htmlFor={dateId} className="font-mono text-[10px] font-bold uppercase text-slate-400">Voucher Date</label>
-        <input id={dateId} type="date" value={dvDate} min={minDate || undefined} max={maxDate && maxDate < getLocalTodayString() ? maxDate : getLocalTodayString()} disabled={disabled}
+        <input id={dateId} type="date" value={dvDate} min={minDate || undefined} max={getLocalTodayString()} disabled={disabled}
           onChange={e => onDvDate(e.target.value)} className={INPUT} />
       </div>
       <div className="space-y-1">
